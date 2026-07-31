@@ -1,0 +1,40 @@
+{
+  "name": "sillytavern-n",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A clean-room, compatibility-first AI role-playing workspace.",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "npm run dev --workspace @stn/web",
+    "dev:server": "npm run dev --workspace @stn/server",
+    "dev:legacy": "npm run dev --workspace @stn/legacy-host",
+    "build:packages": "npm run build --workspace @stn/contracts && npm run build --workspace @stn/core && npm run build --workspace @stn/storage && npm run build --workspace @stn/providers && npm run build --workspace @stn/extension-sdk && npm run build --workspace @stn/legacy-compat",
+    "build:apps": "npm run build --workspace @stn/server && npm run build --workspace @stn/legacy-host && npm run build --workspace @stn/web",
+    "build": "npm run build:packages && npm run build:apps",
+    "typecheck": "tsc -p tsconfig.json --noEmit && npm run typecheck --workspace @stn/web",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "npm run build:packages && vitest run",
+    "test:watch": "vitest",
+    "verify": "npm run format:check && npm run lint && npm run typecheck && npm run build && vitest run && npm run test:sites --workspace @stn/web"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "26.1.2",
+    "eslint": "10.8.0",
+    "prettier": "3.9.6",
+    "tsx": "4.23.1",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.65.0",
+    "vitest": "4.1.10"
+  }
+}

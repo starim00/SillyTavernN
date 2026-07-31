@@ -1,0 +1,20 @@
+{
+  "name": "@stn/providers",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@stn/contracts": "*",
+    "@stn/core": "*",
+    "zod": "4.4.3"
+  }
+}

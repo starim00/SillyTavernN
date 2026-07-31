@@ -1,0 +1,558 @@
+/// <reference types="node" />
+
+import { readFileSync } from "node:fs";
+
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it, vi } from "vitest";
+
+import type { Participant, WorkspaceMessage } from "../domain/workspace";
+import { createDemoWorkspace } from "../data/demoWorkspace";
+import { CardConversationEntry } from "./CardConversationEntry";
+import {
+  ConversationComposer,
+  resizeComposerTextarea,
+} from "./ConversationComposer";
+import {
+  displayContentSegments,
+  htmlDisplayContent,
+  isHtmlDisplayContent,
+  markdownDisplayContent,
+  mixedDisplayContent,
+  MessageCard,
+  MessageStream,
+  sandboxedDisplayDocument,
+} from "./MessageStream";
+import { ParticipantChips } from "./WorkspacePrimitives";
+import { WorkspaceModals } from "./WorkspaceModals";
+
+const workspaceStyles = readFileSync(
+  new URL("../styles.css", import.meta.url),
+  "utf8",
+);
+
+function cssBlocks(selector: string): string[] {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return Array.from(
+    workspaceStyles.matchAll(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`, "g")),
+    (match) => match[1] ?? "",
+  );
+}
+
+describe("workspace components", () => {
+  it("offers trust and enablement for a verified installed legacy plugin", () => {
+    const plugin = createDemoWorkspace().plugins.find(
+      (candidate) => candidate.id === "plugin-js-slash-runner",
+    )!;
+    const html = renderToStaticMarkup(
+      <WorkspaceModals
+        modal={{ kind: "plugins" }}
+        apiOnline
+        cards={[]}
+        plugins={[plugin]}
+        legacyHostPlugins={{
+          "js-slash-runner": {
+            id: "js-slash-runner",
+            name: "酒馆助手 / JS-Slash-Runner",
+            version: plugin.version,
+            repository: plugin.repository,
+            commit: plugin.commit,
+            installed: true,
+            verified: true,
+            enabled: false,
+          },
+        }}
+        worldbooks={[]}
+        providerConnections={[]}
+        selectedProviderId="fake"
+        onClose={vi.fn()}
+        onSelectCard={vi.fn()}
+        onDeleteCard={vi.fn()}
+        onCreateConversation={vi.fn()}
+        onImport={vi.fn()}
+        onInstallPlugin={vi.fn()}
+        onTogglePlugin={vi.fn()}
+        onPermission={vi.fn()}
+        onSelectProvider={vi.fn()}
+        onSaveProvider={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain("已校验固定提交");
+    expect(html).toContain("信任并启用");
+    expect(html).not.toContain("安装服务不可用");
+    const actionIndex = html.indexOf("信任并启用");
+    const openingTagStart = html.lastIndexOf("<button", actionIndex);
+    const openingTagEnd = html.indexOf(">", openingTagStart);
+    expect(actionIndex).toBeGreaterThan(-1);
+    expect(openingTagStart).toBeGreaterThan(-1);
+    expect(openingTagEnd).toBeGreaterThan(openingTagStart);
+    expect(html.slice(openingTagStart, openingTagEnd + 1)).not.toContain(
+      "disabled",
+    );
+  });
+
+  it("starts with role cards instead of a global conversation list", () => {
+    const state = createDemoWorkspace();
+    const html = renderToStaticMarkup(
+      <CardConversationEntry
+        cards={state.cards}
+        onSelectCard={vi.fn()}
+        onImport={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain("选择角色卡");
+    expect(html).toContain("雾港设定集");
+    expect(html).not.toContain("雾港 · 雨后调查");
+    expect(html).toContain('<button class="card-entry-item"');
+    expect(html).not.toContain('role="listitem"');
+  });
+
+  it("does not render the removed card-history interstitial", () => {
+    const state = createDemoWorkspace();
+    const html = renderToStaticMarkup(
+      <CardConversationEntry
+        cards={state.cards}
+        onSelectCard={vi.fn()}
+        onImport={vi.fn()}
+      />,
+    );
+
+    expect(html).not.toContain('class="card-history"');
+    expect(html).not.toContain("返回角色卡");
+    expect(html).toContain("直接进入这张角色卡最近使用的对话");
+  });
+
+  it("keeps the ordinary composer fixed to user input", () => {
+    const noop = vi.fn();
+    const html = renderToStaticMarkup(
+      <ConversationComposer
+        draft=""
+        conversations={[]}
+        selectedConversationId="conversation-default"
+        cardName="默认角色卡"
+        onDraftChange={noop}
+        onSelectConversation={noop}
+        onCreateConversation={noop}
+        onOpenCards={noop}
+        onOpenHelperTool={noop}
+        onSend={noop}
+      />,
+    );
+
+    expect(html).toContain('placeholder="输入消息…"');
+    expect(html).toContain('rows="1"');
+    expect(html).not.toContain("发言者");
+    expect(html).not.toContain("世界叙事");
+  });
+
+  it("grows the composer with its content, caps it, and shrinks it again", () => {
+    const textarea = {
+      scrollHeight: 48,
+      style: {
+        height: "120px",
+        overflowY: "auto",
+      },
+    };
+
+    resizeComposerTextarea(textarea as unknown as HTMLTextAreaElement, 180);
+    expect(textarea.style.height).toBe("48px");
+    expect(textarea.style.overflowY).toBe("hidden");
+
+    textarea.scrollHeight = 260;
+    resizeComposerTextarea(textarea as unknown as HTMLTextAreaElement, 180);
+    expect(textarea.style.height).toBe("180px");
+    expect(textarea.style.overflowY).toBe("auto");
+
+    textarea.scrollHeight = 42;
+    resizeComposerTextarea(textarea as unknown as HTMLTextAreaElement, 180);
+    expect(textarea.style.height).toBe("42px");
+    expect(textarea.style.overflowY).toBe("hidden");
+  });
+
+  it("keeps the composer compact across desktop and mobile styles", () => {
+    const composerBlocks = cssBlocks(".composer textarea");
+    const minHeights = composerBlocks.flatMap((block) => {
+      const value = /min-height:\s*(\d+)px/.exec(block)?.[1];
+      return value === undefined ? [] : [Number(value)];
+    });
+
+    expect(composerBlocks.length).toBeGreaterThan(0);
+    expect(Math.max(...minHeights)).toBeLessThanOrEqual(48);
+    expect(composerBlocks.join("\n")).toMatch(/resize:\s*none/);
+  });
+
+  it("renders zero and multiple participants without a singleton character slot", () => {
+    const empty = renderToStaticMarkup(<ParticipantChips participants={[]} />);
+    const participants: Participant[] = [
+      { id: "narrator", name: "旁白", kind: "narrator", accent: "slate" },
+      { id: "archivist", name: "记录员", kind: "character", accent: "mint" },
+    ];
+    const ensemble = renderToStaticMarkup(
+      <ParticipantChips participants={participants} />,
+    );
+
+    expect(empty).toContain("无固定参与者");
+    expect(ensemble).toContain("旁白");
+    expect(ensemble).toContain("记录员");
+    expect(`${empty}${ensemble}`).not.toContain("currentCharacter");
+  });
+
+  it("renders every message in natural document flow without fixed-height spacers", () => {
+    const messages: WorkspaceMessage[] = Array.from(
+      { length: 130 },
+      (_, index) => ({
+        id: `message-flow-${index}`,
+        conversationId: "conversation-flow",
+        role: index % 2 === 0 ? "assistant" : "user",
+        content:
+          index === 0
+            ? `长回复起点\n${"自然排列的正文。".repeat(500)}\n长回复终点`
+            : `消息 ${index}`,
+        createdLabel: "10:30",
+        revision: 1,
+      }),
+    );
+    const noop = vi.fn();
+    const html = renderToStaticMarkup(
+      <MessageStream
+        conversationId="conversation-flow"
+        messages={messages}
+        generation={{
+          status: "idle",
+          mode: null,
+          conversationId: null,
+          generationId: null,
+          targetMessageId: null,
+          preview: "",
+        }}
+        onCopy={noop}
+        onUpdate={noop}
+        onDelete={noop}
+        onRegenerate={noop}
+        onContinue={noop}
+        onSelectSwipe={noop}
+      />,
+    );
+
+    expect(html.match(/data-message-id=/g)).toHaveLength(messages.length);
+    expect(html).toContain("长回复起点");
+    expect(html).toContain("长回复终点");
+    expect(html).not.toContain('data-virtualized="true"');
+    expect(html).not.toMatch(/aria-hidden="true" style="height:[^"]+"/);
+  });
+
+  it("does not create an inner scrollbar for ordinary message content", () => {
+    for (const selector of [".message-item", ".message-item__content"]) {
+      const block = cssBlocks(selector)[0] ?? "";
+      expect(block).not.toMatch(
+        /(?:^|;)\s*(?:overflow|overflow-y)\s*:\s*(?:auto|scroll)\b/,
+      );
+      expect(block).not.toMatch(/(?:^|;)\s*max-height\s*:/);
+    }
+  });
+
+  it("exposes copy, edit, delete, regenerate, continue, and Swipe controls", () => {
+    const message: WorkspaceMessage = {
+      id: "message-test",
+      conversationId: "conversation-test",
+      role: "assistant",
+      content: "第一候选",
+      createdLabel: "10:30",
+      revision: 2,
+      swipes: [
+        { id: "swipe-1", content: "第一候选" },
+        { id: "swipe-2", content: "第二候选" },
+      ],
+      activeSwipeIndex: 0,
+    };
+    const noop = vi.fn();
+    const html = renderToStaticMarkup(
+      <MessageCard
+        message={message}
+        isLast
+        onCopy={noop}
+        onUpdate={noop}
+        onDelete={noop}
+        onRegenerate={noop}
+        onContinue={noop}
+        onSelectSwipe={noop}
+      />,
+    );
+
+    for (const label of [
+      "模型",
+      "模型回复",
+      "复制消息",
+      "编辑消息",
+      "删除消息",
+      "重新生成并创建 Swipe",
+      "从这里继续",
+      "下一个 Swipe",
+    ]) {
+      expect(html).toContain(label);
+    }
+    expect(html).not.toContain("记录员");
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("<iframe");
+    expect(html).toContain("第一候选");
+  });
+
+  it("renders Markdown inside a semantic document wrapper", () => {
+    const displayContent = `<dream>
+## 降临方式
+
+**【观察者，时间锚点已锁定。】**
+
+1. 命运承载者
+2. 降临者
+
+| 选项 | 状态 |
+| --- | --- |
+| 身份 | 待选择 |
+</dream>
+<tableEdit>`;
+    const message: WorkspaceMessage = {
+      id: "message-markdown-document",
+      conversationId: "conversation-test",
+      role: "assistant",
+      content: displayContent,
+      displayContent,
+      appliedRegexScriptIds: [],
+      createdLabel: "10:31",
+      revision: 1,
+    };
+    const noop = vi.fn();
+    const html = renderToStaticMarkup(
+      <MessageCard
+        message={message}
+        isLast
+        onCopy={noop}
+        onUpdate={noop}
+        onDelete={noop}
+        onRegenerate={noop}
+        onContinue={noop}
+        onSelectSwipe={noop}
+      />,
+    );
+
+    expect(isHtmlDisplayContent(displayContent)).toBe(false);
+    expect(markdownDisplayContent(displayContent)).toMatch(/^## 降临方式/u);
+    expect(
+      markdownDisplayContent("<dream>芝加哥的酒店房间</dream> <tableEdit>"),
+    ).toBe("芝加哥的酒店房间");
+    expect(html).toContain(">降临方式</h2>");
+    expect(html).toContain("<strong>【观察者，时间锚点已锁定。】</strong>");
+    expect(html).toContain('<ol start="1">');
+    expect(html).toContain("<table>");
+    expect(html).toContain("message-item__content--markdown");
+    expect(html).not.toContain("&lt;dream&gt;");
+    expect(html).not.toContain("&lt;tableEdit&gt;");
+    expect(html).not.toContain("<iframe");
+  });
+
+  it("runs interactive regex HTML only inside its isolated frame", () => {
+    const message: WorkspaceMessage = {
+      id: "message-regex-html",
+      conversationId: "conversation-test",
+      role: "assistant",
+      content: "raw content for edit and copy",
+      displayContent:
+        "<section>safe display<script>globalThis.compromised = true</script></section>",
+      appliedRegexScriptIds: ["card-display"],
+      createdLabel: "10:31",
+      revision: 1,
+    };
+    const noop = vi.fn();
+    const html = renderToStaticMarkup(
+      <MessageCard
+        message={message}
+        isLast
+        onCopy={noop}
+        onUpdate={noop}
+        onDelete={noop}
+        onRegenerate={noop}
+        onContinue={noop}
+        onSelectSwipe={noop}
+      />,
+    );
+    const sourceDocument = sandboxedDisplayDocument(
+      message.displayContent ?? "",
+    );
+    const resizableSourceDocument = sandboxedDisplayDocument(
+      `${message.displayContent ?? ""}
+        <script>
+          localStorage.setItem("profile", "saved");
+          const profileName = prompt("方案名称", "默认方案");
+          if (confirm("清除方案？")) alert(profileName);
+          window.parent.document.querySelector("#send_textarea").value = "开始创建";
+        </script>`,
+      "frame-test",
+      { existing: "profile" },
+    );
+
+    expect(html).toContain("<iframe");
+    expect(html).toContain(
+      'sandbox="allow-scripts allow-downloads allow-modals"',
+    );
+    expect(html).toContain('scrolling="no"');
+    expect(html).not.toContain("allow-same-origin");
+    expect(html).toContain('data-auto-height="true"');
+    expect(html).toContain('data-applied-regex="card-display"');
+    expect(sourceDocument).toContain("default-src 'none'");
+    expect(sourceDocument).toContain("script-src 'unsafe-inline' http: https:");
+    expect(sourceDocument).toContain("connect-src http: https:");
+    expect(sourceDocument).toContain("frame-src http: https:");
+    expect(sourceDocument).toContain("navigate-to 'none'");
+    expect(sourceDocument).toContain("media-src http: https: data: blob:");
+    expect(sourceDocument).toContain("style-src 'unsafe-inline' http: https:");
+    expect(resizableSourceDocument).toContain(
+      '<meta name="stn-frame-id" content="frame-test">',
+    );
+    expect(resizableSourceDocument).toContain(
+      'parent.postMessage({type:"stn:message-frame-height"',
+    );
+    expect(resizableSourceDocument).toContain(
+      'type:"stn:message-frame-storage"',
+    );
+    expect(resizableSourceDocument).toContain('type:"stn:message-frame-send"');
+    expect(resizableSourceDocument).toContain(
+      '__stnParentDocument.querySelector("#send_textarea")',
+    );
+    expect(resizableSourceDocument).not.toContain("window.parent.document");
+    expect(resizableSourceDocument).toContain(
+      '__stnLocalStorage.setItem("profile", "saved")',
+    );
+    expect(resizableSourceDocument).not.toContain(
+      'localStorage.setItem("profile", "saved")',
+    );
+    expect(resizableSourceDocument).toContain(
+      '__stnPrompt("方案名称", "默认方案")',
+    );
+    expect(resizableSourceDocument).toContain('__stnConfirm("清除方案？")');
+    expect(resizableSourceDocument).toContain("__stnAlert(profileName)");
+    expect(resizableSourceDocument).toContain('"existing":"profile"');
+    expect(resizableSourceDocument).not.toContain("data-stn-icon-fallback");
+    expect(message.content).toBe("raw content for edit and copy");
+    expect(isHtmlDisplayContent(message.displayContent ?? "")).toBe(true);
+  });
+
+  it("separates message Markdown from an injected fenced HTML status bar", () => {
+    const displayContent = `<dream>
+## 正文标题
+
+这里是模型正文。
+</dream>
+
+\`\`\`
+<!DOCTYPE html>
+<html><body><div class="calendar-container">状态栏</div></body></html>
+\`\`\``;
+    const segments = displayContentSegments(displayContent);
+    const message: WorkspaceMessage = {
+      id: "message-mixed-regex-html",
+      conversationId: "conversation-test",
+      role: "assistant",
+      content: "raw content",
+      displayContent,
+      appliedRegexScriptIds: ["card-status"],
+      createdLabel: "10:31",
+      revision: 1,
+    };
+    const noop = vi.fn();
+    const html = renderToStaticMarkup(
+      <MessageCard
+        message={message}
+        isLast
+        onCopy={noop}
+        onUpdate={noop}
+        onDelete={noop}
+        onRegenerate={noop}
+        onContinue={noop}
+        onSelectSwipe={noop}
+      />,
+    );
+
+    expect(segments).toHaveLength(2);
+    expect(segments[0]).toMatchObject({
+      kind: "markdown",
+      content: expect.stringContaining("这里是模型正文。"),
+    });
+    expect(segments[1]).toMatchObject({
+      kind: "html",
+      content: expect.stringContaining("calendar-container"),
+    });
+    expect(sandboxedDisplayDocument(segments[1]!.content)).not.toContain(
+      "<dream>",
+    );
+    expect(html).toContain(">正文标题</h2>");
+    expect(html).toContain("message-item__rich-content");
+    expect(html.match(/<iframe/gu)).toHaveLength(1);
+  });
+
+  it("renders regex-injected raw HTML and surrounding Markdown as one mixed document", () => {
+    const displayContent = `<style>
+.thinking { color: rebeccapurple; }
+</style>
+<details class="thinking">
+<summary>查看思考</summary>
+<div>**重点**
+
+- 条目一
+- 条目二</div>
+</details>
+
+正文仍然支持 **Markdown**。
+
+\`\`\`
+<!DOCTYPE html>
+<html><body><div class="calendar">状态栏</div></body></html>
+\`\`\``;
+    const segments = displayContentSegments(displayContent);
+    const mixedHtml = mixedDisplayContent(segments[0]!.content);
+    const message: WorkspaceMessage = {
+      id: "message-mixed-raw-html",
+      conversationId: "conversation-test",
+      role: "assistant",
+      content: "raw content",
+      displayContent,
+      appliedRegexScriptIds: ["preset-thinking", "card-status"],
+      createdLabel: "10:32",
+      revision: 1,
+    };
+    const noop = vi.fn();
+    const html = renderToStaticMarkup(
+      <MessageCard
+        message={message}
+        isLast
+        onCopy={noop}
+        onUpdate={noop}
+        onDelete={noop}
+        onRegenerate={noop}
+        onContinue={noop}
+        onSelectSwipe={noop}
+      />,
+    );
+
+    expect(segments).toHaveLength(2);
+    expect(segments[0]).toMatchObject({ kind: "mixed" });
+    expect(segments[1]).toMatchObject({ kind: "html" });
+    expect(mixedHtml).toContain("<style>");
+    expect(mixedHtml).toContain('<details class="thinking">');
+    expect(mixedHtml).toContain("<strong>Markdown</strong>");
+    expect(html.match(/<iframe/gu)).toHaveLength(2);
+    expect(html).not.toContain("message-item__content--markdown");
+  });
+
+  it("unwraps a full fenced HTML greeting only in its display copy", () => {
+    const raw =
+      "```\r\n<!DOCTYPE html><html><body>Greeting</body></html>\r\n```";
+    const display = htmlDisplayContent(raw);
+    const document = sandboxedDisplayDocument(raw);
+
+    expect(display).toBe("<!DOCTYPE html><html><body>Greeting</body></html>");
+    expect(document).toContain("<body><!DOCTYPE html>");
+    expect(document).not.toContain("```");
+    expect(raw.startsWith("```")).toBe(true);
+  });
+});

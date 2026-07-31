@@ -1,0 +1,27 @@
+{
+  "name": "@stn/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@fastify/cors": "11.3.0",
+    "@stn/contracts": "*",
+    "@stn/core": "*",
+    "@stn/extension-sdk": "*",
+    "@stn/legacy-compat": "*",
+    "@stn/providers": "*",
+    "@stn/storage": "*",
+    "fastify": "5.10.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.2",
+    "tsx": "4.23.1",
+    "typescript": "6.0.3"
+  }
+}

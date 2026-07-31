@@ -1,0 +1,40 @@
+{
+  "name": "@stn/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && node scripts/prepare-sites-build.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run src",
+    "preview": "vite preview",
+    "test:sites": "node --test tests/sites-worker.test.mjs"
+  },
+  "dependencies": {
+    "@phosphor-icons/react": "2.1.10",
+    "@stn/contracts": "*",
+    "@tanstack/react-query": "5.101.4",
+    "@vitejs/plugin-react": "6.0.4",
+    "ejs": "^6.0.1",
+    "jquery": "^3.7.1",
+    "lodash": "^4.18.1",
+    "markdown-to-jsx": "9.9.0",
+    "marked": "^18.0.7",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "toastr": "^2.1.4",
+    "vite": "8.1.5",
+    "vue": "^3.5.28",
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/jquery": "^3.5.33",
+    "@types/lodash": "^4.17.24",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@types/toastr": "^2.1.43",
+    "typescript": "6.0.3"
+  }
+}

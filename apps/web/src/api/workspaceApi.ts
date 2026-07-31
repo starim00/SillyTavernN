@@ -1,0 +1,2385 @@
+import type {
+  AgentProposal,
+  AgentRun,
+  ApiEnvelope,
+  ConversationSpace,
+  Participant,
+  PromptPreset,
+  PromptPresetEntry,
+  PromptTraceSegment,
+  ProviderConnection,
+  ProviderConnectionInput,
+  RegexDiagnostic,
+  RegexPlacement,
+  RegexScope,
+  RegexScopeKind,
+  RegexScriptDefinition,
+  RoleCard,
+  WorkspaceMessage,
+  WorkspaceState,
+  Worldbook,
+  WorldbookEntry,
+  WorldbookEntryUpdate,
+} from "../domain/workspace";
+import type {
+  TavernHelperContext,
+  TavernHelperScript,
+  TavernHelperSettings,
+  TavernHelperScope,
+  TavernHelperStateNamespace,
+} from "../compat/tavernHelperTypes";
+import { LEGACY_REALM_ORIGIN } from "../legacy/origin";
+
+type ApiParticipant = {
+  id: string;
+  name: string;
+  role: string;
+  cardId?: string | null;
+};
+
+type ApiConversation = {
+  id: string;
+  title: string;
+  cardId: string;
+  participants?: ApiParticipant[];
+  worldbookIds?: string[];
+  revision?: number;
+  subtitle?: string;
+  updatedAt?: string;
+};
+
+type ApiCard = {
+  id: string;
+  name: string;
+  description?: string;
+  revision?: number;
+  participants?: ApiParticipant[];
+  worldbookIds?: string[];
+  imageUrl?: string;
+};
+
+type ApiSwipe = {
+  id: string;
+  content: string;
+  selected?: boolean;
+  position?: number;
+};
+
+type ApiMessage = {
+  id: string;
+  conversationId: string;
+  role: "user" | "assistant" | "system" | "tool";
+  content: string;
+  displayContent?: string;
+  appliedRegexScriptIds?: string[];
+  revision?: number;
+  createdAt?: string;
+  swipes?: ApiSwipe[];
+};
+
+type ApiWorldbookEntry = {
+  id: string;
+  title?: string;
+  keys?: string[];
+  primaryKeys?: string[];
+  secondaryKeys?: string[];
+  secondaryLogic?: string;
+  selective?: boolean;
+  content?: string;
+  enabled?: boolean;
+  constant?: boolean;
+  caseSensitive?: boolean;
+  matchWholeWords?: boolean;
+  useRegex?: boolean;
+  scanDepth?: number | null;
+  recursion?: boolean;
+  preventRecursion?: boolean;
+  excludeRecursion?: boolean;
+  delayUntilRecursion?: boolean;
+  insertionPosition?: string;
+  outletName?: string | null;
+  insertionDepth?: number | null;
+  insertionRole?: string;
+  order?: number;
+  priority?: number;
+  agentEditable?: boolean;
+  revision?: number;
+};
+
+type ApiWorldbook = {
+  id: string;
+  name: string;
+  agentEditable: boolean;
+  revision: number;
+  description?: string;
+  imported?: boolean;
+  entries?: ApiWorldbookEntry[];
+};
+
+type ApiPreset = {
+  id: string;
+  name: string;
+  description?: string;
+  kind?: string;
+  revision?: number;
+  payload?: {
+    mode?: string;
+    prompts?: ApiPresetPrompt[];
+  };
+};
+
+type ApiPresetPrompt = {
+  id?: string;
+  identifier?: string;
+  name?: string;
+  role?: string;
+  content?: string;
+  enabled?: boolean;
+  order?: number;
+  systemPrompt?: boolean;
+  marker?: string;
+  metadata?: {
+    dynamicMarker?: boolean;
+    promptOrderMember?: boolean;
+  };
+};
+
+type ApiProviderConnection = ProviderConnection;
+
+type ApiRegexScript = {
+  id: string;
+  scriptName: string;
+  findRegex: string;
+  replaceString: string;
+  trimStrings: string[];
+  placement: number[];
+  disabled: boolean;
+  markdownOnly: boolean;
+  promptOnly: boolean;
+  runOnEdit: boolean;
+  substituteRegex: number;
+  minDepth: number | null;
+  maxDepth: number | null;
+};
+
+type ApiRegexDiagnostic = {
+  severity: string;
+  code: string;
+  message: string;
+  path?: string;
+};
+
+type ApiRegexScope = {
+  scope: string;
+  id: string;
+  name: string;
+  enabled: boolean;
+  revision: number;
+  ownerRevision: number | null;
+  scripts: ApiRegexScript[];
+  diagnostics: ApiRegexDiagnostic[];
+  updatedAt: string | null;
+};
+
+type ApiAgentRun = {
+  id: string;
+  conversationId: string;
+  status:
+    | "queued"
+    | "running"
+    | "waiting_confirmation"
+    | "completed"
+    | "failed"
+    | "cancelled";
+  objective: string;
+  updatedAt: string;
+};
+
+type AgentToolResult = {
+  call: {
+    id: string;
+    status:
+      | "proposed"
+      | "awaiting_confirmation"
+      | "running"
+      | "succeeded"
+      | "rejected"
+      | "cancelled"
+      | "failed";
+  };
+  result?: {
+    auditId?: string;
+    revision?: number;
+    [key: string]: unknown;
+  };
+  replayed: boolean;
+};
+
+export type ApiAgentToolCall = {
+  id: string;
+  runId: string;
+  idempotencyKey: string;
+  toolName: string;
+  arguments: Record<string, unknown>;
+  status:
+    | "proposed"
+    | "awaiting_confirmation"
+    | "running"
+    | "succeeded"
+    | "rejected"
+    | "cancelled"
+    | "failed";
+};
+
+type ApiAgentPlan = {
+  run: ApiAgentRun;
+  text: string;
+  toolCalls: ApiAgentToolCall[];
+};
+
+export type ApiBootstrap = {
+  conversations: ConversationSpace[];
+  cards: RoleCard[];
+  participants: Participant[];
+  messagesByConversation: Record<string, WorkspaceMessage[]>;
+  worldbooks: Worldbook[];
+  presets: PromptPreset[];
+  regexScopes: RegexScope[];
+  providerConnections: ProviderConnection[];
+};
+
+export type GenerationReceipt =
+  | {
+      generationId: string;
+      messageId: string;
+      revision: number;
+      content: string;
+    }
+  | {
+      generationId: string;
+      toolProposalOnly: true;
+    };
+
+export type GenerationToolProposal = {
+  run: AgentRun;
+  toolCall: ApiAgentToolCall;
+  text: string;
+};
+
+export type GenerationCallbacks = {
+  onGenerationId?: (generationId: string) => void;
+  onTextDelta?: (delta: string) => void;
+  onToolProposal?: (proposal: GenerationToolProposal) => void;
+  onToolResult?: (result: unknown) => void;
+};
+
+export type PortableImportKind =
+  "card" | "worldbook" | "conversation" | "preset";
+
+export type PortableImportResult = {
+  kind: PortableImportKind;
+  result: unknown;
+};
+
+export type RegexGrantScope = "card" | "preset";
+
+export type LegacyActor = "legacy-plugin" | "embedded-script";
+
+export type LegacyCapabilityGrant = {
+  pluginId: string;
+  actor: LegacyActor;
+  capability: string;
+  granted: boolean;
+  grantedBy: string;
+  updatedAt: string;
+};
+
+export type LegacyRpcRequest = {
+  protocol: "stn.legacy.v1";
+  id: string;
+  pluginId: string;
+  actor: LegacyActor;
+  method: string;
+  capability: string;
+  params: unknown;
+};
+
+export type LegacyRpcResponse =
+  | {
+      protocol: "stn.legacy.v1";
+      id: string;
+      ok: true;
+      result: unknown;
+    }
+  | {
+      protocol: "stn.legacy.v1";
+      id: string;
+      ok: false;
+      error: {
+        code: string;
+        message: string;
+        capability?: string;
+      };
+    };
+
+export type LegacyHostPluginStatus = {
+  id: string;
+  name: string;
+  version: string;
+  repository: string;
+  commit: string;
+  installed: boolean;
+  verified: boolean;
+  enabled: boolean;
+  reason?: string;
+};
+
+export type LegacyHostHealth = {
+  ok: boolean;
+  service: string;
+  safeMode: boolean;
+  plugins: LegacyHostPluginStatus[];
+};
+
+export type LegacyPluginInstallResult = {
+  outcome: "installed" | "already-installed";
+  plugin: LegacyHostPluginStatus;
+  receipt?: {
+    pluginId: string;
+    repository: string;
+    commit: string;
+    installedAt: string;
+  };
+};
+
+export class WorkspaceApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+  ) {
+    super(message);
+    this.name = "WorkspaceApiError";
+  }
+}
+
+export class GenerationInterruptedError extends Error {
+  constructor(message = "Generation was interrupted.") {
+    super(message);
+    this.name = "GenerationInterruptedError";
+  }
+}
+
+type JsonRequestInit = RequestInit & { timeoutMs?: number };
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+async function errorFromResponse(
+  response: Response,
+  path: string,
+): Promise<WorkspaceApiError> {
+  let message = `API request failed: ${path}`;
+  let code: string | undefined;
+  try {
+    const body: unknown = await response.json();
+    if (isRecord(body) && isRecord(body.error)) {
+      if (typeof body.error.message === "string") message = body.error.message;
+      if (typeof body.error.code === "string") code = body.error.code;
+    }
+  } catch {
+    // Keep the route-based fallback when an upstream returned no JSON body.
+  }
+  return new WorkspaceApiError(message, response.status, code);
+}
+
+async function request<T>(
+  path: string,
+  { timeoutMs = 5_000, ...init }: JsonRequestInit = {},
+): Promise<T> {
+  const controller = new AbortController();
+  const timeout = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(`/api${path}`, {
+      ...init,
+      headers: {
+        Accept: "application/json",
+        ...(init.body === undefined || init.body instanceof FormData
+          ? {}
+          : { "Content-Type": "application/json" }),
+        ...init.headers,
+      },
+      signal: controller.signal,
+    });
+
+    if (!response.ok) throw await errorFromResponse(response, path);
+    return (await response.json()) as T;
+  } finally {
+    globalThis.clearTimeout(timeout);
+  }
+}
+
+const timeLabel = (value?: string): string => {
+  if (!value) return "刚刚";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "刚刚";
+  return new Intl.DateTimeFormat("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+};
+
+const normalizeParticipantKind = (role: string): Participant["kind"] => {
+  if (role === "user" || role === "person") return "person";
+  if (role === "narrator") return "narrator";
+  if (role === "system") return "system";
+  return "character";
+};
+
+const participantAccents: Participant["accent"][] = [
+  "blue",
+  "coral",
+  "mint",
+  "violet",
+  "slate",
+];
+
+const normalizeParticipant = (
+  item: ApiParticipant,
+  index: number,
+): Participant => ({
+  id: item.id,
+  name: item.name,
+  kind: normalizeParticipantKind(item.role),
+  accent: participantAccents[index % participantAccents.length] ?? "slate",
+  ...(item.cardId ? { sourceCardId: item.cardId } : {}),
+});
+
+const normalizeConversation = (item: ApiConversation): ConversationSpace => {
+  if (typeof item.cardId !== "string" || item.cardId.trim().length === 0) {
+    throw new WorkspaceApiError(
+      "Conversation is missing its required card binding.",
+      502,
+      "INVALID_CONVERSATION_CARD",
+    );
+  }
+  return {
+    id: item.id,
+    title: item.title,
+    subtitle: item.subtitle ?? "来自本地工作区的会话",
+    cardId: item.cardId,
+    worldbookIds: item.worldbookIds ?? [],
+    updatedLabel: timeLabel(item.updatedAt),
+    unreadCount: 0,
+    pinned: false,
+  };
+};
+
+const normalizeCard = (
+  item: ApiCard,
+  conversations: ApiConversation[],
+): RoleCard => ({
+  id: item.id,
+  name: item.name,
+  description: item.description ?? "",
+  revision: item.revision ?? 1,
+  conversationCount: conversations.filter(
+    (conversation) => conversation.cardId === item.id,
+  ).length,
+  worldbookIds: item.worldbookIds ?? [],
+  ...(item.imageUrl ? { imageUrl: item.imageUrl } : {}),
+});
+
+const normalizeMessage = (item: ApiMessage): WorkspaceMessage => {
+  if (item.role !== "user" && item.role !== "assistant") {
+    throw new WorkspaceApiError(
+      "Internal messages cannot be rendered in the conversation stream.",
+      502,
+    );
+  }
+  const swipes = (item.swipes ?? []).map(({ id, content }) => ({
+    id,
+    content,
+  }));
+  const selectedIndex = (item.swipes ?? []).findIndex(
+    (swipe) => swipe.selected,
+  );
+  const selectedContent =
+    selectedIndex >= 0 ? swipes[selectedIndex]?.content : undefined;
+
+  return {
+    id: item.id,
+    conversationId: item.conversationId,
+    role: item.role,
+    content: selectedContent ?? item.content,
+    displayContent: item.displayContent ?? selectedContent ?? item.content,
+    appliedRegexScriptIds: item.appliedRegexScriptIds ?? [],
+    createdLabel: timeLabel(item.createdAt),
+    revision: item.revision ?? 1,
+    ...(swipes.length > 0
+      ? { swipes, activeSwipeIndex: Math.max(0, selectedIndex) }
+      : {}),
+  };
+};
+
+const worldbookSecondaryLogic = (
+  value: string | undefined,
+): WorldbookEntry["secondaryLogic"] =>
+  value === "all" || value === "not-any" || value === "not-all" ? value : "any";
+
+const worldbookInsertionPosition = (
+  value: string | undefined,
+): WorldbookEntry["insertionPosition"] => {
+  switch (value) {
+    case "before-card":
+    case "after-card":
+    case "author-note-top":
+    case "author-note-bottom":
+    case "at-depth":
+    case "examples-top":
+    case "examples-bottom":
+    case "outlet":
+      return value;
+    default:
+      return null;
+  }
+};
+
+const worldbookInsertionRole = (
+  value: string | undefined,
+): WorldbookEntry["insertionRole"] =>
+  value === "user" || value === "assistant" ? value : "system";
+
+const normalizeWorldbookEntry = (entry: ApiWorldbookEntry): WorldbookEntry => {
+  const primaryKeys = entry.primaryKeys ?? entry.keys ?? [];
+  const secondaryKeys = entry.secondaryKeys ?? [];
+  return {
+    id: entry.id,
+    title: entry.title ?? "未命名条目",
+    keys: [...primaryKeys, ...secondaryKeys],
+    primaryKeys,
+    secondaryKeys,
+    secondaryLogic: worldbookSecondaryLogic(entry.secondaryLogic),
+    selective: entry.selective ?? secondaryKeys.length > 0,
+    content: entry.content ?? "",
+    enabled: entry.enabled ?? true,
+    constant: entry.constant ?? false,
+    caseSensitive: entry.caseSensitive ?? false,
+    matchWholeWords: entry.matchWholeWords ?? false,
+    useRegex: entry.useRegex ?? true,
+    scanDepth: entry.scanDepth ?? null,
+    recursion: entry.recursion ?? true,
+    preventRecursion: entry.preventRecursion ?? false,
+    excludeRecursion: entry.excludeRecursion ?? false,
+    delayUntilRecursion: entry.delayUntilRecursion ?? false,
+    insertionPosition: worldbookInsertionPosition(entry.insertionPosition),
+    outletName: entry.outletName?.trim() || null,
+    insertionDepth: entry.insertionDepth ?? null,
+    insertionRole: worldbookInsertionRole(entry.insertionRole),
+    order: entry.order ?? 0,
+    priority: entry.priority ?? entry.order ?? 0,
+    agentEditable: entry.agentEditable ?? false,
+    revision: entry.revision ?? 1,
+  };
+};
+
+const normalizeWorldbook = (item: ApiWorldbook): Worldbook => ({
+  id: item.id,
+  name: item.name,
+  description:
+    item.description ?? (item.imported ? "从便携内容导入" : "本地世界书"),
+  agentEditable: item.agentEditable,
+  revision: item.revision,
+  imported: item.imported ?? false,
+  hitCount: 0,
+  hits: [],
+  entries: (item.entries ?? []).map(normalizeWorldbookEntry),
+});
+
+const presetModes: PromptPreset["mode"][] = [
+  "chat-completion",
+  "text-generation",
+  "native",
+];
+
+const presetRoles: PromptPresetEntry["role"][] = [
+  "system",
+  "user",
+  "assistant",
+  "tool",
+];
+
+const presetMarkers: NonNullable<PromptPresetEntry["marker"]>[] = [
+  "main",
+  "world-before",
+  "world-after",
+  "persona-description",
+  "character-description",
+  "character-personality",
+  "scenario",
+  "examples",
+  "history",
+  "post-history",
+  "custom",
+];
+
+const normalizePreset = (item: ApiPreset): PromptPreset => {
+  const candidateMode = item.payload?.mode ?? item.kind;
+  const mode = presetModes.includes(candidateMode as PromptPreset["mode"])
+    ? (candidateMode as PromptPreset["mode"])
+    : "native";
+  const prompts = (item.payload?.prompts ?? []).flatMap(
+    (prompt, index): PromptPresetEntry[] => {
+      const id = prompt.id ?? prompt.identifier;
+      if (!id) return [];
+      const role = presetRoles.includes(
+        prompt.role as PromptPresetEntry["role"],
+      )
+        ? (prompt.role as PromptPresetEntry["role"])
+        : "system";
+      const marker = presetMarkers.includes(
+        prompt.marker as NonNullable<PromptPresetEntry["marker"]>,
+      )
+        ? (prompt.marker as NonNullable<PromptPresetEntry["marker"]>)
+        : undefined;
+      return [
+        {
+          id,
+          name: prompt.name?.trim() || id,
+          role,
+          content: prompt.content ?? "",
+          enabled: prompt.enabled ?? true,
+          inserted: prompt.metadata?.promptOrderMember !== false,
+          order: prompt.order ?? index,
+          systemPrompt: prompt.systemPrompt ?? role === "system",
+          dynamicMarker: prompt.metadata?.dynamicMarker === true,
+          ...(marker ? { marker } : {}),
+        },
+      ];
+    },
+  );
+  return {
+    id: item.id,
+    name: item.name,
+    description:
+      item.description ??
+      `${prompts.filter((prompt) => prompt.enabled).length}/${prompts.length} 个条目已启用`,
+    revision: item.revision ?? 0,
+    mode,
+    prompts,
+  };
+};
+
+const regexPlacements: RegexPlacement[] = [1, 2, 3, 5, 6];
+const regexScopeKinds: RegexScopeKind[] = ["global", "card", "preset"];
+const regexDiagnosticSeverities: RegexDiagnostic["severity"][] = [
+  "info",
+  "warning",
+  "error",
+];
+
+const normalizeRegexScript = (
+  script: ApiRegexScript,
+): RegexScriptDefinition => ({
+  id: script.id,
+  scriptName: script.scriptName,
+  findRegex: script.findRegex,
+  replaceString: script.replaceString,
+  trimStrings: [...script.trimStrings],
+  placement: script.placement.filter((placement): placement is RegexPlacement =>
+    regexPlacements.includes(placement as RegexPlacement),
+  ),
+  disabled: script.disabled,
+  markdownOnly: script.markdownOnly,
+  promptOnly: script.promptOnly,
+  runOnEdit: script.runOnEdit,
+  substituteRegex:
+    script.substituteRegex === 1 || script.substituteRegex === 2
+      ? script.substituteRegex
+      : 0,
+  minDepth: script.minDepth,
+  maxDepth: script.maxDepth,
+});
+
+const normalizeRegexDiagnostic = (
+  diagnostic: ApiRegexDiagnostic,
+): RegexDiagnostic => ({
+  severity: regexDiagnosticSeverities.includes(
+    diagnostic.severity as RegexDiagnostic["severity"],
+  )
+    ? (diagnostic.severity as RegexDiagnostic["severity"])
+    : "warning",
+  code: diagnostic.code,
+  message: diagnostic.message,
+  ...(diagnostic.path ? { path: diagnostic.path } : {}),
+});
+
+const normalizeRegexScope = (scope: ApiRegexScope): RegexScope => {
+  if (!regexScopeKinds.includes(scope.scope as RegexScopeKind)) {
+    throw new WorkspaceApiError("Regex scope has an invalid kind.", 502);
+  }
+  return {
+    scope: scope.scope as RegexScopeKind,
+    id: scope.id,
+    name: scope.name,
+    enabled: scope.enabled,
+    revision: scope.revision,
+    ownerRevision: scope.ownerRevision,
+    scripts: scope.scripts.map(normalizeRegexScript),
+    diagnostics: scope.diagnostics.map(normalizeRegexDiagnostic),
+    updatedAt: scope.updatedAt,
+  };
+};
+
+const agentRunStatuses: ApiAgentRun["status"][] = [
+  "queued",
+  "running",
+  "waiting_confirmation",
+  "completed",
+  "failed",
+  "cancelled",
+];
+
+const normalizeAgentRun = (value: unknown): AgentRun => {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== "string" ||
+    typeof value.conversationId !== "string" ||
+    typeof value.status !== "string" ||
+    !agentRunStatuses.includes(value.status as ApiAgentRun["status"]) ||
+    typeof value.objective !== "string" ||
+    typeof value.updatedAt !== "string"
+  ) {
+    throw new WorkspaceApiError("Model tool run is invalid.", 502);
+  }
+  return {
+    id: value.id,
+    conversationId: value.conversationId,
+    status: value.status as ApiAgentRun["status"],
+    objective: value.objective,
+    updatedAt: value.updatedAt,
+  };
+};
+
+function clientRequestId(prefix: string): string {
+  const suffix =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return `${prefix}-${suffix}`;
+}
+
+export async function loadConversationMessages(
+  conversationId: string,
+  presetId?: string,
+): Promise<WorkspaceMessage[]> {
+  const query =
+    presetId === undefined || presetId.length === 0
+      ? ""
+      : `?presetId=${encodeURIComponent(presetId)}`;
+  const result = await request<ApiEnvelope<ApiMessage[]>>(
+    `/conversations/${encodeURIComponent(conversationId)}/messages${query}`,
+  );
+  return result.data
+    .filter(
+      (message) => message.role === "user" || message.role === "assistant",
+    )
+    .map(normalizeMessage);
+}
+
+export async function loadPromptTraceFromApi(input: {
+  conversationId: string;
+  connectionId: string;
+  presetId?: string;
+}): Promise<PromptTraceSegment[]> {
+  const result = await request<ApiEnvelope<{ segments: unknown[] }>>(
+    `/conversations/${encodeURIComponent(input.conversationId)}/prompt-preview`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        connectionId: input.connectionId,
+        ...(input.presetId ? { presetId: input.presetId } : {}),
+      }),
+      timeoutMs: 10_000,
+    },
+  );
+  if (!Array.isArray(result.data.segments)) {
+    throw new WorkspaceApiError("Prompt preview has no segment list.", 502);
+  }
+  return result.data.segments.map((value) => {
+    if (
+      !isRecord(value) ||
+      typeof value.id !== "string" ||
+      typeof value.role !== "string" ||
+      typeof value.position !== "string" ||
+      typeof value.tokenEstimate !== "number" ||
+      !isRecord(value.source) ||
+      typeof value.source.kind !== "string" ||
+      typeof value.source.label !== "string"
+    ) {
+      throw new WorkspaceApiError(
+        "Prompt preview contains an invalid segment.",
+        502,
+      );
+    }
+    const segment = value as {
+      id: string;
+      role: string;
+      position: string;
+      tokenEstimate: number;
+      source: { kind: string; label: string };
+    };
+    const source: PromptTraceSegment["source"] =
+      segment.source.kind === "preset"
+        ? "preset"
+        : segment.source.kind === "worldbook"
+          ? "worldbook"
+          : segment.source.kind === "extension"
+            ? "extension"
+            : segment.source.kind === "message" ||
+                segment.source.kind === "conversation"
+              ? "conversation"
+              : "system";
+    return {
+      id: segment.id,
+      label: segment.source.label,
+      source,
+      tokens: segment.tokenEstimate,
+      detail: `${segment.position} · ${segment.role}`,
+    };
+  });
+}
+
+export async function loadTavernHelperContext(input: {
+  conversationId: string;
+  presetId?: string;
+}): Promise<TavernHelperContext> {
+  const query = new URLSearchParams({ conversationId: input.conversationId });
+  if (input.presetId) query.set("presetId", input.presetId);
+  const result = await request<ApiEnvelope<TavernHelperContext>>(
+    `/compatibility/tavern-helper?${query.toString()}`,
+  );
+  return result.data;
+}
+
+export async function updateTavernHelperGrant(input: {
+  scope: TavernHelperScope;
+  id: string;
+  granted: boolean;
+}): Promise<void> {
+  await request<ApiEnvelope<unknown>>("/compatibility/tavern-helper/grants", {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function saveTavernHelperSettings(
+  settings: TavernHelperSettings,
+): Promise<TavernHelperSettings> {
+  const result = await request<ApiEnvelope<{ settings: TavernHelperSettings }>>(
+    "/compatibility/tavern-helper/settings",
+    {
+      method: "PUT",
+      body: JSON.stringify(settings),
+    },
+  );
+  return result.data.settings;
+}
+
+export async function saveTavernHelperScripts(input: {
+  scope: TavernHelperScope;
+  id: string;
+  scripts: TavernHelperScript[];
+}): Promise<void> {
+  await request<ApiEnvelope<unknown>>("/compatibility/tavern-helper/scripts", {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function saveTavernHelperState(input: {
+  conversationId: string;
+  presetId?: string;
+  namespace: TavernHelperStateNamespace;
+  variables: Record<string, unknown>;
+  messageId?: string;
+  sourceScope?: TavernHelperScope;
+  sourceId?: string;
+  scriptId?: string;
+  extensionId?: string;
+}): Promise<void> {
+  await request<ApiEnvelope<unknown>>("/compatibility/tavern-helper/state", {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function generateWithTavernHelper(input: {
+  conversationId: string;
+  connectionId: string;
+  presetId?: string;
+  userInput?: string;
+  settings?: Record<string, unknown>;
+  messagesOverride?: PreparedPromptMessage[];
+  injects?: Array<{
+    role: "system" | "assistant" | "user";
+    content: string;
+    depth: number;
+  }>;
+}): Promise<string> {
+  const result = await request<ApiEnvelope<{ content: string }>>(
+    "/compatibility/tavern-helper/generate",
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+      timeoutMs: 300_000,
+    },
+  );
+  return result.data.content;
+}
+
+export type PreparedPromptMessage = {
+  role: "system" | "assistant" | "user" | "tool";
+  content: string;
+};
+
+export type PromptTemplateDirective = {
+  id: string;
+  worldbookId: string;
+  title: string;
+  content: string;
+  enabled: boolean;
+  order: number;
+};
+
+export async function preparePromptTemplate(input: {
+  conversationId: string;
+  connectionId: string;
+  presetId?: string;
+}): Promise<{
+  enabled: boolean;
+  messages: PreparedPromptMessage[];
+  directives: PromptTemplateDirective[];
+  templateCount: number;
+}> {
+  const result = await request<
+    ApiEnvelope<{
+      enabled: boolean;
+      messages: PreparedPromptMessage[];
+      directives: PromptTemplateDirective[];
+      templateCount: number;
+    }>
+  >("/compatibility/prompt-template/prepare", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return result.data;
+}
+
+export async function loadWorldbooksFromApi(): Promise<Worldbook[]> {
+  const result = await request<ApiEnvelope<ApiWorldbook[]>>("/worldbooks");
+  return result.data.map(normalizeWorldbook);
+}
+
+export async function loadWorkspaceFromApi(
+  selectedPresetId?: string,
+): Promise<ApiBootstrap> {
+  await request<ApiEnvelope<{ ok?: boolean }>>("/health", {
+    timeoutMs: 1_600,
+  });
+  const [
+    conversationResult,
+    cardResult,
+    worldbookResult,
+    presetResult,
+    regexResult,
+    providerResult,
+  ] = await Promise.all([
+    request<ApiEnvelope<ApiConversation[]>>("/conversations"),
+    request<ApiEnvelope<ApiCard[]>>("/cards"),
+    request<ApiEnvelope<ApiWorldbook[]>>("/worldbooks"),
+    request<ApiEnvelope<ApiPreset[]>>("/presets"),
+    request<ApiEnvelope<ApiRegexScope[]>>("/regex/scopes"),
+    request<ApiEnvelope<ApiProviderConnection[]>>("/providers/connections"),
+  ]);
+
+  const conversations = conversationResult.data.map(normalizeConversation);
+  const activePresetId =
+    presetResult.data.find((preset) => preset.id === selectedPresetId)?.id ??
+    presetResult.data[0]?.id;
+  const messagePairs = await Promise.all(
+    conversations.map(
+      async (conversation) =>
+        [
+          conversation.id,
+          await loadConversationMessages(conversation.id, activePresetId),
+        ] as const,
+    ),
+  );
+  const participantMap = new Map<string, Participant>();
+  cardResult.data.forEach((card) => {
+    card.participants?.forEach((participant) => {
+      if (!participantMap.has(participant.id)) {
+        participantMap.set(
+          participant.id,
+          normalizeParticipant(participant, participantMap.size),
+        );
+      }
+    });
+  });
+  conversationResult.data.forEach((conversation) => {
+    conversation.participants?.forEach((participant) => {
+      if (!participantMap.has(participant.id)) {
+        participantMap.set(
+          participant.id,
+          normalizeParticipant(participant, participantMap.size),
+        );
+      }
+    });
+  });
+
+  return {
+    conversations,
+    cards: cardResult.data.map((card) =>
+      normalizeCard(card, conversationResult.data),
+    ),
+    participants: [...participantMap.values()],
+    messagesByConversation: Object.fromEntries(messagePairs),
+    worldbooks: worldbookResult.data.map(normalizeWorldbook),
+    presets: presetResult.data.map(normalizePreset),
+    regexScopes: regexResult.data.map(normalizeRegexScope),
+    providerConnections: providerResult.data,
+  };
+}
+
+export async function createMessage(
+  conversationId: string,
+  input: { content: string; parentMessageId?: string },
+): Promise<WorkspaceMessage> {
+  const result = await request<ApiEnvelope<ApiMessage>>(
+    `/conversations/${encodeURIComponent(conversationId)}/messages`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+  return normalizeMessage(result.data);
+}
+
+export async function updateWorkspaceMessage(
+  message: WorkspaceMessage,
+  content: string,
+): Promise<WorkspaceMessage> {
+  const result = await request<ApiEnvelope<ApiMessage>>(
+    `/messages/${encodeURIComponent(message.id)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        content,
+        expectedRevision: message.revision,
+      }),
+    },
+  );
+  return normalizeMessage(result.data);
+}
+
+export async function deleteWorkspaceMessage(
+  messageId: string,
+  expectedRevision: number,
+): Promise<void> {
+  await request<ApiEnvelope<unknown>>(
+    `/messages/${encodeURIComponent(messageId)}`,
+    {
+      method: "DELETE",
+      body: JSON.stringify({ expectedRevision }),
+    },
+  );
+}
+
+export async function createMessageSwipe(
+  messageId: string,
+  content: string,
+  selected = true,
+): Promise<void> {
+  await request<ApiEnvelope<ApiSwipe>>(
+    `/messages/${encodeURIComponent(messageId)}/swipes`,
+    {
+      method: "POST",
+      body: JSON.stringify({ content, selected }),
+    },
+  );
+}
+
+export async function selectMessageSwipe(
+  message: WorkspaceMessage,
+  swipeId: string,
+): Promise<void> {
+  await request<ApiEnvelope<unknown>>(
+    `/messages/${encodeURIComponent(message.id)}/swipes/${encodeURIComponent(
+      swipeId,
+    )}/select`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ expectedMessageRevision: message.revision }),
+    },
+  );
+}
+
+type StreamEvent = {
+  type: string;
+  [key: string]: unknown;
+};
+
+function parseStreamEvent(data: string): StreamEvent {
+  const parsed: unknown = JSON.parse(data);
+  if (!isRecord(parsed) || typeof parsed.type !== "string") {
+    throw new WorkspaceApiError("Provider returned an invalid SSE event.", 502);
+  }
+  return parsed as StreamEvent;
+}
+
+function streamFrames(buffer: string): {
+  frames: string[];
+  remainder: string;
+} {
+  const normalized = buffer.replaceAll("\r\n", "\n");
+  const parts = normalized.split("\n\n");
+  return {
+    frames: parts.slice(0, -1),
+    remainder: parts.at(-1) ?? "",
+  };
+}
+
+function dataFromFrame(frame: string): string | null {
+  const lines = frame
+    .split("\n")
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trimStart());
+  return lines.length > 0 ? lines.join("\n") : null;
+}
+
+export async function generateConversation(
+  input: {
+    conversationId: string;
+    connectionId: string;
+    presetId?: string;
+    messagesOverride?: PreparedPromptMessage[];
+    injects?: Array<{
+      role: "system" | "assistant" | "user";
+      content: string;
+      depth: number;
+    }>;
+    signal?: AbortSignal;
+  },
+  callbacks: GenerationCallbacks = {},
+): Promise<GenerationReceipt> {
+  let response: Response;
+  try {
+    response = await fetch(
+      `/api/conversations/${encodeURIComponent(input.conversationId)}/generate`,
+      {
+        method: "POST",
+        headers: {
+          Accept: "text/event-stream",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          connectionId: input.connectionId,
+          ...(input.presetId ? { presetId: input.presetId } : {}),
+          ...(input.messagesOverride
+            ? { messagesOverride: input.messagesOverride }
+            : {}),
+          ...(input.injects?.length ? { injects: input.injects } : {}),
+        }),
+        ...(input.signal ? { signal: input.signal } : {}),
+      },
+    );
+  } catch (error) {
+    if (input.signal?.aborted) throw new GenerationInterruptedError();
+    throw error;
+  }
+
+  if (!response.ok) {
+    throw await errorFromResponse(response, "/conversations/:id/generate");
+  }
+  if (!response.body) {
+    throw new WorkspaceApiError("Provider stream has no response body.", 502);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let generationId: string | null = null;
+  let messageId: string | null = null;
+  let revision: number | null = null;
+  let content = "";
+  let toolProposalReceived = false;
+
+  const consume = (frame: string) => {
+    const data = dataFromFrame(frame);
+    if (!data) return;
+    const event = parseStreamEvent(data);
+    if (event.type === "generation-id") {
+      if (typeof event.generationId !== "string") {
+        throw new WorkspaceApiError("Generation id is missing.", 502);
+      }
+      generationId = event.generationId;
+      callbacks.onGenerationId?.(event.generationId);
+      return;
+    }
+    if (event.type === "text-delta") {
+      if (typeof event.delta !== "string") return;
+      content += event.delta;
+      callbacks.onTextDelta?.(event.delta);
+      return;
+    }
+    if (event.type === "message-persisted") {
+      if (
+        typeof event.messageId === "string" &&
+        typeof event.revision === "number"
+      ) {
+        messageId = event.messageId;
+        revision = event.revision;
+      }
+      return;
+    }
+    if (event.type === "tool-proposal") {
+      const payload = isRecord(event.payload) ? event.payload : event;
+      const run = normalizeAgentRun(payload.run);
+      const toolCall = normalizePlannedToolCall(payload.toolCall);
+      toolProposalReceived = true;
+      callbacks.onToolProposal?.({
+        run,
+        toolCall,
+        text: typeof payload.text === "string" ? payload.text : run.objective,
+      });
+      return;
+    }
+    if (event.type === "tool-result") {
+      callbacks.onToolResult?.(isRecord(event.payload) ? event.payload : event);
+      return;
+    }
+    if (event.type === "error") {
+      throw new WorkspaceApiError(
+        typeof event.message === "string"
+          ? event.message
+          : "Provider generation failed.",
+        502,
+        typeof event.code === "string" ? event.code : undefined,
+      );
+    }
+    if (event.type === "finish" && event.reason === "cancelled") {
+      throw new GenerationInterruptedError();
+    }
+  };
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parsed = streamFrames(buffer);
+      buffer = parsed.remainder;
+      parsed.frames.forEach(consume);
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) consume(buffer);
+  } catch (error) {
+    if (input.signal?.aborted) throw new GenerationInterruptedError();
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+
+  if (!generationId) {
+    throw new WorkspaceApiError("Generation id is missing.", 502);
+  }
+  if (!messageId || revision === null || !content) {
+    if (toolProposalReceived) {
+      return { generationId, toolProposalOnly: true };
+    }
+    throw new WorkspaceApiError(
+      "Generation ended before a complete message was persisted.",
+      502,
+    );
+  }
+  return { generationId, messageId, revision, content };
+}
+
+export async function abortGeneration(generationId: string): Promise<void> {
+  await request<ApiEnvelope<{ id: string; stopped: boolean }>>(
+    `/generations/${encodeURIComponent(generationId)}/abort`,
+    { method: "POST" },
+  );
+}
+
+export async function saveProviderConnection(
+  input: ProviderConnectionInput,
+  current?: ProviderConnection,
+): Promise<ProviderConnection> {
+  const result = await request<ApiEnvelope<ApiProviderConnection>>(
+    current
+      ? `/providers/connections/${encodeURIComponent(current.id)}`
+      : "/providers/connections",
+    {
+      method: current ? "PATCH" : "POST",
+      body: JSON.stringify({
+        ...input,
+        ...(current ? { expectedRevision: current.revision } : {}),
+      }),
+      timeoutMs: 10_000,
+    },
+  );
+  return result.data;
+}
+
+export async function updateWorldbookEntryPermission(
+  worldbook: Worldbook,
+  entry: WorldbookEntry,
+  agentEditable: boolean,
+): Promise<{
+  worldbook: Worldbook;
+  entry: WorldbookEntry;
+}> {
+  const result = await request<
+    ApiEnvelope<{
+      worldbook: ApiWorldbook;
+    }>
+  >(
+    `/worldbooks/${encodeURIComponent(
+      worldbook.id,
+    )}/entries/${encodeURIComponent(entry.id)}/permission`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        expectedWorldbookRevision: worldbook.revision,
+        expectedEntryRevision: entry.revision,
+        agentEditable,
+      }),
+    },
+  );
+  const updatedWorldbook = normalizeWorldbook(result.data.worldbook);
+  const updatedEntry = updatedWorldbook.entries.find(
+    (candidate) => candidate.id === entry.id,
+  );
+  if (!updatedEntry) {
+    throw new WorkspaceApiError("Updated worldbook was not returned.", 502);
+  }
+  return {
+    worldbook: updatedWorldbook,
+    entry: updatedEntry,
+  };
+}
+
+export async function updateWorldbookEntry(
+  worldbook: Worldbook,
+  entry: WorldbookEntry,
+  patch: WorldbookEntryUpdate,
+): Promise<Worldbook> {
+  const result = await request<
+    ApiEnvelope<{
+      worldbook: ApiWorldbook;
+    }>
+  >(
+    `/worldbooks/${encodeURIComponent(
+      worldbook.id,
+    )}/entries/${encodeURIComponent(entry.id)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        expectedWorldbookRevision: worldbook.revision,
+        expectedEntryRevision: entry.revision,
+        ...patch,
+      }),
+    },
+  );
+  return normalizeWorldbook(result.data.worldbook);
+}
+
+export async function updatePresetPrompt(input: {
+  presetId: string;
+  promptId: string;
+  expectedRevision: number;
+  enabled?: boolean;
+  inserted?: boolean;
+  content?: string;
+}): Promise<PromptPreset> {
+  if (
+    input.enabled === undefined &&
+    input.inserted === undefined &&
+    input.content === undefined
+  ) {
+    throw new TypeError(
+      "Preset prompt update requires enabled, inserted or content.",
+    );
+  }
+  const result = await request<ApiEnvelope<ApiPreset>>(
+    `/presets/${encodeURIComponent(input.presetId)}/prompts/${encodeURIComponent(
+      input.promptId,
+    )}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        expectedRevision: input.expectedRevision,
+        ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
+        ...(input.inserted === undefined ? {} : { inserted: input.inserted }),
+        ...(input.content === undefined ? {} : { content: input.content }),
+      }),
+    },
+  );
+  return normalizePreset(result.data);
+}
+
+export async function reorderPresetPrompts(input: {
+  presetId: string;
+  expectedRevision: number;
+  promptIds: string[];
+}): Promise<PromptPreset> {
+  if (
+    input.promptIds.length === 0 ||
+    new Set(input.promptIds).size !== input.promptIds.length
+  ) {
+    throw new TypeError(
+      "Preset prompt order requires unique inserted prompt identifiers.",
+    );
+  }
+  const result = await request<ApiEnvelope<ApiPreset>>(
+    `/presets/${encodeURIComponent(input.presetId)}/prompt-order`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        expectedRevision: input.expectedRevision,
+        promptIds: input.promptIds,
+      }),
+    },
+  );
+  return normalizePreset(result.data);
+}
+
+async function loadAgentRun(runId: string): Promise<AgentRun> {
+  const result = await request<
+    ApiEnvelope<{ run: ApiAgentRun; toolCalls: unknown[]; audit: unknown[] }>
+  >(`/agent/runs/${encodeURIComponent(runId)}`);
+  return normalizeAgentRun(result.data.run);
+}
+
+export type AgentPlanningResult = {
+  run: AgentRun;
+  proposal: AgentProposal | null;
+  text: string;
+};
+
+function normalizePlannedToolCall(value: unknown): ApiAgentToolCall {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== "string" ||
+    typeof value.runId !== "string" ||
+    typeof value.idempotencyKey !== "string" ||
+    typeof value.toolName !== "string" ||
+    !isRecord(value.arguments) ||
+    typeof value.status !== "string"
+  ) {
+    throw new WorkspaceApiError(
+      "Agent planner returned an invalid tool call.",
+      502,
+    );
+  }
+  const statuses: ApiAgentToolCall["status"][] = [
+    "proposed",
+    "awaiting_confirmation",
+    "running",
+    "succeeded",
+    "rejected",
+    "cancelled",
+    "failed",
+  ];
+  if (!statuses.includes(value.status as ApiAgentToolCall["status"])) {
+    throw new WorkspaceApiError(
+      "Agent planner returned an unknown tool-call status.",
+      502,
+    );
+  }
+  return {
+    id: value.id,
+    runId: value.runId,
+    idempotencyKey: value.idempotencyKey,
+    toolName: value.toolName,
+    arguments: value.arguments,
+    status: value.status as ApiAgentToolCall["status"],
+  };
+}
+
+function worldbookProposalFromCall(
+  state: WorkspaceState,
+  run: AgentRun,
+  call: ApiAgentToolCall,
+  objective: string,
+): AgentProposal {
+  const worldbookId = call.arguments.worldbookId;
+  const beforeRevision = call.arguments.expectedRevision;
+  if (
+    typeof worldbookId !== "string" ||
+    typeof beforeRevision !== "number" ||
+    !Number.isInteger(beforeRevision)
+  ) {
+    throw new WorkspaceApiError(
+      "Model tool returned an invalid worldbook proposal.",
+      502,
+    );
+  }
+  const worldbook = state.worldbooks.find(
+    (candidate) => candidate.id === worldbookId,
+  );
+  if (!worldbook) {
+    throw new WorkspaceApiError(
+      "Model tool proposal targets a worldbook outside the loaded workspace.",
+      409,
+    );
+  }
+  const shared = {
+    id: call.id,
+    idempotencyKey: call.idempotencyKey,
+    runId: run.id,
+    worldbookId,
+    worldbookName: worldbook.name,
+    toolArguments: call.arguments,
+    rationale: objective,
+    beforeRevision,
+    afterRevision: null,
+    auditId: null,
+  } as const;
+
+  if (call.toolName === "worldbook.entry.create") {
+    const entry = call.arguments.entry;
+    if (!isRecord(entry) || typeof entry.content !== "string") {
+      throw new WorkspaceApiError(
+        "Model tool returned an invalid create-entry proposal.",
+        502,
+      );
+    }
+    const entryTitle =
+      typeof entry.title === "string" && entry.title.trim()
+        ? entry.title.trim()
+        : "新世界书条目";
+    const keys = Array.isArray(entry.keys)
+      ? entry.keys.filter((key): key is string => typeof key === "string")
+      : [];
+    return {
+      ...shared,
+      toolName: call.toolName,
+      title: entryTitle,
+      diffLines: [
+        `+ 标题：${entryTitle}`,
+        ...(keys.length > 0 ? [`+ 关键词：${keys.join("、")}`] : []),
+        `+ 内容：${entry.content}`,
+      ],
+      status: "awaiting_confirmation",
+    };
+  }
+
+  if (
+    call.toolName !== "worldbook.entry.update" &&
+    call.toolName !== "worldbook.entry.delete"
+  ) {
+    throw new WorkspaceApiError(
+      "Model tool proposal is not supported by this workspace.",
+      422,
+    );
+  }
+  const entryId = call.arguments.entryId;
+  const beforeEntryRevision = call.arguments.expectedEntryRevision;
+  if (
+    typeof entryId !== "string" ||
+    typeof beforeEntryRevision !== "number" ||
+    !Number.isInteger(beforeEntryRevision)
+  ) {
+    throw new WorkspaceApiError(
+      "Model tool returned an invalid target entry revision.",
+      502,
+    );
+  }
+  const targetEntry = worldbook.entries.find((entry) => entry.id === entryId);
+  if (!targetEntry) {
+    throw new WorkspaceApiError(
+      "Model tool proposal targets an entry outside the loaded worldbook.",
+      409,
+    );
+  }
+  const target = {
+    targetEntryId: targetEntry.id,
+    targetEntryTitle: targetEntry.title,
+    beforeEntryRevision,
+    status: targetEntry.agentEditable
+      ? ("awaiting_confirmation" as const)
+      : ("blocked" as const),
+  };
+
+  if (call.toolName === "worldbook.entry.delete") {
+    return {
+      ...shared,
+      ...target,
+      toolName: call.toolName,
+      title: `删除条目：${targetEntry.title}`,
+      diffLines: [
+        `- 标题：${targetEntry.title}`,
+        `- 条目 ID：${targetEntry.id}`,
+        `- 内容：${targetEntry.content}`,
+      ],
+    };
+  }
+
+  const patch = call.arguments.patch;
+  if (!isRecord(patch)) {
+    throw new WorkspaceApiError(
+      "Model tool returned an invalid update-entry patch.",
+      502,
+    );
+  }
+  const diffLines: string[] = [];
+  if (typeof patch.title === "string") {
+    diffLines.push(`~ 标题：${targetEntry.title} → ${patch.title}`);
+  }
+  if (Array.isArray(patch.keys)) {
+    const keys = patch.keys.filter(
+      (key): key is string => typeof key === "string",
+    );
+    diffLines.push(`~ 关键词：${keys.join("、") || "无"}`);
+  }
+  if (typeof patch.content === "string") {
+    diffLines.push(`~ 内容：${patch.content}`);
+  }
+  if (typeof patch.enabled === "boolean") {
+    diffLines.push(`~ 状态：${patch.enabled ? "启用" : "停用"}`);
+  }
+  if (typeof patch.position === "number") {
+    diffLines.push(`~ 位置：${String(patch.position)}`);
+  }
+  if (isRecord(patch.metadata)) {
+    diffLines.push("~ 元数据：更新");
+  }
+  return {
+    ...shared,
+    ...target,
+    toolName: call.toolName,
+    title: `更新条目：${targetEntry.title}`,
+    diffLines:
+      diffLines.length > 0 ? diffLines : [`~ 条目 ${targetEntry.id}：更新字段`],
+  };
+}
+
+export function proposalFromGenerationToolEvent(
+  state: WorkspaceState,
+  event: GenerationToolProposal,
+): AgentProposal | null {
+  if (
+    ![
+      "worldbook.entry.create",
+      "worldbook.entry.update",
+      "worldbook.entry.delete",
+    ].includes(event.toolCall.toolName) ||
+    !["proposed", "awaiting_confirmation"].includes(event.toolCall.status)
+  ) {
+    return null;
+  }
+  return worldbookProposalFromCall(
+    state,
+    event.run,
+    event.toolCall,
+    event.text || event.run.objective,
+  );
+}
+
+export async function planAgentWorldbookChange(
+  state: WorkspaceState,
+  objective: string,
+): Promise<AgentPlanningResult> {
+  const normalizedObjective = objective.trim();
+  if (!normalizedObjective) {
+    throw new WorkspaceApiError("Agent objective cannot be empty.", 400);
+  }
+  const requestId = clientRequestId("agent");
+  const created = await request<
+    ApiEnvelope<{ run: ApiAgentRun; replayed: boolean }>
+  >("/agent/runs", {
+    method: "POST",
+    body: JSON.stringify({
+      conversationId: state.selectedConversationId,
+      connectionId: state.selectedProviderId,
+      objective: normalizedObjective,
+      idempotencyKey: `${requestId}:run`,
+      maxSteps: 8,
+    }),
+  });
+  const planned = await request<ApiEnvelope<ApiAgentPlan>>(
+    `/agent/runs/${encodeURIComponent(created.data.run.id)}/plan`,
+    { method: "POST", timeoutMs: 30_000 },
+  );
+  const run = normalizeAgentRun(planned.data.run);
+  if (!Array.isArray(planned.data.toolCalls)) {
+    throw new WorkspaceApiError(
+      "Agent planner returned an invalid tool-call list.",
+      502,
+    );
+  }
+  const toolCalls = planned.data.toolCalls.map(normalizePlannedToolCall);
+  const call = toolCalls.find(
+    (candidate) =>
+      candidate.toolName === "worldbook.entry.create" &&
+      candidate.status === "awaiting_confirmation",
+  );
+  if (!call) {
+    return { run, proposal: null, text: planned.data.text };
+  }
+  const proposal = worldbookProposalFromCall(
+    state,
+    run,
+    call,
+    normalizedObjective,
+  );
+  return { run, proposal, text: planned.data.text };
+}
+
+export async function loadPendingAgentWorldbookProposal(
+  state: WorkspaceState,
+): Promise<AgentPlanningResult | null> {
+  const listed = await request<ApiEnvelope<ApiAgentRun[]>>(
+    `/agent/runs?conversationId=${encodeURIComponent(
+      state.selectedConversationId,
+    )}`,
+  );
+  if (!Array.isArray(listed.data)) {
+    throw new WorkspaceApiError("Agent run list is invalid.", 502);
+  }
+  const candidates = listed.data
+    .filter((run) => run.status === "waiting_confirmation")
+    .slice(0, 5);
+  const snapshots = await Promise.all(
+    candidates.map((run) =>
+      request<
+        ApiEnvelope<{
+          run: ApiAgentRun;
+          toolCalls: unknown[];
+          audit: unknown[];
+        }>
+      >(`/agent/runs/${encodeURIComponent(run.id)}`),
+    ),
+  );
+  for (const snapshot of snapshots) {
+    if (!Array.isArray(snapshot.data.toolCalls)) continue;
+    const run = normalizeAgentRun(snapshot.data.run);
+    const call = snapshot.data.toolCalls
+      .map(normalizePlannedToolCall)
+      .find(
+        (candidate) =>
+          [
+            "worldbook.entry.create",
+            "worldbook.entry.update",
+            "worldbook.entry.delete",
+          ].includes(candidate.toolName) &&
+          candidate.status === "awaiting_confirmation",
+      );
+    if (call) {
+      return {
+        run,
+        proposal: worldbookProposalFromCall(state, run, call, run.objective),
+        text: "",
+      };
+    }
+  }
+  return null;
+}
+
+async function createAgentRun(state: WorkspaceState): Promise<AgentRun> {
+  const proposal = state.agentProposal;
+  if (!proposal) {
+    throw new WorkspaceApiError(
+      "No Agent proposal is awaiting confirmation.",
+      409,
+    );
+  }
+  const result = await request<
+    ApiEnvelope<{ run: ApiAgentRun; replayed: boolean }>
+  >("/agent/runs", {
+    method: "POST",
+    body: JSON.stringify({
+      conversationId: state.selectedConversationId,
+      connectionId: state.selectedProviderId,
+      objective: proposal.rationale,
+      idempotencyKey: `${proposal.id}:run`,
+      maxSteps: 8,
+    }),
+  });
+  return normalizeAgentRun(result.data.run);
+}
+
+async function activeAgentRun(state: WorkspaceState): Promise<AgentRun> {
+  if (
+    state.agentRun &&
+    state.agentRun.conversationId === state.selectedConversationId &&
+    !["cancelled", "failed"].includes(state.agentRun.status)
+  ) {
+    try {
+      return await loadAgentRun(state.agentRun.id);
+    } catch (error) {
+      if (!(error instanceof WorkspaceApiError) || error.status !== 404) {
+        throw error;
+      }
+    }
+  }
+  return createAgentRun(state);
+}
+
+async function executeAgentTool(
+  runId: string,
+  input: {
+    idempotencyKey: string;
+    toolName: string;
+    arguments: Record<string, unknown>;
+  },
+): Promise<AgentToolResult> {
+  const result = await request<ApiEnvelope<AgentToolResult>>(
+    `/agent/runs/${encodeURIComponent(runId)}/tools`,
+    {
+      method: "POST",
+      body: JSON.stringify({ ...input, confirmed: true }),
+    },
+  );
+  return result.data;
+}
+
+export async function confirmAgentProposal(
+  state: WorkspaceState,
+  callbacks: { onRun?: (run: AgentRun) => void } = {},
+): Promise<{
+  auditId: string | null;
+  revision: number | null;
+  worldbooks: Worldbook[];
+  run: AgentRun;
+}> {
+  const proposal = state.agentProposal;
+  if (!proposal) {
+    throw new WorkspaceApiError(
+      "No Agent proposal is awaiting confirmation.",
+      409,
+    );
+  }
+  const run = await activeAgentRun(state);
+  callbacks.onRun?.(run);
+  const result = await executeAgentTool(run.id, {
+    idempotencyKey: proposal.idempotencyKey,
+    toolName: proposal.toolName,
+    arguments: proposal.toolArguments,
+  });
+  const [worldbooks, refreshedRun] = await Promise.all([
+    loadWorldbooksFromApi(),
+    loadAgentRun(run.id),
+  ]);
+  return {
+    auditId: result.result?.auditId ?? null,
+    revision: result.result?.revision ?? null,
+    worldbooks,
+    run: refreshedRun,
+  };
+}
+
+export async function undoAgentProposal(
+  state: WorkspaceState,
+): Promise<{ worldbooks: Worldbook[]; run: AgentRun }> {
+  const proposal = state.agentProposal;
+  if (!proposal) {
+    throw new WorkspaceApiError("No applied Agent change can be undone.", 409);
+  }
+  const { auditId } = proposal;
+  if (!auditId || !state.agentRun) {
+    throw new WorkspaceApiError("No applied Agent change can be undone.", 409);
+  }
+  await executeAgentTool(state.agentRun.id, {
+    idempotencyKey: `${proposal.id}:undo:${auditId}`,
+    toolName: "agent.change.undo",
+    arguments: { auditId },
+  });
+  const [worldbooks, run] = await Promise.all([
+    loadWorldbooksFromApi(),
+    loadAgentRun(state.agentRun.id),
+  ]);
+  return { worldbooks, run };
+}
+
+export async function cancelAgentRun(runId: string): Promise<AgentRun> {
+  const result = await request<ApiEnvelope<ApiAgentRun>>(
+    `/agent/runs/${encodeURIComponent(runId)}/cancel`,
+    { method: "POST" },
+  );
+  return normalizeAgentRun(result.data);
+}
+
+const maxJsonSniffBytes = 32 * 1024 * 1024;
+
+function portableFileExtension(filename: string): string {
+  const lastDot = filename.lastIndexOf(".");
+  return lastDot < 0 ? "" : filename.slice(lastDot + 1).toLowerCase();
+}
+
+function hasConversationImportShape(value: unknown): boolean {
+  if (Array.isArray(value)) {
+    return value.some(
+      (item) =>
+        isRecord(item) &&
+        (typeof item.mes === "string" ||
+          typeof item.is_user === "boolean" ||
+          Array.isArray(item.swipes)),
+    );
+  }
+  return isRecord(value) && Array.isArray(value.messages);
+}
+
+function hasCardImportShape(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const data = isRecord(value.data) ? value.data : value;
+  return (
+    (typeof value.spec === "string" && value.spec.startsWith("chara_card_")) ||
+    (typeof data.name === "string" &&
+      (typeof data.description === "string" ||
+        typeof data.first_mes === "string" ||
+        Array.isArray(data.participants)))
+  );
+}
+
+function hasPresetImportShape(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  if (value.spec === "sillytavern_n_prompt_preset") return true;
+  if (
+    Array.isArray(value.prompts) &&
+    (Array.isArray(value.prompt_order) ||
+      typeof value.temperature === "number" ||
+      typeof value.top_p === "number" ||
+      typeof value.openai_max_context === "number")
+  ) {
+    return true;
+  }
+  return (
+    (value.type === "full" || value.type === "character") &&
+    isRecord(value.data) &&
+    Array.isArray(value.data.prompts)
+  );
+}
+
+function hasWorldbookImportShape(value: unknown): boolean {
+  if (!isRecord(value) || !("entries" in value)) return false;
+  const entries = value.entries;
+  const samples = Array.isArray(entries)
+    ? entries.slice(0, 4)
+    : isRecord(entries)
+      ? Object.values(entries).slice(0, 4)
+      : [];
+  return samples.some(
+    (entry) =>
+      isRecord(entry) &&
+      (typeof entry.content === "string" ||
+        Array.isArray(entry.key) ||
+        Array.isArray(entry.keys)),
+  );
+}
+
+async function detectPortableImportKind(
+  file: File,
+): Promise<PortableImportKind> {
+  const extension = portableFileExtension(file.name);
+  if (extension === "png" || extension === "charx" || extension === "zip") {
+    return "card";
+  }
+  if (extension === "jsonl") return "conversation";
+  if (extension !== "json" || file.size > maxJsonSniffBytes) return "card";
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await file.text()) as unknown;
+  } catch {
+    return "card";
+  }
+  if (hasConversationImportShape(parsed)) return "conversation";
+  if (hasPresetImportShape(parsed)) return "preset";
+  if (hasCardImportShape(parsed)) return "card";
+  if (hasWorldbookImportShape(parsed)) return "worldbook";
+  return "card";
+}
+
+export async function importPortableFile(
+  file: File,
+  options: { conversationCardId?: string } = {},
+): Promise<PortableImportResult> {
+  const kind = await detectPortableImportKind(file);
+  if (kind === "preset") {
+    const source = JSON.parse(await file.text()) as unknown;
+    const response = await request<ApiEnvelope<unknown>>("/presets/import", {
+      method: "POST",
+      body: JSON.stringify({
+        source,
+        filename: file.name,
+        conflictStrategy: "duplicate",
+      }),
+      timeoutMs: 20_000,
+    });
+    return { kind, result: response.data };
+  }
+  if (kind === "conversation" && !options.conversationCardId) {
+    throw new WorkspaceApiError(
+      "请先选择角色卡，再把聊天记录导入到该卡下。",
+      400,
+      "CONVERSATION_CARD_REQUIRED",
+    );
+  }
+  const formData = new FormData();
+  formData.set("file", file);
+  if (kind === "conversation") {
+    formData.set("cardId", options.conversationCardId!);
+  }
+  const route =
+    kind === "worldbook"
+      ? "/worldbooks/import"
+      : kind === "conversation"
+        ? "/conversations/import"
+        : "/cards/import";
+  const response = await request<ApiEnvelope<unknown>>(route, {
+    method: "POST",
+    body: formData,
+    timeoutMs: 20_000,
+  });
+  return { kind, result: response.data };
+}
+
+export async function updateRegexGrant(input: {
+  scope: RegexGrantScope;
+  id: string;
+  granted: boolean;
+}): Promise<void> {
+  await request("/compatibility/regex-grants", {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function saveRegexScope(input: {
+  scope: RegexScope;
+  enabled?: boolean;
+  scripts?: RegexScriptDefinition[];
+}): Promise<RegexScope> {
+  const result = await request<ApiEnvelope<ApiRegexScope>>(
+    `/regex/scopes/${encodeURIComponent(input.scope.scope)}/${encodeURIComponent(input.scope.id)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        expectedRevision: input.scope.revision,
+        ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
+        ...(input.scripts === undefined ? {} : { scripts: input.scripts }),
+      }),
+    },
+  );
+  return normalizeRegexScope(result.data);
+}
+
+export async function createConversationSpace(input: {
+  title: string;
+  cardId: string;
+}): Promise<ConversationSpace> {
+  const result = await request<ApiEnvelope<ApiConversation>>("/conversations", {
+    method: "POST",
+    body: JSON.stringify({
+      title: input.title,
+      cardId: input.cardId,
+    }),
+  });
+  return normalizeConversation(result.data);
+}
+
+export async function deleteRoleCard(input: {
+  cardId: string;
+  expectedRevision: number;
+}): Promise<void> {
+  await request(`/cards/${encodeURIComponent(input.cardId)}`, {
+    method: "DELETE",
+    body: JSON.stringify({ expectedRevision: input.expectedRevision }),
+  });
+}
+
+export async function deletePromptPreset(input: {
+  presetId: string;
+  expectedRevision: number;
+}): Promise<void> {
+  await request(`/presets/${encodeURIComponent(input.presetId)}`, {
+    method: "DELETE",
+    body: JSON.stringify({ expectedRevision: input.expectedRevision }),
+  });
+}
+
+type ApiLegacyCapabilityGrant = {
+  plugin_id?: unknown;
+  pluginId?: unknown;
+  actor?: unknown;
+  capability?: unknown;
+  granted?: unknown;
+  granted_by?: unknown;
+  grantedBy?: unknown;
+  updated_at?: unknown;
+  updatedAt?: unknown;
+};
+
+function requireString(value: unknown, field: string): string {
+  if (typeof value !== "string") {
+    throw new WorkspaceApiError(
+      `Legacy host returned an invalid ${field}.`,
+      502,
+    );
+  }
+  return value;
+}
+
+function normalizeLegacyGrant(
+  item: ApiLegacyCapabilityGrant,
+): LegacyCapabilityGrant {
+  const actor = requireString(item.actor, "grant actor");
+  if (actor !== "legacy-plugin" && actor !== "embedded-script") {
+    throw new WorkspaceApiError(
+      "Legacy host returned an invalid grant actor.",
+      502,
+    );
+  }
+  return {
+    pluginId: requireString(item.pluginId ?? item.plugin_id, "grant plugin id"),
+    actor,
+    capability: requireString(item.capability, "grant capability"),
+    granted: item.granted === true || item.granted === 1,
+    grantedBy: requireString(item.grantedBy ?? item.granted_by, "grant owner"),
+    updatedAt: requireString(
+      item.updatedAt ?? item.updated_at,
+      "grant timestamp",
+    ),
+  };
+}
+
+export async function loadLegacyGrants(): Promise<LegacyCapabilityGrant[]> {
+  const result =
+    await request<ApiEnvelope<ApiLegacyCapabilityGrant[]>>("/legacy/grants");
+  return result.data.map(normalizeLegacyGrant);
+}
+
+export async function updateLegacyGrant(input: {
+  pluginId: string;
+  actor?: LegacyActor;
+  capability: string;
+  granted: boolean;
+}): Promise<LegacyCapabilityGrant> {
+  const result = await request<ApiEnvelope<ApiLegacyCapabilityGrant>>(
+    "/legacy/grants",
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        ...input,
+        actor: input.actor ?? "legacy-plugin",
+      }),
+    },
+  );
+  return normalizeLegacyGrant(result.data);
+}
+
+function normalizeLegacyRpcResponse(
+  value: unknown,
+  expectedId: string,
+): LegacyRpcResponse {
+  if (
+    !isRecord(value) ||
+    value.protocol !== "stn.legacy.v1" ||
+    value.id !== expectedId ||
+    typeof value.ok !== "boolean"
+  ) {
+    throw new WorkspaceApiError(
+      "Legacy broker returned an invalid RPC response.",
+      502,
+    );
+  }
+  if (value.ok) {
+    return {
+      protocol: "stn.legacy.v1",
+      id: expectedId,
+      ok: true,
+      result: value.result,
+    };
+  }
+  if (
+    !isRecord(value.error) ||
+    typeof value.error.code !== "string" ||
+    typeof value.error.message !== "string"
+  ) {
+    throw new WorkspaceApiError(
+      "Legacy broker returned an invalid RPC error.",
+      502,
+    );
+  }
+  return {
+    protocol: "stn.legacy.v1",
+    id: expectedId,
+    ok: false,
+    error: {
+      code: value.error.code,
+      message: value.error.message,
+      ...(typeof value.error.capability === "string"
+        ? { capability: value.error.capability }
+        : {}),
+    },
+  };
+}
+
+export async function callLegacyRpc(
+  input: LegacyRpcRequest,
+): Promise<LegacyRpcResponse> {
+  const response = await fetch("/api/legacy/rpc", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+  let body: unknown;
+  try {
+    body = (await response.json()) as unknown;
+  } catch {
+    throw new WorkspaceApiError(
+      "Legacy broker returned a non-JSON RPC response.",
+      response.status || 502,
+    );
+  }
+  return normalizeLegacyRpcResponse(body, input.id);
+}
+
+function normalizeLegacyHostPlugin(value: unknown): LegacyHostPluginStatus {
+  if (!isRecord(value) || !isRecord(value.lock)) {
+    throw new WorkspaceApiError(
+      "Legacy host returned an invalid plugin status.",
+      502,
+    );
+  }
+  return {
+    id: requireString(value.lock.id, "plugin id"),
+    name: requireString(value.lock.displayName, "plugin name"),
+    version: requireString(value.lock.manifestVersion, "plugin version"),
+    repository: requireString(value.lock.repository, "plugin repository"),
+    commit: requireString(value.lock.commit, "plugin commit"),
+    installed: value.installed === true,
+    verified: value.verified === true,
+    enabled: value.enabled === true,
+    ...(typeof value.reason === "string" ? { reason: value.reason } : {}),
+  };
+}
+
+export async function installLegacyPlugin(
+  pluginId: string,
+  repository: string,
+  origin = LEGACY_REALM_ORIGIN,
+): Promise<LegacyPluginInstallResult> {
+  const base = origin.replace(/\/+$/u, "");
+  const path = `${base}/plugins/${encodeURIComponent(pluginId)}/install`;
+  const controller = new AbortController();
+  const timeout = globalThis.setTimeout(() => controller.abort(), 300_000);
+  try {
+    const response = await fetch(path, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ repository }),
+      signal: controller.signal,
+    });
+    if (!response.ok) throw await errorFromResponse(response, path);
+    const value: unknown = await response.json();
+    if (
+      !isRecord(value) ||
+      (value.outcome !== "installed" &&
+        value.outcome !== "already-installed") ||
+      !isRecord(value.plugin)
+    ) {
+      throw new WorkspaceApiError(
+        "Legacy host returned an invalid installation result.",
+        502,
+      );
+    }
+    const receipt = isRecord(value.receipt)
+      ? {
+          pluginId: requireString(value.receipt.pluginId, "receipt plugin id"),
+          repository: requireString(
+            value.receipt.repository,
+            "receipt repository",
+          ),
+          commit: requireString(value.receipt.commit, "receipt commit"),
+          installedAt: requireString(
+            value.receipt.installedAt,
+            "receipt timestamp",
+          ),
+        }
+      : undefined;
+    return {
+      outcome: value.outcome,
+      plugin: normalizeLegacyHostPlugin(value.plugin),
+      ...(receipt === undefined ? {} : { receipt }),
+    };
+  } finally {
+    globalThis.clearTimeout(timeout);
+  }
+}
+
+export async function setLegacyPluginEnabled(
+  pluginId: string,
+  enabled: boolean,
+  origin = LEGACY_REALM_ORIGIN,
+): Promise<LegacyHostPluginStatus> {
+  const base = origin.replace(/\/+$/u, "");
+  const requestPath = `${base}/plugins/${encodeURIComponent(pluginId)}/enabled`;
+  const response = await fetch(requestPath, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!response.ok) throw await errorFromResponse(response, requestPath);
+  const value: unknown = await response.json();
+  if (!isRecord(value) || !isRecord(value.plugin)) {
+    throw new WorkspaceApiError(
+      "Legacy host returned an invalid enablement result.",
+      502,
+    );
+  }
+  return normalizeLegacyHostPlugin(value.plugin);
+}
+
+export async function loadLegacyHostHealth(
+  origin = LEGACY_REALM_ORIGIN,
+): Promise<LegacyHostHealth> {
+  const path = `${origin.replace(/\/+$/u, "")}/health`;
+  const response = await fetch(path, {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) throw await errorFromResponse(response, path);
+  const value: unknown = await response.json();
+  if (
+    !isRecord(value) ||
+    typeof value.ok !== "boolean" ||
+    typeof value.service !== "string" ||
+    typeof value.safeMode !== "boolean" ||
+    !Array.isArray(value.plugins)
+  ) {
+    throw new WorkspaceApiError(
+      "Legacy host returned an invalid health response.",
+      502,
+    );
+  }
+  return {
+    ok: value.ok,
+    service: value.service,
+    safeMode: value.safeMode,
+    plugins: value.plugins.map(normalizeLegacyHostPlugin),
+  };
+}

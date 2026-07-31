@@ -40,6 +40,54 @@ function createConversationFixture(store: AppStore) {
 }
 
 describe("AppStore", () => {
+  it("creates, switches and deletes user personas without leaving chat bindings", () => {
+    const store = new AppStore();
+    try {
+      const first = store.createPersona({
+        id: "persona-first",
+        name: "First user",
+        description: "First description",
+        isDefault: true,
+      });
+      const second = store.createPersona({
+        id: "persona-second",
+        name: "Second user",
+        description: "Second description",
+      });
+      const card = store.createCard({
+        id: "card-persona",
+        kind: "character",
+        name: "Persona card",
+      }).card;
+      const conversation = store.createConversation({
+        id: "conversation-persona",
+        title: "Persona chat",
+        cardId: card.id,
+      });
+
+      expect(conversation.personaId).toBe(first.id);
+      const defaultSecond = store.updatePersona({
+        id: second.id,
+        expectedRevision: second.revision,
+        patch: { isDefault: true },
+      });
+      expect(defaultSecond.isDefault).toBe(true);
+      expect(store.getPersona(first.id).isDefault).toBe(false);
+
+      const switched = store.setConversationPersona({
+        id: conversation.id,
+        personaId: second.id,
+        expectedRevision: conversation.revision,
+      });
+      expect(switched.personaId).toBe(second.id);
+
+      store.deletePersona(second.id, defaultSecond.revision);
+      expect(store.getConversation(conversation.id).personaId).toBeNull();
+    } finally {
+      store.close();
+    }
+  });
+
   it("requires a card, groups histories by card and resolves card participants dynamically", () => {
     const store = new AppStore();
     try {
@@ -281,6 +329,139 @@ describe("AppStore", () => {
           `%${preset.id}%`,
         )?.count,
       ).toBe(0);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("deletes a conversation with its messages, variables, artifacts and exclusive worldbooks", () => {
+    const store = new AppStore();
+    try {
+      const { card, conversation, first } = createConversationFixture(store);
+      const otherConversation = store.createConversation({
+        id: "conversation-keep",
+        title: "Keep this conversation",
+        cardId: card.card.id,
+      });
+      const otherMessage = store.addUserMessage({
+        id: "message-keep",
+        conversationId: otherConversation.id,
+        content: "Keep this message.",
+      });
+      const exclusiveWorldbook = store.createWorldbook({
+        id: "worldbook-conversation-owned",
+        name: "Conversation-owned lore",
+      });
+      store.bindWorldbook({
+        worldbookId: exclusiveWorldbook.id,
+        scopeType: "conversation",
+        scopeId: conversation.id,
+      });
+      const sharedWorldbook = store.createWorldbook({
+        id: "worldbook-conversation-shared",
+        name: "Shared conversation lore",
+      });
+      store.bindWorldbook({
+        worldbookId: sharedWorldbook.id,
+        scopeType: "conversation",
+        scopeId: conversation.id,
+      });
+      store.bindWorldbook({
+        worldbookId: sharedWorldbook.id,
+        scopeType: "global",
+      });
+      store.addSwipe({
+        id: "swipe-delete",
+        messageId: first.id,
+        content: "Alternative that should be deleted.",
+        selected: true,
+      });
+      store.createArtifact({
+        kind: "chat_summary",
+        scopeType: "conversation",
+        scopeId: conversation.id,
+        content: "Conversation summary.",
+      });
+      store.createArtifact({
+        kind: "message_variables",
+        scopeType: "message",
+        scopeId: first.id,
+        content: "Message artifact.",
+      });
+      store.createArtifact({
+        kind: "chat_summary",
+        scopeType: "conversation",
+        scopeId: otherConversation.id,
+        content: "Keep summary.",
+      });
+      store.setExtensionSetting(
+        "stn.tavern-helper",
+        `variables:conversation:${conversation.id}`,
+        { chatValue: 1 },
+      );
+      store.setExtensionSetting(
+        "stn.tavern-helper",
+        `variables:message:${first.id}`,
+        { messageValue: 1 },
+      );
+      store.setExtensionSetting(
+        "stn.tavern-helper",
+        `variables:conversation:${otherConversation.id}`,
+        { keepValue: 1 },
+      );
+      store.setExtensionSetting(
+        "stn.tavern-helper",
+        `variables:message:${otherMessage.id}`,
+        { keepMessageValue: 1 },
+      );
+
+      const deleted = store.deleteConversation(
+        conversation.id,
+        store.getConversation(conversation.id).revision,
+      );
+
+      expect(deleted.id).toBe(conversation.id);
+      expect(store.listConversations()).toEqual([
+        expect.objectContaining({ id: otherConversation.id }),
+      ]);
+      expect(store.listWorldbooks()).toEqual([
+        expect.objectContaining({ id: sharedWorldbook.id }),
+      ]);
+      expect(
+        store.database.get<{ count: number }>(
+          "SELECT COUNT(*) AS count FROM messages WHERE conversation_id = ?",
+          conversation.id,
+        )?.count,
+      ).toBe(0);
+      expect(
+        store.database.get<{ count: number }>(
+          "SELECT COUNT(*) AS count FROM swipes WHERE message_id = ?",
+          first.id,
+        )?.count,
+      ).toBe(0);
+      expect(
+        store.database.get<{ count: number }>(
+          "SELECT COUNT(*) AS count FROM artifacts WHERE scope_id IN (?, ?)",
+          conversation.id,
+          first.id,
+        )?.count,
+      ).toBe(0);
+      expect(
+        store.database.get<{ count: number }>(
+          `SELECT COUNT(*) AS count
+           FROM extension_settings
+           WHERE key IN (?, ?, ?)`,
+          `variables:conversation:${conversation.id}`,
+          `variables:message:${first.id}`,
+          `variables:conversation:${otherConversation.id}`,
+        )?.count,
+      ).toBe(1);
+      expect(
+        store.getExtensionSetting(
+          "stn.tavern-helper",
+          `variables:message:${otherMessage.id}`,
+        ).value,
+      ).toEqual({ keepMessageValue: 1 });
     } finally {
       store.close();
     }

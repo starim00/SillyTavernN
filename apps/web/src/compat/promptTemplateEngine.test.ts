@@ -88,4 +88,132 @@ describe("native Prompt Template processing", () => {
       { role: "user", content: "question" },
     ]);
   });
+
+  it("evaluates worldbook entries independently and filters @@if entries", async () => {
+    vi.stubGlobal("window", {});
+    const result = await renderPromptTemplateMessages(
+      [
+        {
+          role: "system",
+          content:
+            "@@if variables.stage === 2\nhidden branch\n<%= variables.stage %>\n\nvisible <%= variables.stage %>",
+        },
+      ],
+      {
+        enabled: true,
+        context: {
+          conversation: {
+            id: "conversation",
+            cardId: "card",
+            presetId: null,
+          },
+          sources: [],
+          worldbooks: [
+            {
+              id: "book",
+              name: "Book",
+              bindings: [],
+              entries: [
+                {
+                  id: "conditional",
+                  legacyUid: 1,
+                  keys: [],
+                  content:
+                    "@@if variables.stage === 2\nhidden branch\n<%= variables.stage %>",
+                  enabled: true,
+                  position: 0,
+                  metadata: { label: "Conditional" },
+                },
+                {
+                  id: "visible",
+                  legacyUid: 2,
+                  keys: [],
+                  content: "visible <%= variables.stage %>",
+                  enabled: true,
+                  position: 1,
+                  metadata: { label: "Visible" },
+                },
+              ],
+            },
+          ],
+          variables: {
+            global: {},
+            character: {},
+            preset: {},
+            chat: { stage: 1 },
+            messages: {},
+            scripts: {},
+          },
+        },
+      },
+    );
+    expect(result.messages[0]?.content).not.toContain("hidden branch");
+    expect(result.messages[0]?.content).toContain("visible 1");
+    expect(result.sourceTemplateCount).toBe(2);
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  it("fails one invalid worldbook entry closed without dropping valid entries", async () => {
+    vi.stubGlobal("window", {});
+    const invalid = "broken <% missingHelper() %>";
+    const valid = "kept <%= variables.value %>";
+    const result = await renderPromptTemplateMessages(
+      [{ role: "system", content: `${invalid}\n${valid}` }],
+      {
+        enabled: true,
+        context: {
+          conversation: {
+            id: "conversation",
+            cardId: "card",
+            presetId: null,
+          },
+          sources: [],
+          worldbooks: [
+            {
+              id: "book",
+              name: "Book",
+              bindings: [],
+              entries: [
+                {
+                  id: "invalid",
+                  legacyUid: 1,
+                  keys: [],
+                  content: invalid,
+                  enabled: true,
+                  position: 0,
+                  metadata: { label: "Invalid" },
+                },
+                {
+                  id: "valid",
+                  legacyUid: 2,
+                  keys: [],
+                  content: valid,
+                  enabled: true,
+                  position: 1,
+                  metadata: { label: "Valid" },
+                },
+              ],
+            },
+          ],
+          variables: {
+            global: {},
+            character: {},
+            preset: {},
+            chat: { value: 7 },
+            messages: {},
+            scripts: {},
+          },
+        },
+      },
+    );
+    expect(result.messages[0]?.content).not.toContain("broken");
+    expect(result.messages[0]?.content).toContain("kept 7");
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({
+        phase: "render",
+        sourceId: "invalid",
+        sourceLabel: "Book: Invalid",
+      }),
+    ]);
+  });
 });

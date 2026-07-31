@@ -9,6 +9,12 @@ import { prepareConversationPrompt } from "./prompt-service.js";
 
 const applications: ServerApplication[] = [];
 
+type PersonaRouteResponse = {
+  id: string;
+  revision: number;
+  isDefault: boolean;
+};
+
 async function application(seedDevelopmentData = true) {
   const dataDirectory = await mkdtemp(path.join(tmpdir(), "stn-server-"));
   const created = await createServer({
@@ -25,6 +31,72 @@ afterEach(async () => {
 });
 
 describe("SillyTavern N server", () => {
+  it("exposes user persona CRUD and conversation switching", async () => {
+    const { app, context } = await application(false);
+    const card = context.store.createCard({
+      id: "card-persona-route",
+      kind: "character",
+      name: "Persona route card",
+    }).card;
+    const createdPersona = await app.inject({
+      method: "POST",
+      url: "/api/personas",
+      payload: {
+        name: "Route user",
+        description: "Route description",
+        title: "Investigator",
+        isDefault: true,
+      },
+    });
+    expect(createdPersona.statusCode).toBe(201);
+    const persona = (createdPersona.json() as { data: PersonaRouteResponse })
+      .data;
+    expect(persona).toMatchObject({ isDefault: true, revision: 1 });
+
+    const conversation = context.store.createConversation({
+      id: "conversation-persona-route",
+      title: "Persona route conversation",
+      cardId: card.id,
+    });
+    expect(conversation.personaId).toBe(persona.id);
+
+    const switched = await app.inject({
+      method: "PATCH",
+      url: `/api/conversations/${conversation.id}/persona`,
+      payload: { personaId: null, expectedRevision: conversation.revision },
+    });
+    expect(switched.statusCode).toBe(200);
+    expect(switched.json()).toMatchObject({
+      data: { id: conversation.id, personaId: persona.id },
+    });
+
+    const updated = await app.inject({
+      method: "PATCH",
+      url: `/api/personas/${persona.id}`,
+      payload: {
+        expectedRevision: persona.revision,
+        name: "Updated route user",
+      },
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json()).toMatchObject({
+      data: { id: persona.id, name: "Updated route user" },
+    });
+
+    const listed = await app.inject({ method: "GET", url: "/api/personas" });
+    expect(listed.json()).toMatchObject({
+      data: [expect.objectContaining({ id: persona.id })],
+    });
+
+    const removed = await app.inject({
+      method: "DELETE",
+      url: `/api/personas/${persona.id}`,
+      payload: { expectedRevision: persona.revision + 1 },
+    });
+    expect(removed.statusCode).toBe(200);
+    expect(context.store.getConversation(conversation.id).personaId).toBeNull();
+  });
+
   it("cascade-deletes cards and presets through their public routes", async () => {
     const { app, context } = await application(false);
     const card = context.store.createCard({
@@ -85,6 +157,73 @@ describe("SillyTavern N server", () => {
       data: { id: preset.id },
     });
     expect(context.store.listPresets()).toEqual([]);
+  });
+
+  it("deletes a conversation and its conversation-scoped state through its public route", async () => {
+    const { app, context } = await application(false);
+    const card = context.store.createCard({
+      id: "card-conversation-delete-route",
+      kind: "character",
+      name: "Conversation delete route card",
+    }).card;
+    const conversation = context.store.createConversation({
+      id: "conversation-delete-route-state",
+      title: "Conversation delete route state",
+      cardId: card.id,
+    });
+    const message = context.store.addUserMessage({
+      id: "message-delete-route-state",
+      conversationId: conversation.id,
+      content: "Delete this message too.",
+    });
+    const exclusiveWorldbook = context.store.createWorldbook({
+      id: "worldbook-delete-route-state",
+      name: "Conversation-only lore",
+    });
+    context.store.bindWorldbook({
+      worldbookId: exclusiveWorldbook.id,
+      scopeType: "conversation",
+      scopeId: conversation.id,
+    });
+    context.store.createArtifact({
+      kind: "chat_summary",
+      scopeType: "conversation",
+      scopeId: conversation.id,
+      content: "Delete this summary too.",
+    });
+    context.store.setExtensionSetting(
+      "stn.tavern-helper",
+      `variables:conversation:${conversation.id}`,
+      { state: "delete" },
+    );
+    context.store.setExtensionSetting(
+      "stn.tavern-helper",
+      `variables:message:${message.id}`,
+      { state: "delete-message" },
+    );
+
+    const deleted = await app.inject({
+      method: "DELETE",
+      url: `/api/conversations/${conversation.id}`,
+      payload: {
+        expectedRevision: context.store.getConversation(conversation.id)
+          .revision,
+      },
+    });
+
+    expect(deleted.statusCode).toBe(200);
+    expect(deleted.json()).toMatchObject({
+      data: { id: conversation.id, title: conversation.title },
+    });
+    expect(context.store.listConversations()).toEqual([]);
+    expect(context.store.listWorldbooks()).toEqual([]);
+    expect(context.store.listArtifacts()).toEqual([]);
+    expect(
+      context.store.database.get<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM extension_settings WHERE key LIKE ?",
+        `%${conversation.id}%`,
+      )?.count,
+    ).toBe(0);
   });
 
   it("serves a real workspace and persists offline CRUD", async () => {
@@ -261,7 +400,33 @@ describe("SillyTavern N server", () => {
       },
     });
 
-    for (const role of ["assistant", "narrator", "system", "tool"]) {
+    const ordinaryAssistant = await app.inject({
+      method: "POST",
+      url: `/api/conversations/${conversationId}/messages`,
+      payload: {
+        role: "assistant",
+        content: "User-created assistant message",
+      },
+    });
+    expect(ordinaryAssistant.statusCode).toBe(201);
+    expect(ordinaryAssistant.json()).toMatchObject({
+      data: {
+        role: "assistant",
+        participantId: null,
+        content: "User-created assistant message",
+      },
+    });
+    const ordinaryAssistantData = ordinaryAssistant.json().data as {
+      id: string;
+      revision: number;
+    };
+    await app.inject({
+      method: "DELETE",
+      url: `/api/messages/${ordinaryAssistantData.id}`,
+      payload: { expectedRevision: ordinaryAssistantData.revision },
+    });
+
+    for (const role of ["narrator", "system", "tool"]) {
       const forged = await app.inject({
         method: "POST",
         url: `/api/conversations/${conversationId}/messages`,
@@ -281,6 +446,33 @@ describe("SillyTavern N server", () => {
       },
     });
     expect(forgedAttribution.statusCode).toBe(400);
+
+    const helperAssistant = await app.inject({
+      method: "POST",
+      url: `/api/compatibility/tavern-helper/conversations/${conversationId}/messages`,
+      payload: {
+        role: "assistant",
+        content: "Trusted helper-created assistant floor.",
+      },
+    });
+    expect(helperAssistant.statusCode).toBe(201);
+    expect(helperAssistant.json()).toMatchObject({
+      data: {
+        role: "assistant",
+        participantId: null,
+        content: "Trusted helper-created assistant floor.",
+      },
+    });
+    const helperAssistantData = helperAssistant.json().data as {
+      id: string;
+      revision: number;
+    };
+    const helperAssistantDeletion = await app.inject({
+      method: "DELETE",
+      url: `/api/messages/${helperAssistantData.id}`,
+      payload: { expectedRevision: helperAssistantData.revision },
+    });
+    expect(helperAssistantDeletion.statusCode).toBe(200);
 
     context.store.addInternalMessage({
       id: "internal-world-instruction",

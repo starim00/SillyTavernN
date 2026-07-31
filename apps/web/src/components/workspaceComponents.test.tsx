@@ -133,6 +133,7 @@ describe("workspace components", () => {
         cardName="默认角色卡"
         onDraftChange={noop}
         onSelectConversation={noop}
+        onDeleteConversation={noop}
         onCreateConversation={noop}
         onOpenCards={noop}
         onOpenHelperTool={noop}
@@ -351,6 +352,53 @@ describe("workspace components", () => {
     expect(html).not.toContain("<iframe");
   });
 
+  it("always parses user Markdown instead of treating wrappers as rich HTML", () => {
+    const displayContent = `<init_data>
+\`\`\`yaml
+# AI任务指令
+创角档案:
+  核心人格:
+    姓名: "风间澪"
+\`\`\`
+</init_data>`;
+    const message: WorkspaceMessage = {
+      id: "message-user-yaml",
+      conversationId: "conversation-test",
+      role: "user",
+      content: displayContent,
+      displayContent,
+      appliedRegexScriptIds: [],
+      createdLabel: "15:42",
+      revision: 1,
+    };
+    const noop = vi.fn();
+    const renderMessage = (renderRichContent: boolean) =>
+      renderToStaticMarkup(
+        <MessageCard
+          message={message}
+          isLast={false}
+          renderRichContent={renderRichContent}
+          onCopy={noop}
+          onUpdate={noop}
+          onDelete={noop}
+          onRegenerate={noop}
+          onContinue={noop}
+          onSelectSwipe={noop}
+        />,
+      );
+    const richContentHtml = renderMessage(true);
+    const depthLimitedHtml = renderMessage(false);
+
+    for (const html of [richContentHtml, depthLimitedHtml]) {
+      expect(html).toContain("message-item__content--markdown");
+      expect(html).toContain('<code class="language-yaml lang-yaml">');
+      expect(html).toContain("# AI任务指令");
+      expect(html).not.toContain("```yaml");
+      expect(html).not.toContain("&lt;init_data&gt;");
+      expect(html).not.toContain("<iframe");
+    }
+  });
+
   it("runs interactive regex HTML only inside its isolated frame", () => {
     const message: WorkspaceMessage = {
       id: "message-regex-html",
@@ -386,9 +434,12 @@ describe("workspace components", () => {
           const profileName = prompt("方案名称", "默认方案");
           if (confirm("清除方案？")) alert(profileName);
           window.parent.document.querySelector("#send_textarea").value = "开始创建";
+          const Mvu = window.parent?.Mvu || window.top?.Mvu;
+          await Mvu.replaceMvuData({ stat_data: { favor: 4 } });
         </script>`,
       "frame-test",
       { existing: "profile" },
+      { stat_data: { favor: 3 } },
     );
 
     expect(html).toContain("<iframe");
@@ -417,9 +468,17 @@ describe("workspace components", () => {
     );
     expect(resizableSourceDocument).toContain('type:"stn:message-frame-send"');
     expect(resizableSourceDocument).toContain(
+      'type:"stn:message-frame-mvu-update"',
+    );
+    expect(resizableSourceDocument).toContain(
       '__stnParentDocument.querySelector("#send_textarea")',
     );
     expect(resizableSourceDocument).not.toContain("window.parent.document");
+    expect(resizableSourceDocument).not.toContain("window.parent?.Mvu");
+    expect(resizableSourceDocument).toContain(
+      "const Mvu = window.Mvu || window.Mvu",
+    );
+    expect(resizableSourceDocument).toContain('"stat_data":{"favor":3}');
     expect(resizableSourceDocument).toContain(
       '__stnLocalStorage.setItem("profile", "saved")',
     );
@@ -437,7 +496,7 @@ describe("workspace components", () => {
     expect(isHtmlDisplayContent(message.displayContent ?? "")).toBe(true);
   });
 
-  it("separates message Markdown from an injected fenced HTML status bar", () => {
+  it("parses message Markdown and an injected fenced HTML status bar once", () => {
     const displayContent = `<dream>
 ## 正文标题
 
@@ -473,34 +532,37 @@ describe("workspace components", () => {
       />,
     );
 
-    expect(segments).toHaveLength(2);
+    expect(segments).toHaveLength(1);
     expect(segments[0]).toMatchObject({
-      kind: "markdown",
+      kind: "mixed",
       content: expect.stringContaining("这里是模型正文。"),
     });
-    expect(segments[1]).toMatchObject({
-      kind: "html",
-      content: expect.stringContaining("calendar-container"),
-    });
-    expect(sandboxedDisplayDocument(segments[1]!.content)).not.toContain(
-      "<dream>",
-    );
-    expect(html).toContain(">正文标题</h2>");
+    const mixedHtml = mixedDisplayContent(segments[0]!.content);
+    expect(mixedHtml).toContain(">正文标题</h2>");
+    expect(mixedHtml).toContain('<div class="calendar-container">状态栏</div>');
+    expect(sandboxedDisplayDocument(mixedHtml)).not.toContain("<dream>");
     expect(html).toContain("message-item__rich-content");
     expect(html.match(/<iframe/gu)).toHaveLength(1);
   });
 
-  it("renders regex-injected raw HTML and surrounding Markdown as one mixed document", () => {
+  it("keeps arbitrary regex-injected HTML intact in one mixed document", () => {
     const displayContent = `<style>
 .thinking { color: rebeccapurple; }
 </style>
+<status-panel data-kind="thinking">
 <details class="thinking">
-<summary>查看思考</summary>
-<div>**重点**
+<summary>
+  <i class="fa-solid fa-server"></i>
+  <span>变量更新LOG // 处理完成</span>
+  <div style="flex: 1"></div>
+  <i class="fa-solid fa-caret-down"></i>
+</summary>
+<div>重点
 
 - 条目一
 - 条目二</div>
 </details>
+</status-panel>
 
 正文仍然支持 **Markdown**。
 
@@ -534,13 +596,21 @@ describe("workspace components", () => {
       />,
     );
 
-    expect(segments).toHaveLength(2);
+    expect(segments).toHaveLength(1);
     expect(segments[0]).toMatchObject({ kind: "mixed" });
-    expect(segments[1]).toMatchObject({ kind: "html" });
     expect(mixedHtml).toContain("<style>");
+    expect(mixedHtml).toContain('<status-panel data-kind="thinking">');
     expect(mixedHtml).toContain('<details class="thinking">');
+    expect(mixedHtml).toContain("<span>变量更新LOG // 处理完成</span>");
+    expect(mixedHtml).not.toMatch(
+      /<summary[^>]*>[\s\S]*?<br\s*\/?>[\s\S]*?<\/summary>/u,
+    );
+    expect(mixedHtml).not.toMatch(
+      /<summary[^>]*>[\s\S]*?<pre>[\s\S]*?<\/summary>/u,
+    );
+    expect(mixedHtml).toContain('<div class="calendar">状态栏</div>');
     expect(mixedHtml).toContain("<strong>Markdown</strong>");
-    expect(html.match(/<iframe/gu)).toHaveLength(2);
+    expect(html.match(/<iframe/gu)).toHaveLength(1);
     expect(html).not.toContain("message-item__content--markdown");
   });
 

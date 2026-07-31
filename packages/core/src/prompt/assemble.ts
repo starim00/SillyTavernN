@@ -446,6 +446,7 @@ export function assemblePrompt(
   const hasDynamicMarkers = presetTemplates.some(
     (template) => template.enabled && template.metadata.dynamicMarker === true,
   );
+  let personaInserted = false;
   let legacyPresetPosition: PromptSegment["position"] = "system";
   for (const template of presetTemplates) {
     if (!template.enabled) {
@@ -459,8 +460,8 @@ export function assemblePrompt(
             role: template.role,
             content: input.persona,
             source: {
-              kind: "conversation",
-              ...(input.conversation ? { id: input.conversation.id } : {}),
+              kind: "persona",
+              ...(input.personaId ? { id: input.personaId } : {}),
               label: "Persona",
               detail: {
                 presetId: input.preset?.id ?? "",
@@ -473,6 +474,7 @@ export function assemblePrompt(
             truncation: "tail",
             metadata: { dynamicMarker: "persona-description" },
           });
+          personaInserted = true;
         }
       }
       legacyPresetPosition = positionAfterPresetMarker(
@@ -498,6 +500,23 @@ export function assemblePrompt(
       required: template.systemPrompt,
       truncation: template.systemPrompt ? "head" : "drop",
       metadata: template.metadata,
+    });
+  }
+
+  if (input.persona?.trim() && !personaInserted) {
+    add({
+      role: "system",
+      content: input.persona,
+      source: {
+        kind: "persona",
+        ...(input.personaId ? { id: input.personaId } : {}),
+        label: "Persona",
+        detail: { fallback: true },
+      },
+      position: "before-card",
+      priority: 700,
+      order: -1,
+      truncation: "tail",
     });
   }
 

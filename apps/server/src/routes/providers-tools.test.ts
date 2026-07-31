@@ -9,6 +9,7 @@ import {
   type FakeProviderScript,
   type ProviderRequest,
 } from "@stn/providers";
+import type { ProviderEvent } from "@stn/contracts";
 
 import { createServer, type ServerApplication } from "../app.js";
 
@@ -41,6 +42,34 @@ class SequencedFakeProvider extends DeterministicFakeProvider {
       throw new Error("The fake provider received an unexpected extra turn.");
     }
     yield* new DeterministicFakeProvider(script).generate(request, signal);
+  }
+}
+
+class PartialFailureProvider extends DeterministicFakeProvider {
+  override async *generate(
+    request: ProviderRequest,
+  ): AsyncIterable<ProviderEvent> {
+    yield {
+      type: "start",
+      requestId: request.requestId,
+      sequence: 0,
+      model: "partial-failure",
+      capabilities: this.capabilities(),
+    };
+    yield {
+      type: "text-delta",
+      requestId: request.requestId,
+      sequence: 1,
+      delta: "Content received before the proxy disconnected.",
+    };
+    yield {
+      type: "error",
+      requestId: request.requestId,
+      sequence: 2,
+      code: "PROVIDER_REQUEST_FAILED",
+      message: "Proxy disconnected.",
+      retryable: true,
+    };
   }
 }
 
@@ -101,6 +130,42 @@ afterEach(async () => {
 });
 
 describe("ordinary generation worldbook tools", () => {
+  it("persists received text when the provider stream fails", async () => {
+    const server = await application();
+    const { conversation } = workspaceFixture(server);
+    vi.spyOn(server.context.providers, "get").mockResolvedValue(
+      new PartialFailureProvider(),
+    );
+
+    const response = await server.app.inject({
+      method: "POST",
+      url: `/api/conversations/${conversation.id}/generate`,
+      payload: { connectionId: "partial-failure" },
+    });
+
+    const events = streamEvents(response.body);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "error",
+        code: "PROVIDER_REQUEST_FAILED",
+      }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "message-persisted",
+        incomplete: true,
+        reason: "error",
+        errorCode: "PROVIDER_REQUEST_FAILED",
+      }),
+    );
+    expect(
+      server.context.store.listMessages(conversation.id).at(-1),
+    ).toMatchObject({
+      role: "assistant",
+      content: "Content received before the proxy disconnected.",
+    });
+  });
+
   it("feeds a read result back as a tool message before persisting normal assistant text", async () => {
     const server = await application();
     const { conversation, worldbook } = workspaceFixture(server);

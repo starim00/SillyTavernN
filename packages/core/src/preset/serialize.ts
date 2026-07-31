@@ -243,6 +243,15 @@ function generationFields(
     format === "openai" ? "openai_max_tokens" : "max_length",
     generation.maxOutputTokens,
   );
+  if (format === "openai") {
+    set(output, "n", generation.n);
+    set(output, "openai_max_context", generation.additional.maxContextTokens);
+    set(
+      output,
+      "max_context_unlocked",
+      generation.additional.maxContextUnlocked,
+    );
+  }
   set(output, "seed", generation.seed);
   set(output, format === "novelai" ? "order" : "sampler_order", [
     ...generation.samplerOrder,

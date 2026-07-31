@@ -28,26 +28,31 @@ export const ProviderEventSchema = z.discriminatedUnion("type", [
   ProviderEventBaseSchema.extend({
     type: z.literal("text-delta"),
     delta: z.string(),
+    choiceIndex: z.number().int().nonnegative().optional(),
   }).strict(),
   ProviderEventBaseSchema.extend({
     type: z.literal("reasoning-delta"),
     delta: z.string(),
+    choiceIndex: z.number().int().nonnegative().optional(),
   }).strict(),
   ProviderEventBaseSchema.extend({
     type: z.literal("tool-call-start"),
     callId: EntityIdSchema,
     name: z.string().trim().min(1),
+    choiceIndex: z.number().int().nonnegative().optional(),
   }).strict(),
   ProviderEventBaseSchema.extend({
     type: z.literal("tool-call-delta"),
     callId: EntityIdSchema,
     argumentsDelta: z.string(),
+    choiceIndex: z.number().int().nonnegative().optional(),
   }).strict(),
   ProviderEventBaseSchema.extend({
     type: z.literal("tool-call-complete"),
     callId: EntityIdSchema,
     name: z.string().trim().min(1),
     arguments: JsonObjectSchema,
+    choiceIndex: z.number().int().nonnegative().optional(),
   }).strict(),
   ProviderEventBaseSchema.extend({
     type: z.literal("usage"),

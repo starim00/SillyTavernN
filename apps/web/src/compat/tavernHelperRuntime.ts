@@ -35,6 +35,20 @@ type RuntimeListener = {
   listener: EventListener;
   owner: RuntimeScript | null;
   once: boolean;
+  priority: number;
+  sequence: number;
+};
+
+type PersistRequest = {
+  namespace: TavernHelperStateNamespace;
+  variables: JsonRecord;
+  identifiers: {
+    messageId?: string;
+    sourceScope?: TavernHelperScope;
+    sourceId?: string;
+    scriptId?: string;
+    extensionId?: string;
+  };
 };
 
 const nativeRuntimeGlobals = new WeakSet<object>();
@@ -135,6 +149,12 @@ Object.defineProperty(scriptToastr, "options", {
 export type TavernHelperRuntimeAdapter = {
   connectionId: string;
   getMessages: () => WorkspaceMessage[];
+  createMessage: (input: {
+    content: string;
+    role: "user" | "assistant";
+    parentMessageId?: string;
+  }) => Promise<WorkspaceMessage>;
+  deleteMessage: (message: WorkspaceMessage) => Promise<void>;
   updateMessage: (
     message: WorkspaceMessage,
     content: string,
@@ -165,22 +185,87 @@ export type TavernHelperRuntimeAdapter = {
 
 const tavernEvents = {
   APP_READY: "app_ready",
+  EXTRAS_CONNECTED: "extras_connected",
   MESSAGE_SWIPED: "message_swiped",
   MESSAGE_SENT: "message_sent",
   MESSAGE_RECEIVED: "message_received",
   MESSAGE_EDITED: "message_edited",
   MESSAGE_DELETED: "message_deleted",
   MESSAGE_UPDATED: "message_updated",
+  MESSAGE_FILE_EMBEDDED: "message_file_embedded",
+  MESSAGE_REASONING_EDITED: "message_reasoning_edited",
+  MESSAGE_REASONING_DELETED: "message_reasoning_deleted",
+  MESSAGE_SWIPE_DELETED: "message_swipe_deleted",
+  MORE_MESSAGES_LOADED: "more_messages_loaded",
+  IMPERSONATE_READY: "impersonate_ready",
   CHAT_CHANGED: "chat_id_changed",
   GENERATION_AFTER_COMMANDS: "GENERATION_AFTER_COMMANDS",
   GENERATION_STARTED: "generation_started",
   GENERATION_STOPPED: "generation_stopped",
   GENERATION_ENDED: "generation_ended",
+  SD_PROMPT_PROCESSING: "sd_prompt_processing",
+  EXTENSIONS_FIRST_LOAD: "extensions_first_load",
+  EXTENSION_SETTINGS_LOADED: "extension_settings_loaded",
+  SETTINGS_LOADED: "settings_loaded",
+  SETTINGS_UPDATED: "settings_updated",
+  MOVABLE_PANELS_RESET: "movable_panels_reset",
+  SETTINGS_LOADED_BEFORE: "settings_loaded_before",
+  SETTINGS_LOADED_AFTER: "settings_loaded_after",
+  CHATCOMPLETION_SOURCE_CHANGED: "chatcompletion_source_changed",
+  CHATCOMPLETION_MODEL_CHANGED: "chatcompletion_model_changed",
+  OAI_PRESET_CHANGED_BEFORE: "oai_preset_changed_before",
+  OAI_PRESET_CHANGED_AFTER: "oai_preset_changed_after",
+  OAI_PRESET_EXPORT_READY: "oai_preset_export_ready",
+  OAI_PRESET_IMPORT_READY: "oai_preset_import_ready",
+  WORLDINFO_SETTINGS_UPDATED: "worldinfo_settings_updated",
+  WORLDINFO_UPDATED: "worldinfo_updated",
+  CHARACTER_EDITOR_OPENED: "character_editor_opened",
+  CHARACTER_EDITED: "character_edited",
+  CHARACTER_PAGE_LOADED: "character_page_loaded",
   USER_MESSAGE_RENDERED: "user_message_rendered",
   CHARACTER_MESSAGE_RENDERED: "character_message_rendered",
-  PRESET_CHANGED: "preset_changed",
-  WORLDINFO_UPDATED: "worldinfo_updated",
+  FORCE_SET_BACKGROUND: "force_set_background",
+  CHAT_DELETED: "chat_deleted",
+  CHAT_CREATED: "chat_created",
+  GENERATE_BEFORE_COMBINE_PROMPTS: "generate_before_combine_prompts",
+  GENERATE_AFTER_COMBINE_PROMPTS: "generate_after_combine_prompts",
+  GENERATE_AFTER_DATA: "generate_after_data",
   WORLD_INFO_ACTIVATED: "world_info_activated",
+  TEXT_COMPLETION_SETTINGS_READY: "text_completion_settings_ready",
+  CHAT_COMPLETION_SETTINGS_READY: "chat_completion_settings_ready",
+  CHAT_COMPLETION_PROMPT_READY: "chat_completion_prompt_ready",
+  CHARACTER_FIRST_MESSAGE_SELECTED: "character_first_message_selected",
+  CHARACTER_DELETED: "characterDeleted",
+  CHARACTER_DUPLICATED: "character_duplicated",
+  CHARACTER_RENAMED: "character_renamed",
+  CHARACTER_RENAMED_IN_PAST_CHAT: "character_renamed_in_past_chat",
+  SMOOTH_STREAM_TOKEN_RECEIVED: "stream_token_received",
+  STREAM_TOKEN_RECEIVED: "stream_token_received",
+  STREAM_REASONING_DONE: "stream_reasoning_done",
+  FILE_ATTACHMENT_DELETED: "file_attachment_deleted",
+  WORLDINFO_FORCE_ACTIVATE: "worldinfo_force_activate",
+  OPEN_CHARACTER_LIBRARY: "open_character_library",
+  ONLINE_STATUS_CHANGED: "online_status_changed",
+  IMAGE_SWIPED: "image_swiped",
+  CONNECTION_PROFILE_LOADED: "connection_profile_loaded",
+  CONNECTION_PROFILE_CREATED: "connection_profile_created",
+  CONNECTION_PROFILE_DELETED: "connection_profile_deleted",
+  CONNECTION_PROFILE_UPDATED: "connection_profile_updated",
+  TOOL_CALLS_PERFORMED: "tool_calls_performed",
+  TOOL_CALLS_RENDERED: "tool_calls_rendered",
+  CHARACTER_MANAGEMENT_DROPDOWN: "charManagementDropdown",
+  SECRET_WRITTEN: "secret_written",
+  SECRET_DELETED: "secret_deleted",
+  SECRET_ROTATED: "secret_rotated",
+  SECRET_EDITED: "secret_edited",
+  PRESET_CHANGED: "preset_changed",
+  PRESET_DELETED: "preset_deleted",
+  PRESET_RENAMED: "preset_renamed",
+  PRESET_RENAMED_BEFORE: "preset_renamed_before",
+  MAIN_API_CHANGED: "main_api_changed",
+  WORLDINFO_ENTRIES_LOADED: "worldinfo_entries_loaded",
+  WORLDINFO_SCAN_DONE: "worldinfo_scan_done",
+  MEDIA_ATTACHMENT_DELETED: "media_attachment_deleted",
 } as const;
 
 const iframeEvents = {
@@ -190,6 +275,14 @@ const iframeEvents = {
   STREAM_TOKEN_RECEIVED_FULLY: "js_stream_token_received_fully",
   STREAM_TOKEN_RECEIVED_INCREMENTALLY: "js_stream_token_received_incrementally",
   GENERATION_ENDED: "js_generation_ended",
+} as const;
+
+const mvuEvents = {
+  VARIABLE_INITIALIZED: "mag_variable_initialized",
+  VARIABLE_UPDATE_STARTED: "mag_variable_update_started",
+  COMMAND_PARSED: "mag_command_parsed",
+  VARIABLE_UPDATE_ENDED: "mag_variable_update_ended",
+  BEFORE_MESSAGE_UPDATE: "mag_before_message_update",
 } as const;
 
 function clone<T>(value: T): T {
@@ -225,6 +318,56 @@ export function resolveTavernHelperMessageVariables(
     Math.max(0, update.swipes_data.length - 1),
   );
   return asRecord(clone(update.swipes_data[resolvedIndex]));
+}
+
+export function shouldReconcileOpeningMessageVariables(
+  variables: Record<string, unknown>,
+): boolean {
+  return (
+    _.has(variables, "initialized_lorebooks") &&
+    _.has(variables, "stat_data") &&
+    _.isPlainObject(variables.stat_data) &&
+    _.isEmpty(variables.stat_data)
+  );
+}
+
+function isCrossConversationMvuState(
+  variables: Record<string, unknown> | undefined,
+): variables is Record<string, unknown> {
+  return (
+    variables !== undefined &&
+    (Object.hasOwn(variables, "stat_data") ||
+      Object.hasOwn(variables, "initialized_lorebooks"))
+  );
+}
+
+export function shouldSeedOpeningMessageVariables(
+  message: Pick<WorkspaceMessage, "role"> | undefined,
+  messageVariables: Record<string, unknown> | undefined,
+  characterVariables: Record<string, unknown>,
+): boolean {
+  return (
+    message?.role === "assistant" &&
+    messageVariables === undefined &&
+    isCrossConversationMvuState(characterVariables)
+  );
+}
+
+export function shouldEnsureAssistantStatusPlaceholder(
+  message: Pick<WorkspaceMessage, "role" | "content">,
+  variables: Record<string, unknown>,
+): boolean {
+  return (
+    message.role === "assistant" &&
+    _.has(variables, "stat_data") &&
+    _.isPlainObject(variables.stat_data) &&
+    !message.content.includes("<StatusPlaceHolderImpl/>")
+  );
+}
+
+export function appendAssistantStatusPlaceholder(content: string): string {
+  if (content.includes("<StatusPlaceHolderImpl/>")) return content;
+  return `${content.trimEnd()}\n\n<StatusPlaceHolderImpl/>`;
 }
 
 export function createTavernHelperMessageView(
@@ -300,7 +443,30 @@ export class TavernHelperRuntime {
     Array<{ name: string; visible: boolean }>
   >();
   private readonly extensionVariables = new Map<string, JsonRecord>();
+  private readonly variableSchemas = new Map<string, z.ZodType>();
+  private readonly macroLike = new Map<
+    string,
+    string | ((...values: string[]) => unknown)
+  >();
+  private readonly initializedGlobals = new Map<string, Promise<unknown>>();
+  private readonly scriptInfo = new Map<string, string>();
+  private readonly audio = new Map<
+    "bgm" | "ambient",
+    {
+      playlist: Array<{ title: string; url: string }>;
+      current: string;
+      settings: {
+        enabled: boolean;
+        mode: "repeat_one" | "repeat_all" | "shuffle" | "play_one_and_stop";
+        muted: boolean;
+        volume: number;
+      };
+      element: HTMLAudioElement | null;
+    }
+  >();
   private readonly persistTimers = new Map<string, number>();
+  private readonly pendingPersists = new Map<string, PersistRequest>();
+  private readonly activePersists = new Set<Promise<void>>();
   private readonly injections = new Map<
     string,
     {
@@ -316,7 +482,11 @@ export class TavernHelperRuntime {
   private readonly loadedScriptIds: string[] = [];
   private readonly errors: TavernHelperRuntimeStatus["errors"] = [];
   private readonly runtimeId = crypto.randomUUID();
+  private listenerSequence = 0;
   private activeScript: RuntimeScript | null = null;
+  private nativeMvuParser:
+    ((message: string, oldData: JsonRecord) => Promise<JsonRecord>) | null =
+    null;
   private disposed = false;
   private globalsCleanup: (() => void) | null = null;
 
@@ -337,6 +507,19 @@ export class TavernHelperRuntime {
         );
       }
     }
+    for (const type of ["bgm", "ambient"] as const) {
+      this.audio.set(type, {
+        playlist: [],
+        current: "",
+        settings: {
+          enabled: true,
+          mode: "repeat_all",
+          muted: false,
+          volume: 1,
+        },
+        element: null,
+      });
+    }
   }
 
   async start(): Promise<void> {
@@ -346,6 +529,7 @@ export class TavernHelperRuntime {
       errors: [],
     });
     this.globalsCleanup = this.installGlobals();
+    this.seedOpeningMessageVariables();
     for (const source of this.context.sources) {
       if (!source.trusted) continue;
       for (const script of source.bundle.scripts) {
@@ -364,6 +548,7 @@ export class TavernHelperRuntime {
       errors: [...this.errors],
     });
     await this.emit(tavernEvents.APP_READY);
+    await this.emit(tavernEvents.CHAT_CHANGED, this.context.conversation.id);
     void this.processOpeningAssistantMessage().catch((error) => {
       if (!this.disposed) {
         this.adapter.notify(
@@ -375,11 +560,14 @@ export class TavernHelperRuntime {
   }
 
   dispose(): void {
+    void this.flushPersistence();
     this.disposed = true;
-    for (const timer of this.persistTimers.values()) window.clearTimeout(timer);
-    this.persistTimers.clear();
     this.listeners.clear();
     this.injections.clear();
+    for (const audio of this.audio.values()) {
+      audio.element?.pause();
+      audio.element = null;
+    }
     this.globalsCleanup?.();
     this.globalsCleanup = null;
     this.adapter.onButtonsChanged([]);
@@ -391,6 +579,12 @@ export class TavernHelperRuntime {
       await this.withOwner(entry.owner, () => entry.listener(...values));
       if (entry.once) this.removeListener(event, entry.listener);
     }
+    if (
+      event === tavernEvents.MESSAGE_RECEIVED &&
+      typeof values[0] === "number"
+    ) {
+      await this.reconcileAssistantMessage(values[0]);
+    }
   }
 
   async clickButton(button: TavernHelperRuntimeButton): Promise<void> {
@@ -400,6 +594,59 @@ export class TavernHelperRuntime {
       button.scriptId,
     );
     await this.withOwner(owner, () => this.emit(this.buttonEvent(button.name)));
+  }
+
+  async processAssistantSwipe(
+    messageIndex: number,
+    expectedSwipeId?: string,
+  ): Promise<boolean> {
+    const messages = await this.adapter.refreshMessages();
+    const message = messages[messageIndex];
+    if (!message || message.role !== "assistant") return false;
+
+    if (expectedSwipeId !== undefined) {
+      const activeSwipe =
+        message.swipes?.[message.activeSwipeIndex ?? 0] ?? undefined;
+      if (activeSwipe?.id !== expectedSwipeId) return false;
+    }
+
+    const baseline = this.rollbackAssistantMessageVariables(
+      messageIndex,
+      messages,
+    );
+    try {
+      await this.emit(tavernEvents.MESSAGE_SWIPED, messageIndex);
+      const parsed = await this.parseAssistantSwipeVariables(
+        messageIndex,
+        message,
+        baseline,
+      );
+      if (parsed) {
+        await this.reconcileAssistantMessage(messageIndex);
+      } else {
+        await this.emit(
+          tavernEvents.MESSAGE_RECEIVED,
+          messageIndex,
+          "assistant",
+        );
+      }
+      await this.emit(
+        tavernEvents.CHARACTER_MESSAGE_RENDERED,
+        messageIndex,
+        "assistant",
+      );
+    } finally {
+      const processedMessage = this.adapter.getMessages()[messageIndex];
+      if (processedMessage) {
+        const variables =
+          this.context.variables.messages[processedMessage.id] ?? {};
+        this.queuePersist("message", variables, {
+          messageId: processedMessage.id,
+        });
+      }
+      await this.flushPersistence();
+    }
+    return true;
   }
 
   async activePromptInjections(): Promise<
@@ -477,36 +724,161 @@ export class TavernHelperRuntime {
 
   private async processOpeningAssistantMessage(): Promise<void> {
     const opening = this.adapter.getMessages();
-    if (
-      opening.length !== 1 ||
-      opening[0]?.role !== "assistant" ||
-      opening[0].content.includes("<StatusPlaceHolderImpl/>")
-    ) {
+    if (opening[0]?.role !== "assistant") {
       return;
     }
 
-    for (let attempt = 0; attempt < 100 && !this.disposed; attempt += 1) {
+    let initializationReconciled = false;
+    for (let attempt = 0; attempt < 600 && !this.disposed; attempt += 1) {
       const message = this.adapter.getMessages()[0];
-      if (
-        !message ||
-        message.role !== "assistant" ||
-        message.content.includes("<StatusPlaceHolderImpl/>")
-      ) {
+      if (!message || message.role !== "assistant") {
         return;
       }
       const variables = this.context.variables.messages[message.id] ?? {};
+      const needsInitializationReconciliation =
+        shouldReconcileOpeningMessageVariables(variables);
+      const initializationListeners =
+        this.listeners.get(mvuEvents.VARIABLE_INITIALIZED) ?? [];
+      if (
+        !initializationReconciled &&
+        initializationListeners.length > 0 &&
+        needsInitializationReconciliation
+      ) {
+        await this.emit(
+          mvuEvents.VARIABLE_INITIALIZED,
+          variables,
+          message.activeSwipeIndex ?? 0,
+        );
+        initializationReconciled = true;
+        this.replaceVariableStore(
+          { type: "message", message_id: 0 },
+          clone(variables),
+        );
+      }
+      if (message.content.includes("<StatusPlaceHolderImpl/>")) {
+        if (initializationReconciled || !needsInitializationReconciliation) {
+          await this.reconcileAssistantBacklog();
+          return;
+        }
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 20));
+        continue;
+      }
       const listeners = this.listeners.get(tavernEvents.MESSAGE_RECEIVED) ?? [];
-      if (_.has(variables, "stat_data") && listeners.length > 0) {
-        await this.emit(tavernEvents.MESSAGE_RECEIVED, 0, "assistant");
+      if (_.has(variables, "stat_data")) {
+        if (listeners.length > 0) {
+          await this.emit(tavernEvents.MESSAGE_RECEIVED, 0, "assistant");
+        } else {
+          await this.reconcileAssistantMessage(0);
+        }
         await this.emit(
           tavernEvents.CHARACTER_MESSAGE_RENDERED,
           0,
           "assistant",
         );
+        await this.reconcileAssistantBacklog();
         return;
       }
-      await new Promise<void>((resolve) => window.setTimeout(resolve, 20));
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 100));
     }
+  }
+
+  private async reconcileAssistantBacklog(): Promise<void> {
+    const messages = this.adapter.getMessages();
+    for (const [index, message] of messages.entries()) {
+      if (message.role !== "assistant") continue;
+      await this.reconcileAssistantMessage(index);
+    }
+  }
+
+  private rollbackAssistantMessageVariables(
+    messageIndex: number,
+    messages: WorkspaceMessage[],
+  ): JsonRecord | undefined {
+    const message = messages[messageIndex];
+    if (!message || message.role !== "assistant") return undefined;
+
+    for (let index = messageIndex - 1; index >= 0; index -= 1) {
+      const previousMessage = messages[index];
+      if (!previousMessage) continue;
+      const previousVariables =
+        this.context.variables.messages[previousMessage.id];
+      if (!previousVariables || !_.has(previousVariables, "stat_data")) {
+        continue;
+      }
+      const snapshot = clone(previousVariables);
+      this.context.variables.messages[message.id] = snapshot;
+      this.queuePersist("message", snapshot, { messageId: message.id });
+      return snapshot;
+    }
+    return undefined;
+  }
+
+  private async parseAssistantSwipeVariables(
+    messageIndex: number,
+    message: WorkspaceMessage,
+    baseline: JsonRecord | undefined,
+  ): Promise<boolean> {
+    if (baseline === undefined) return false;
+    const mvu = asRecord(
+      (window as unknown as Record<string, unknown>).Mvu,
+    ) as JsonRecord & {
+      parseMessage?: (
+        message: string,
+        oldData: JsonRecord,
+      ) => JsonRecord | Promise<JsonRecord>;
+    };
+    const parser = mvu.parseMessage;
+    if (typeof parser !== "function" || parser === this.nativeMvuParser) {
+      return false;
+    }
+    const parsed = asRecord(
+      await parser.call(mvu, message.content, clone(baseline)),
+    );
+    this.replaceVariableStore(
+      { type: "message", message_id: messageIndex },
+      parsed,
+    );
+    return true;
+  }
+
+  private async reconcileAssistantMessage(messageIndex: number): Promise<void> {
+    let messages = await this.adapter.refreshMessages();
+    let message = messages[messageIndex];
+    if (!message || message.role !== "assistant") return;
+
+    let variables = this.context.variables.messages[message.id] ?? {};
+    if (!_.has(variables, "stat_data")) {
+      for (let index = messageIndex - 1; index >= 0; index -= 1) {
+        const source = messages[index];
+        if (!source) continue;
+        const candidate = this.context.variables.messages[source.id] ?? {};
+        if (!_.has(candidate, "stat_data")) continue;
+        variables = clone(candidate);
+        this.context.variables.messages[message.id] = variables;
+        this.queuePersist("message", variables, { messageId: message.id });
+        break;
+      }
+    }
+
+    if (!shouldEnsureAssistantStatusPlaceholder(message, variables)) return;
+    const content = appendAssistantStatusPlaceholder(message.content);
+    try {
+      await this.adapter.updateMessage(message, content);
+    } catch {
+      messages = await this.adapter.refreshMessages();
+      message = messages[messageIndex];
+      if (
+        !message ||
+        !shouldEnsureAssistantStatusPlaceholder(message, variables)
+      ) {
+        return;
+      }
+      await this.adapter.updateMessage(
+        message,
+        appendAssistantStatusPlaceholder(message.content),
+      );
+    }
+    await this.adapter.refreshMessages();
   }
 
   private async withOwner<T>(
@@ -593,10 +965,21 @@ export class TavernHelperRuntime {
     event: string,
     listener: EventListener,
     once = false,
+    priority = 0,
   ): { stop: () => void } {
     const existing = this.listeners.get(event) ?? [];
     if (!existing.some((entry) => entry.listener === listener)) {
-      existing.push({ listener, owner: this.activeScript, once });
+      existing.push({
+        listener,
+        owner: this.activeScript,
+        once,
+        priority,
+        sequence: this.listenerSequence++,
+      });
+      existing.sort(
+        (left, right) =>
+          left.priority - right.priority || left.sequence - right.sequence,
+      );
       this.listeners.set(event, existing);
     }
     return { stop: () => this.removeListener(event, listener) };
@@ -704,12 +1087,54 @@ export class TavernHelperRuntime {
     option: VariableOption,
     variables: JsonRecord,
   ): void {
+    const schema =
+      this.variableSchemas.get(this.variableSchemaKey(option)) ??
+      (option.type === "message"
+        ? this.variableSchemas.get("message:*")
+        : undefined);
+    if (schema) {
+      const result = schema.safeParse(variables);
+      if (!result.success) {
+        throw new Error(
+          `Variable schema validation failed: ${result.error.message}`,
+        );
+      }
+      variables = asRecord(result.data);
+    }
     const target = this.variableStore(option);
     Object.keys(target.variables).forEach(
       (key) => delete target.variables[key],
     );
     Object.assign(target.variables, clone(variables));
     target.persist();
+  }
+
+  private seedOpeningMessageVariables(): void {
+    const opening = this.adapter.getMessages()[0];
+    if (
+      !shouldSeedOpeningMessageVariables(
+        opening,
+        opening ? this.context.variables.messages[opening.id] : undefined,
+        this.context.variables.character,
+      )
+    ) {
+      return;
+    }
+    if (!opening) return;
+    const variables = clone(this.context.variables.character);
+    this.context.variables.messages[opening.id] = variables;
+    this.queuePersist("message", variables, { messageId: opening.id });
+  }
+
+  private variableSchemaKey(option: VariableOption): string {
+    if (option.type === "message")
+      return option.message_id === undefined || option.message_id === "latest"
+        ? "message:*"
+        : `message:${String(option.message_id)}`;
+    if (option.type === "script")
+      return `script:${option.script_id ?? this.activeScript?.script.id ?? ""}`;
+    if (option.type === "extension") return `extension:${option.extension_id}`;
+    return option.type;
   }
 
   private queuePersist(
@@ -733,24 +1158,51 @@ export class TavernHelperRuntime {
     ]
       .filter(Boolean)
       .join(":");
+    const request: PersistRequest = {
+      namespace,
+      variables: clone(variables),
+      identifiers,
+    };
+    this.pendingPersists.set(key, request);
     const previous = this.persistTimers.get(key);
     if (previous !== undefined) window.clearTimeout(previous);
-    const snapshot = clone(variables);
     this.persistTimers.set(
       key,
       window.setTimeout(() => {
         this.persistTimers.delete(key);
         if (this.disposed) return;
-        void this.adapter
-          .saveState({ namespace, variables: snapshot, ...identifiers })
-          .catch((error) =>
-            this.adapter.notify(
-              `酒馆助手变量保存失败：${errorMessage(error)}`,
-              "warning",
-            ),
-          );
+        const pending = this.pendingPersists.get(key);
+        if (!pending) return;
+        this.pendingPersists.delete(key);
+        this.persistState(pending);
       }, 120),
     );
+  }
+
+  async flushPersistence(): Promise<void> {
+    for (const timer of this.persistTimers.values()) window.clearTimeout(timer);
+    this.persistTimers.clear();
+    const pending = [...this.pendingPersists.values()];
+    this.pendingPersists.clear();
+    pending.forEach((request) => this.persistState(request));
+    await Promise.all([...this.activePersists]);
+  }
+
+  private persistState(request: PersistRequest): void {
+    const operation = this.adapter
+      .saveState({
+        namespace: request.namespace,
+        variables: request.variables,
+        ...request.identifiers,
+      })
+      .catch((error) => {
+        this.adapter.notify(
+          `酒馆助手变量保存失败：${errorMessage(error)}`,
+          "warning",
+        );
+      });
+    this.activePersists.add(operation);
+    void operation.then(() => this.activePersists.delete(operation));
   }
 
   private publishButtons(): void {
@@ -791,6 +1243,7 @@ export class TavernHelperRuntime {
     updates: Array<Record<string, unknown> & { message_id: number }>,
   ): Promise<void> {
     const messages = this.adapter.getMessages();
+    const variableUpdateIndexes = new Set<number>();
     for (const update of updates) {
       const message = messages[update.message_id];
       if (!message) continue;
@@ -807,9 +1260,13 @@ export class TavernHelperRuntime {
       if (variables !== undefined) {
         this.context.variables.messages[message.id] = variables;
         this.queuePersist("message", variables, { messageId: message.id });
+        variableUpdateIndexes.add(update.message_id);
       }
     }
     await this.adapter.refreshMessages();
+    for (const messageIndex of variableUpdateIndexes) {
+      await this.reconcileAssistantMessage(messageIndex);
+    }
   }
 
   private async generate(config: JsonRecord): Promise<string> {
@@ -902,10 +1359,30 @@ export class TavernHelperRuntime {
       this.addListener(event, listener);
     const eventOnce = (event: string, listener: EventListener) =>
       this.addListener(event, listener, true);
+    const eventMakeFirst = (event: string, listener: EventListener) =>
+      this.addListener(event, listener, false, -1);
+    const eventMakeLast = (event: string, listener: EventListener) =>
+      this.addListener(event, listener, false, 1);
     const eventEmit = (event: string, ...values: unknown[]) =>
       this.emit(event, ...values);
     const getVariables = (option: VariableOption) =>
       clone(this.variableStore(option).variables);
+    const getAllVariables = () => {
+      const messages = this.adapter.getMessages();
+      return clone(
+        Object.assign(
+          {},
+          this.context.variables.global,
+          this.context.variables.character,
+          this.context.variables.preset,
+          this.context.variables.chat,
+          messages.length > 0
+            ? this.variableStore({ type: "message", message_id: "latest" })
+                .variables
+            : {},
+        ),
+      );
+    };
     const replaceVariables = (variables: JsonRecord, option: VariableOption) =>
       this.replaceVariableStore(option, asRecord(variables));
     const updateVariablesWith = async (
@@ -936,6 +1413,75 @@ export class TavernHelperRuntime {
       replaceVariables(result, option);
       return { variables: result, delete_occurred: deleteOccurred };
     };
+    const registerVariableSchema = (
+      schema: z.ZodType,
+      option: VariableOption = { type: "chat" },
+    ) => {
+      this.variableSchemas.set(this.variableSchemaKey(option), schema);
+      return {
+        unregister: () =>
+          this.variableSchemas.delete(this.variableSchemaKey(option)),
+      };
+    };
+    const registerMacroLike = (
+      name: string,
+      replacement: string | ((...values: string[]) => unknown),
+    ) => {
+      this.macroLike.set(name, replacement);
+      return { unregister: () => this.macroLike.delete(name) };
+    };
+    const unregisterMacroLike = (name: string) => this.macroLike.delete(name);
+    const initializeGlobal = (name: string, value: unknown) => {
+      global[name] = value;
+      installed.set(name, value);
+      if (
+        (typeof value === "object" && value !== null) ||
+        typeof value === "function"
+      ) {
+        nativeRuntimeGlobals.add(value as object);
+      }
+      const initialized = Promise.resolve(value);
+      this.initializedGlobals.set(name, initialized);
+      void this.emit(`global_${name}_initialized`, value);
+    };
+    const waitGlobalInitialized = async (name: string) => {
+      if (Object.prototype.hasOwnProperty.call(global, name)) return;
+      await new Promise<void>((resolve) => {
+        this.addListener(`global_${name}_initialized`, () => resolve(), true);
+      });
+    };
+    const nativeMvuParser = async (_message: string, oldData: JsonRecord) =>
+      clone(oldData);
+    this.nativeMvuParser = nativeMvuParser;
+    const mvu = {
+      events: mvuEvents,
+      getMvuData: (
+        option: VariableOption = { type: "message", message_id: "latest" },
+      ) => getVariables(option),
+      replaceMvuData: async (
+        variables: JsonRecord,
+        option: VariableOption = { type: "message", message_id: "latest" },
+      ) => {
+        const before = getVariables(option);
+        await this.emit(mvuEvents.VARIABLE_UPDATE_STARTED, before);
+        replaceVariables(variables, option);
+        const updated = getVariables(option);
+        await this.emit(mvuEvents.VARIABLE_UPDATE_ENDED, updated, before);
+        await this.emit(mvuEvents.BEFORE_MESSAGE_UPDATE, {
+          variables: updated,
+          message_content: "",
+        });
+        document.dispatchEvent(
+          new CustomEvent(mvuEvents.VARIABLE_UPDATE_ENDED, {
+            detail: clone(updated),
+          }),
+        );
+        return updated;
+      },
+      parseMessage: nativeMvuParser,
+      isDuringExtraAnalysis: () => false,
+    };
+    this.initializedGlobals.set("Mvu", Promise.resolve(mvu));
     const getScriptButtons = () =>
       clone(this.buttons.get(this.requireActiveScript().key) ?? []);
     const replaceScriptButtons = (
@@ -971,6 +1517,61 @@ export class TavernHelperRuntime {
         ...buttons.filter((button) => !names.has(button.name)),
       ]);
     };
+    const audioState = (type: "bgm" | "ambient") => this.audio.get(type)!;
+    const playAudio = (
+      type: "bgm" | "ambient",
+      item: { title?: string; url: string },
+    ) => {
+      const state = audioState(type);
+      const title =
+        item.title ||
+        decodeURIComponent(item.url.split("/").at(-1) ?? item.url);
+      if (
+        !state.playlist.some(
+          (candidate) =>
+            candidate.url === item.url || candidate.title === title,
+        )
+      ) {
+        state.playlist.push({ title, url: item.url });
+      }
+      state.current = item.url;
+      state.element?.pause();
+      const element = new Audio(item.url);
+      element.muted = state.settings.muted;
+      element.volume = _.clamp(state.settings.volume, 0, 1);
+      state.element = element;
+      if (state.settings.enabled) void element.play().catch(() => undefined);
+    };
+    const pauseAudio = (type: "bgm" | "ambient") =>
+      audioState(type).element?.pause();
+    const replaceAudioList = (
+      type: "bgm" | "ambient",
+      items: Array<{ title?: string; url: string }>,
+    ) => {
+      audioState(type).playlist = items.map((item) => ({
+        title:
+          item.title ||
+          decodeURIComponent(item.url.split("/").at(-1) ?? item.url),
+        url: item.url,
+      }));
+    };
+    const appendAudioList = (
+      type: "bgm" | "ambient",
+      items: Array<{ title?: string; url: string }>,
+    ) => {
+      const state = audioState(type);
+      const urls = new Set(state.playlist.map((item) => item.url));
+      state.playlist.push(
+        ...items
+          .filter((item) => !urls.has(item.url))
+          .map((item) => ({
+            title:
+              item.title ||
+              decodeURIComponent(item.url.split("/").at(-1) ?? item.url),
+            url: item.url,
+          })),
+      );
+    };
     const getChatMessages = (
       range: string | number,
       option: {
@@ -999,6 +1600,91 @@ export class TavernHelperRuntime {
                 "swipes_info",
               ),
         );
+    };
+    const createChatMessages = async (
+      messages: Array<{
+        role: "system" | "assistant" | "user";
+        message: string;
+        data?: JsonRecord;
+      }>,
+      option: {
+        insert_at?: number | "end";
+        insert_before?: number | "end";
+      } = {},
+    ) => {
+      const insertBefore = option.insert_at ?? option.insert_before ?? "end";
+      if (
+        insertBefore !== "end" &&
+        insertBefore !== this.adapter.getMessages().length
+      ) {
+        throw new Error(
+          "SillyTavernN currently persists new script messages at the end of the conversation; middle insertion is unavailable.",
+        );
+      }
+      for (const input of messages) {
+        if (input.role === "system") {
+          throw new Error(
+            "Creating a visible system floor is unsupported because SillyTavernN keeps system prompts outside the user/assistant transcript.",
+          );
+        }
+        const created = await this.adapter.createMessage({
+          role: input.role,
+          content: String(input.message),
+          ...(this.adapter.getMessages().at(-1)?.id
+            ? { parentMessageId: this.adapter.getMessages().at(-1)!.id }
+            : {}),
+        });
+        if (input.data !== undefined) {
+          const variables = asRecord(clone(input.data));
+          this.context.variables.messages[created.id] = variables;
+          this.queuePersist("message", variables, { messageId: created.id });
+        }
+        const floor = this.adapter.getMessages().length - 1;
+        await this.emit(
+          input.role === "user"
+            ? tavernEvents.MESSAGE_SENT
+            : tavernEvents.MESSAGE_RECEIVED,
+          floor,
+          "extension",
+        );
+        await this.emit(
+          input.role === "user"
+            ? tavernEvents.USER_MESSAGE_RENDERED
+            : tavernEvents.CHARACTER_MESSAGE_RENDERED,
+          floor,
+        );
+      }
+      await this.adapter.refreshMessages();
+    };
+    const deleteChatMessages = async (messageIds: number[]) => {
+      const current = this.adapter.getMessages();
+      const normalized = [
+        ...new Set(
+          messageIds
+            .map((id) => (id < 0 ? current.length + id : id))
+            .filter(
+              (id) => Number.isInteger(id) && id >= 0 && id < current.length,
+            ),
+        ),
+      ].sort((left, right) => right - left);
+      for (const floor of normalized) {
+        const message = this.adapter.getMessages()[floor];
+        if (!message) continue;
+        await this.adapter.deleteMessage(message);
+        delete this.context.variables.messages[message.id];
+        await this.emit(tavernEvents.MESSAGE_DELETED, floor);
+      }
+      await this.adapter.refreshMessages();
+    };
+    const rotateChatMessages = async (
+      begin: number,
+      middle: number,
+      end: number,
+    ) => {
+      if (begin === middle || middle === end) return;
+      throw new Error(
+        "Rotating persisted chat floors is unavailable because SillyTavernN preserves stable message identities and parent links.",
+      );
     };
     const worldbooks = this.context.worldbooks ?? [];
     const getLorebookSettings = () => ({
@@ -1171,12 +1857,56 @@ export class TavernHelperRuntime {
       });
       return { uninject: () => this.injections.delete(id) };
     };
+    const substituteMacros = (text: string) => {
+      if (this.context.settings?.developer.macrosEnabled === false) return text;
+      let result = text
+        .replaceAll(
+          "{{lastMessageId}}",
+          String(this.adapter.getMessages().length - 1),
+        )
+        .replaceAll(
+          "{{char}}",
+          this.context.sources.find((source) => source.scope === "card")
+            ?.name ?? "",
+        );
+      for (const [name, replacement] of this.macroLike) {
+        const pattern = new RegExp(
+          `\\{\\{${name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}(?:::(.*?))?\\}\\}`,
+          "gu",
+        );
+        result = result.replace(pattern, (_match, parameter: string = "") =>
+          String(
+            typeof replacement === "function"
+              ? replacement(...parameter.split("::"))
+              : replacement,
+          ),
+        );
+      }
+      return result;
+    };
+    const cardSources = this.context.sources.filter(
+      (source) => source.scope === "card",
+    );
+    const presetSources = this.context.sources.filter(
+      (source) => source.scope === "preset",
+    );
     const helper = {
       getChatMessages,
       setChatMessages: (
         messages: Array<Record<string, unknown> & { message_id: number }>,
       ) => this.setChatMessages(messages),
+      setChatMessage: (
+        values: { message?: string; data?: JsonRecord },
+        messageId: number,
+      ) => this.setChatMessages([{ message_id: messageId, ...values }]),
+      createChatMessages,
+      deleteChatMessages,
+      rotateChatMessages,
       getLastMessageId: () => this.adapter.getMessages().length - 1,
+      getMessageId: () => this.adapter.getMessages().length - 1,
+      getCurrentMessageId: () => this.adapter.getMessages().length - 1,
+      getAllVariables,
+      registerVariableSchema,
       getLorebookSettings,
       setLorebookSettings: () => undefined,
       getLorebooks: () => worldbooks.map((worldbook) => worldbook.name),
@@ -1204,6 +1934,12 @@ export class TavernHelperRuntime {
         )?.name ?? null,
       getLorebookEntries,
       getWorldbook: getLorebookEntries,
+      getCharacterNames: () => cardSources.map((source) => source.name),
+      getCharacterIds: () => cardSources.map((source) => source.id),
+      getCurrentCharacterName: () => cardSources[0]?.name ?? null,
+      getCurrentCharacterId: () => cardSources[0]?.id ?? null,
+      getPresetNames: () => presetSources.map((source) => source.name),
+      getLoadedPresetName: () => presetSources[0]?.name ?? "",
       getVariables,
       replaceVariables,
       updateVariablesWith,
@@ -1215,22 +1951,50 @@ export class TavernHelperRuntime {
       injectPrompts,
       uninjectPrompts: (ids: string[]) =>
         ids.forEach((id) => this.injections.delete(id)),
+      registerMacroLike,
+      unregisterMacroLike,
+      initializeGlobal,
+      waitGlobalInitialized,
+      playAudio,
+      pauseAudio,
+      getAudioList: (type: "bgm" | "ambient") =>
+        clone(audioState(type).playlist),
+      replaceAudioList,
+      appendAudioList,
+      getAudioSettings: (type: "bgm" | "ambient") =>
+        clone(audioState(type).settings),
+      setAudioSettings: (
+        type: "bgm" | "ambient",
+        settings: Partial<{
+          enabled: boolean;
+          mode: "repeat_one" | "repeat_all" | "shuffle" | "play_one_and_stop";
+          muted: boolean;
+          volume: number;
+        }>,
+      ) => {
+        Object.assign(audioState(type).settings, settings);
+        const element = audioState(type).element;
+        if (element) {
+          element.muted = audioState(type).settings.muted;
+          element.volume = _.clamp(audioState(type).settings.volume, 0, 1);
+        }
+      },
+      getCurrentAudio: (type: "bgm" | "ambient") => {
+        const state = audioState(type);
+        const current = state.playlist.find(
+          (item) => item.url === state.current,
+        );
+        return {
+          src: state.current,
+          title: current?.title ?? "",
+          playing: state.element ? !state.element.paused : false,
+          progress: state.element?.currentTime ?? 0,
+        };
+      },
       getTavernHelperVersion: () => "4.8.19-native",
       getTavernHelperExtensionId: () => "stn-native-tavern-helper",
       getTavernVersion: () => "SillyTavernN",
-      substitudeMacros: (text: string) =>
-        this.context.settings?.developer.macrosEnabled === false
-          ? text
-          : text
-              .replaceAll(
-                "{{lastMessageId}}",
-                String(this.adapter.getMessages().length - 1),
-              )
-              .replaceAll(
-                "{{char}}",
-                this.context.sources.find((source) => source.scope === "card")
-                  ?.name ?? "",
-              ),
+      substitudeMacros: substituteMacros,
       errorCatched:
         <T extends unknown[], R>(fn: (...args: T) => R) =>
         (...args: T) => {
@@ -1250,14 +2014,40 @@ export class TavernHelperRuntime {
       appendInexistentScriptButtons,
       getScriptId: () => this.requireActiveScript().script.id,
       getScriptName: () => this.requireActiveScript().script.name,
-      getScriptInfo: () => this.requireActiveScript().script.info,
+      getScriptInfo: () => {
+        const owner = this.requireActiveScript();
+        return this.scriptInfo.get(owner.key) ?? owner.script.info;
+      },
+      replaceScriptInfo: (info: string) => {
+        const owner = this.requireActiveScript();
+        this.scriptInfo.set(owner.key, String(info));
+      },
+      getAllEnabledScriptButtons: () =>
+        Object.fromEntries(
+          this.context.sources.flatMap((source) =>
+            source.bundle.scripts
+              .filter((script) => source.trusted && script.enabled)
+              .map((script) => {
+                const key = scriptKey(source.scope, source.id, script.id);
+                return [
+                  script.id,
+                  (this.buttons.get(key) ?? [])
+                    .filter((button) => button.visible)
+                    .map((button, index) => ({
+                      button_id: `${key}:${String(index)}`,
+                      button_name: button.name,
+                    })),
+                ];
+              }),
+          ),
+        ),
     };
     const eventApi = {
       eventOn,
       eventOnButton: eventOn,
       eventOnce,
-      eventMakeFirst: eventOn,
-      eventMakeLast: eventOn,
+      eventMakeFirst,
+      eventMakeLast,
       eventEmit,
       eventEmitAndWait: eventEmit,
       eventRemoveListener: (event: string, listener: EventListener) =>
@@ -1268,6 +2058,50 @@ export class TavernHelperRuntime {
           this.removeListener(event, listener);
       },
       eventClearAll: () => this.listeners.clear(),
+    };
+    const tavernHelperObject = {
+      ...helper,
+      ...scriptApi,
+      ...eventApi,
+      tavern_events: tavernEvents,
+      iframe_events: iframeEvents,
+      _bind: {
+        _eventOn: eventOn,
+        _eventOnButton: eventOn,
+        _eventMakeFirst: eventMakeFirst,
+        _eventMakeLast: eventMakeLast,
+        _eventOnce: eventOnce,
+        _eventEmit: eventEmit,
+        _eventEmitAndWait: eventEmit,
+        _eventRemoveListener: (event: string, listener: EventListener) =>
+          this.removeListener(event, listener),
+        _eventClearEvent: (event: string) => this.listeners.delete(event),
+        _eventClearListener: (listener: EventListener) => {
+          for (const event of this.listeners.keys())
+            this.removeListener(event, listener);
+        },
+        _eventClearAll: () => this.listeners.clear(),
+        _initializeGlobal: initializeGlobal,
+        _waitGlobalInitialized: waitGlobalInitialized,
+        _registerMacroLike: registerMacroLike,
+        _getButtonEvent: scriptApi.getButtonEvent,
+        _getScriptButtons: getScriptButtons,
+        _replaceScriptButtons: replaceScriptButtons,
+        _updateScriptButtonsWith: updateScriptButtonsWith,
+        _appendInexistentScriptButtons: appendInexistentScriptButtons,
+        _getScriptName: scriptApi.getScriptName,
+        _getScriptInfo: scriptApi.getScriptInfo,
+        _replaceScriptInfo: scriptApi.replaceScriptInfo,
+        _getVariables: getVariables,
+        _getAllVariables: getAllVariables,
+        _replaceVariables: replaceVariables,
+        _updateVariablesWith: updateVariablesWith,
+        _insertOrAssignVariables: insertOrAssignVariables,
+        _insertVariables: insertVariables,
+        _deleteVariable: deleteVariable,
+        _getScriptId: scriptApi.getScriptId,
+        _getCurrentMessageId: helper.getCurrentMessageId,
+      },
     };
     const popupType = {
       TEXT: 1,
@@ -1344,12 +2178,11 @@ export class TavernHelperRuntime {
     expose("YAML", YAML);
     expose("z", z);
     expose("toastr", scriptToastr);
-    expose("TavernHelper", { ...helper, ...scriptApi, ...eventApi });
+    expose("Mvu", mvu);
+    expose("TavernHelper", tavernHelperObject);
     expose("SillyTavern", sillyTavern);
-    expose("tavern_events", tavernEvents);
-    expose("iframe_events", iframeEvents);
-    Object.entries({ ...helper, ...scriptApi, ...eventApi }).forEach(
-      ([name, value]) => expose(name, value),
+    Object.entries(tavernHelperObject).forEach(([name, value]) =>
+      expose(name, value),
     );
     return () => {
       roster.querySelectorAll("[data-stn-native-runtime]").forEach((item) => {

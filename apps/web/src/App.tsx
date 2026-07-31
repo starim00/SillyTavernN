@@ -10,6 +10,7 @@ import {
   PuzzlePiece,
   SlidersHorizontal,
   UploadSimple,
+  UserCircle,
 } from "@phosphor-icons/react";
 import {
   useCallback,
@@ -26,10 +27,14 @@ import {
   cancelAgentRun,
   confirmAgentProposal,
   createConversationSpace as createConversationSpaceOnServer,
+  createPersona,
   createMessageSwipe,
   createMessage,
+  createTavernHelperMessage,
+  deleteConversationSpace,
   deletePromptPreset,
   deleteRoleCard,
+  deletePersona,
   deleteWorkspaceMessage,
   generateConversation,
   generateWithTavernHelper,
@@ -51,18 +56,22 @@ import {
   saveTavernHelperSettings,
   saveRegexScope as saveRegexScopeOnServer,
   selectMessageSwipe,
+  setConversationPersona,
   setLegacyPluginEnabled,
   undoAgentProposal,
   updateLegacyGrant,
   updatePresetPrompt,
+  updatePresetGeneration,
   updateRegexGrant,
   updateTavernHelperGrant,
   updateWorldbookEntry,
   updateWorkspaceMessage,
   updateWorldbookEntryPermission,
+  updatePersona,
   saveTavernHelperState,
   type LegacyHostPluginStatus,
   WorkspaceApiError,
+  type PersonaInput,
 } from "./api/workspaceApi";
 import { renderPromptTemplateMessages } from "./compat/promptTemplateEngine";
 import {
@@ -83,9 +92,13 @@ import {
   LegacyRealmBridge,
   type LegacyRealmStatus,
 } from "./components/LegacyRealmBridge";
-import { MessageStream } from "./components/MessageStream";
+import {
+  clearMessageFrameStorage,
+  MessageStream,
+} from "./components/MessageStream";
 import { NavigationRail } from "./components/NavigationRail";
 import { PresetSettingsRail } from "./components/PresetSettingsRail";
+import type { PresetGenerationPatch } from "./components/PresetGenerationControls";
 import {
   TavernHelperWorkbench,
   type TavernHelperTool,
@@ -99,6 +112,7 @@ import type {
   PromptPreset,
   ProviderConnection,
   ProviderConnectionInput,
+  Persona,
   RegexScope,
   RegexScriptDefinition,
   RoleCard,
@@ -159,6 +173,7 @@ export default function App() {
     loadWorkspaceState,
   );
   const generationControllerRef = useRef<AbortController | null>(null);
+  const swipeSelectionQueueRef = useRef<Promise<void>>(Promise.resolve());
   const initialPresetIdRef = useRef(state.selectedPresetId);
   const workspaceStateRef = useRef(state);
   workspaceStateRef.current = state;
@@ -317,6 +332,7 @@ export default function App() {
     state.draftByConversation,
     state.loading,
     state.messagesByConversation,
+    state.personas,
     state.participants,
     state.plugins,
     state.selectedCardId,
@@ -407,6 +423,10 @@ export default function App() {
     state.providerConnections.find(
       (provider) => provider.id === state.selectedProviderId,
     ) ?? null;
+  const activePersona =
+    state.personas.find((persona) => persona.id === conversation?.personaId) ??
+    state.personas.find((persona) => persona.isDefault) ??
+    null;
 
   useEffect(() => {
     if (!state.apiOnline || !conversation) return;
@@ -441,9 +461,102 @@ export default function App() {
     [],
   );
 
-  const selectConversation = useCallback((id: string) => {
-    dispatch({ type: "conversation/select", id });
-  }, []);
+  const selectConversation = useCallback(
+    async (id: string) => {
+      if (id === state.selectedConversationId) return;
+      await tavernHelperRuntimeRef.current?.flushPersistence();
+      dispatch({ type: "conversation/select", id });
+    },
+    [state.selectedConversationId],
+  );
+
+  const selectPersona = useCallback(
+    async (persona: Persona) => {
+      if (!conversation) return;
+      if (conversation.personaId === persona.id) {
+        dispatch({ type: "modal/set", modal: { kind: "closed" } });
+        return;
+      }
+      if (state.apiOnline) {
+        try {
+          const updated = await setConversationPersona(
+            conversation,
+            persona.id,
+          );
+          dispatch({ type: "conversation/persona", conversation: updated });
+          dispatch({ type: "modal/set", modal: { kind: "closed" } });
+          showToast(`当前对话已切换为“${persona.name}”。`, "success");
+        } catch {
+          showToast("人设切换失败；当前对话没有改变。", "warning");
+        }
+        return;
+      }
+      dispatch({
+        type: "conversation/persona",
+        conversation: {
+          ...conversation,
+          personaId: persona.id,
+          revision: (conversation.revision ?? 1) + 1,
+        },
+      });
+      dispatch({ type: "modal/set", modal: { kind: "closed" } });
+      showToast(`当前对话已切换为“${persona.name}”。`, "success");
+    },
+    [conversation, showToast, state.apiOnline],
+  );
+
+  const savePersona = useCallback(
+    async (input: PersonaInput, current?: Persona) => {
+      if (!state.apiOnline) {
+        showToast("连接本地服务后才能保存用户人设。", "warning");
+        throw new Error("Persona storage is offline");
+      }
+      try {
+        const saved = current
+          ? await updatePersona(current, input)
+          : await createPersona(input);
+        dispatch({ type: "persona/replace", persona: saved });
+        showToast(
+          current
+            ? `人设“${saved.name}”已保存。`
+            : `人设“${saved.name}”已创建。`,
+          "success",
+        );
+      } catch (error) {
+        showToast("人设保存失败；服务器内容没有改变。", "warning");
+        throw error;
+      }
+    },
+    [showToast, state.apiOnline],
+  );
+
+  const removePersona = useCallback(
+    async (persona: Persona) => {
+      if (!state.apiOnline) {
+        showToast("离线工作区不能删除服务器人设。", "warning");
+        return;
+      }
+      if (
+        !window.confirm(
+          `永久删除人设“${persona.name}”？当前使用它的对话会回退到默认人设。`,
+        )
+      ) {
+        return;
+      }
+      try {
+        await deletePersona({
+          personaId: persona.id,
+          expectedRevision: persona.revision,
+        });
+        const payload = await loadWorkspaceFromApi(state.selectedPresetId);
+        dispatch({ type: "bootstrap/api", payload });
+        showToast(`人设“${persona.name}”已删除。`, "success");
+      } catch {
+        showToast("人设删除失败；服务器内容没有改变。", "warning");
+      }
+    },
+    [showToast, state.apiOnline, state.selectedPresetId],
+  );
 
   const refreshMessages = useCallback(
     async (conversationId: string) => {
@@ -497,6 +610,18 @@ export default function App() {
             workspaceStateRef.current.messagesByConversation[
               context.conversation.id
             ] ?? [],
+          createMessage: async (input) => {
+            const created = await createTavernHelperMessage(
+              context.conversation.id,
+              input,
+            );
+            await refreshMessages(context.conversation.id);
+            return created;
+          },
+          deleteMessage: async (message) => {
+            await deleteWorkspaceMessage(message.id, message.revision);
+            await refreshMessages(context.conversation.id);
+          },
           updateMessage: async (message, content) => {
             const updated = await updateWorkspaceMessage(message, content);
             if (active) dispatch({ type: "message/replace", message: updated });
@@ -626,6 +751,7 @@ export default function App() {
         const runtime = tavernHelperRuntimeRef.current;
         await runtime?.emit("GENERATION_AFTER_COMMANDS");
         await runtime?.emit("generation_started");
+        await runtime?.emit("js_generation_started");
         const scriptInjections =
           (await runtime?.activePromptInjections()) ?? [];
         const preparedTemplate = await preparePromptTemplate({
@@ -658,8 +784,13 @@ export default function App() {
           },
           {
             onGenerationId: (id) => dispatch({ type: "generation/id", id }),
-            onTextDelta: (delta) =>
-              dispatch({ type: "generation/delta", delta }),
+            onTextDelta: (delta) => {
+              dispatch({ type: "generation/delta", delta });
+              void runtime?.emit(
+                "js_stream_token_received_incrementally",
+                delta,
+              );
+            },
             onToolProposal: (event) => {
               try {
                 const proposal = proposalFromGenerationToolEvent(
@@ -691,16 +822,25 @@ export default function App() {
             surfacedToolProposal ? "success" : "warning",
           );
           await runtime?.emit("generation_ended");
+          await runtime?.emit("js_generation_ended");
           return;
         }
 
         if (input.mode === "regenerate" && input.targetMessage) {
           try {
-            await createMessageSwipe(
-              input.targetMessage.id,
+            const alternatives = [
               receipt.content,
-              true,
-            );
+              ...("alternatives" in receipt
+                ? (receipt.alternatives ?? [])
+                : []),
+            ];
+            for (const [index, alternative] of alternatives.entries()) {
+              await createMessageSwipe(
+                input.targetMessage.id,
+                alternative,
+                index === 0,
+              );
+            }
           } catch (error) {
             await deleteWorkspaceMessage(
               receipt.messageId,
@@ -720,32 +860,75 @@ export default function App() {
             : refreshedMessages.length - 1;
         if (responseIndex >= 0) {
           if (input.mode === "regenerate") {
-            await runtime?.emit("message_swiped", responseIndex);
+            const response = refreshedMessages[responseIndex];
+            const activeSwipe =
+              response?.swipes?.[response.activeSwipeIndex ?? 0];
+            try {
+              await runtime?.processAssistantSwipe(
+                responseIndex,
+                activeSwipe?.id,
+              );
+            } catch (error) {
+              showToast(
+                `新的 Swipe 已保存，但变量回退或解析失败：${
+                  error instanceof Error ? error.message : String(error)
+                }`,
+                "warning",
+              );
+            }
           } else {
             await runtime?.emit("message_received", responseIndex, "assistant");
+            await runtime?.emit(
+              "character_message_rendered",
+              responseIndex,
+              "assistant",
+            );
           }
-          await runtime?.emit(
-            "character_message_rendered",
-            responseIndex,
-            "assistant",
-          );
         }
         await runtime?.emit("generation_ended", receipt.content);
-        showToast(
-          input.mode === "regenerate"
-            ? "新的 Swipe 已完整生成并保存。"
-            : "Provider 回复已完整生成并保存。",
-          "success",
-        );
+        await runtime?.emit("js_stream_token_received_fully", receipt.content);
+        await runtime?.emit("js_generation_ended", receipt.content);
+        if (receipt.incomplete) {
+          const reason =
+            receipt.reason === "length"
+              ? "模型达到最大输出长度"
+              : receipt.reason === "cancelled"
+                ? "生成已停止"
+                : receipt.errorMessage || "Provider 连接中断";
+          showToast(
+            `回复未完整结束（${reason}），已生成的内容已经保留。`,
+            "warning",
+          );
+        } else {
+          showToast(
+            input.mode === "regenerate"
+              ? "新的 Swipe 已完整生成并保存。"
+              : "Provider 回复已完整生成并保存。",
+            "success",
+          );
+        }
       } catch (error) {
         await tavernHelperRuntimeRef.current?.emit("generation_stopped");
+        await tavernHelperRuntimeRef.current?.emit(
+          "js_generation_ended",
+          undefined,
+          error,
+        );
+        await refreshMessages(input.conversationId).catch(() => undefined);
         if (
           error instanceof GenerationInterruptedError ||
           controller.signal.aborted
         ) {
-          showToast("生成已停止，未完成的临时预览没有写入消息记录。");
+          showToast("生成已停止；已接收的内容会保留在消息记录中。");
         } else {
-          showToast("生成失败，未完成的临时预览没有写入消息记录。", "warning");
+          const detail =
+            error instanceof Error
+              ? error.message.trim().slice(0, 240)
+              : "未知错误";
+          showToast(
+            `生成失败：${detail || "未知错误"}。已接收的内容会保留在消息记录中。`,
+            "warning",
+          );
         }
       } finally {
         if (generationControllerRef.current === controller) {
@@ -768,13 +951,14 @@ export default function App() {
     const controller = generationControllerRef.current;
     if (!controller) return;
     dispatch({ type: "generation/stopping" });
-    const stopRequest = state.generation.generationId
-      ? abortGeneration(state.generation.generationId)
-      : Promise.resolve();
-    controller.abort();
+    if (!state.generation.generationId) {
+      controller.abort();
+      return;
+    }
     try {
-      await stopRequest;
+      await abortGeneration(state.generation.generationId);
     } catch {
+      controller.abort();
       showToast("停止请求未得到确认，正在断开本次生成。", "warning");
     }
   }, [showToast, state.generation.generationId]);
@@ -937,24 +1121,57 @@ export default function App() {
   );
 
   const selectSwipe = useCallback(
-    async (message: WorkspaceMessage, index: number) => {
+    (message: WorkspaceMessage, index: number) => {
       const swipe = message.swipes?.[index];
-      if (!swipe) return;
-      if (state.apiOnline) {
-        try {
-          await selectMessageSwipe(message, swipe.id);
-          await refreshMessages(message.conversationId);
-          return;
-        } catch {
-          showToast("Swipe 切换失败；服务器状态没有改变。", "warning");
-          return;
-        }
+      if (!swipe) return Promise.resolve();
+      if (generationControllerRef.current) {
+        showToast("当前回复仍在生成，请完成或停止后再切换 Swipe。", "warning");
+        return Promise.resolve();
       }
-      dispatch({
-        type: "message/swipe-select",
-        messageId: message.id,
-        index,
+
+      const operation = swipeSelectionQueueRef.current.then(async () => {
+        if (state.apiOnline) {
+          const currentMessage = (
+            workspaceStateRef.current.messagesByConversation[
+              message.conversationId
+            ] ?? []
+          ).find((candidate) => candidate.id === message.id);
+          if (!currentMessage) return;
+          try {
+            await selectMessageSwipe(currentMessage, swipe.id);
+            const refreshed = await refreshMessages(message.conversationId);
+            const messageIndex = refreshed.findIndex(
+              (candidate) => candidate.id === message.id,
+            );
+            if (messageIndex < 0) return;
+            try {
+              await tavernHelperRuntimeRef.current?.processAssistantSwipe(
+                messageIndex,
+                swipe.id,
+              );
+            } catch (error) {
+              showToast(
+                `Swipe 已切换，但变量回退或解析失败：${
+                  error instanceof Error ? error.message : String(error)
+                }`,
+                "warning",
+              );
+            }
+            return;
+          } catch {
+            showToast("Swipe 切换失败；服务器状态没有改变。", "warning");
+            return;
+          }
+        }
+        dispatch({
+          type: "message/swipe-select",
+          messageId: message.id,
+          index,
+        });
       });
+
+      swipeSelectionQueueRef.current = operation.catch(() => undefined);
+      return operation;
     },
     [refreshMessages, showToast, state.apiOnline],
   );
@@ -968,6 +1185,7 @@ export default function App() {
         showToast("请先选择角色卡，再新建对话。", "warning");
         throw new Error("Card selection is required");
       }
+      await tavernHelperRuntimeRef.current?.flushPersistence();
       if (state.apiOnline) {
         let created: ConversationSpace;
         try {
@@ -1006,6 +1224,61 @@ export default function App() {
     [refreshMessages, showToast, state.apiOnline, state.cards],
   );
 
+  const removeConversation = useCallback(
+    async (target: ConversationSpace) => {
+      if (
+        state.generation.conversationId === target.id &&
+        state.generation.status !== "idle"
+      ) {
+        showToast(
+          "当前对话仍在生成，请先停止或等待生成完成后再删除。",
+          "warning",
+        );
+        return;
+      }
+      const accepted = window.confirm(
+        `永久删除“${target.title}”？该对话的消息、Swipe、聊天变量、消息变量、对话衍生数据和对话专属世界书绑定会一并删除；仍被其他范围使用的世界书不会受影响。`,
+      );
+      if (!accepted) return;
+
+      if (state.apiOnline) {
+        try {
+          await deleteConversationSpace({
+            conversationId: target.id,
+            expectedRevision: target.revision ?? 1,
+          });
+        } catch {
+          showToast("对话删除失败；服务器内容没有改变。", "warning");
+          return;
+        }
+      }
+
+      clearMessageFrameStorage(target.id);
+      dispatch({ type: "conversation/delete", id: target.id });
+
+      if (state.apiOnline) {
+        try {
+          const payload = await loadWorkspaceFromApi(state.selectedPresetId);
+          dispatch({ type: "bootstrap/api", payload });
+        } catch {
+          showToast(
+            "对话已删除，但工作区刷新失败；请重新载入页面。",
+            "warning",
+          );
+          return;
+        }
+      }
+      showToast(`对话“${target.title}”及其会话数据已删除。`, "success");
+    },
+    [
+      showToast,
+      state.apiOnline,
+      state.generation.conversationId,
+      state.generation.status,
+      state.selectedPresetId,
+    ],
+  );
+
   const openRoleCard = useCallback(
     async (cardId: string) => {
       const card = state.cards.find((candidate) => candidate.id === cardId);
@@ -1014,6 +1287,7 @@ export default function App() {
         (candidate) => candidate.cardId === cardId,
       );
       if (latestConversation) {
+        await tavernHelperRuntimeRef.current?.flushPersistence();
         dispatch({ type: "card/select", id: cardId });
         return;
       }
@@ -1328,6 +1602,36 @@ export default function App() {
     [showToast],
   );
 
+  const saveRenderedMessageVariables = useCallback(
+    (message: WorkspaceMessage, variables: Record<string, unknown>) => {
+      const snapshot = structuredClone(variables);
+      setTavernHelperContext((current) =>
+        current
+          ? {
+              ...current,
+              variables: {
+                ...current.variables,
+                messages: {
+                  ...current.variables.messages,
+                  [message.id]: snapshot,
+                },
+              },
+            }
+          : current,
+      );
+      void saveTavernHelperState({
+        conversationId: message.conversationId,
+        ...(state.selectedPresetId ? { presetId: state.selectedPresetId } : {}),
+        namespace: "message",
+        messageId: message.id,
+        variables: snapshot,
+      }).catch(() => {
+        showToast("状态栏变量保存失败；本次修改没有持久化。", "warning");
+      });
+    },
+    [showToast, state.selectedPresetId],
+  );
+
   const runTavernHelperButton = useCallback(
     async (button: TavernHelperRuntimeButton) => {
       try {
@@ -1616,6 +1920,61 @@ export default function App() {
     [showToast],
   );
 
+  const changePresetGeneration = useCallback(
+    async (patch: PresetGenerationPatch) => {
+      const currentState = workspaceStateRef.current;
+      const currentPreset = currentState.presets.find(
+        (candidate) => candidate.id === currentState.selectedPresetId,
+      );
+      if (!currentPreset) {
+        showToast("没有可更新的提示词预设。", "warning");
+        throw new Error("No selected preset");
+      }
+
+      if (currentState.apiOnline) {
+        try {
+          const updated = await updatePresetGeneration({
+            presetId: currentPreset.id,
+            expectedRevision: currentPreset.revision,
+            generation: patch,
+          });
+          dispatch({ type: "preset/replace", preset: updated });
+          showToast("预设生成参数已保存。", "success");
+          return;
+        } catch {
+          showToast("生成参数保存失败，服务器内容没有改变。", "warning");
+          throw new Error("Preset generation update failed");
+        }
+      }
+
+      const baseGeneration = currentPreset.generation ?? {
+        stop: [],
+        samplerOrder: [],
+        additional: {},
+      };
+      const generation = {
+        ...baseGeneration,
+        ...patch,
+        stop: patch.stop ?? baseGeneration.stop,
+        samplerOrder: patch.samplerOrder ?? baseGeneration.samplerOrder,
+        additional: {
+          ...baseGeneration.additional,
+          ...(patch.additional ?? {}),
+        },
+      };
+      dispatch({
+        type: "preset/replace",
+        preset: {
+          ...currentPreset,
+          generation,
+          revision: currentPreset.revision + 1,
+        },
+      });
+      showToast("离线演示中的生成参数已更新。", "success");
+    },
+    [showToast],
+  );
+
   const reorderPresetPrompts = useCallback(
     async (promptIds: string[]) => {
       const currentState = workspaceStateRef.current;
@@ -1830,6 +2189,8 @@ export default function App() {
         modal={state.modal}
         apiOnline={state.apiOnline}
         cards={state.cards}
+        personas={state.personas}
+        activePersonaId={activePersona?.id ?? null}
         plugins={state.plugins}
         legacyHostPlugins={legacyHostPlugins}
         worldbooks={state.worldbooks}
@@ -1840,6 +2201,9 @@ export default function App() {
         }
         onSelectCard={(id) => void openRoleCard(id)}
         onDeleteCard={(card) => void removeRoleCard(card)}
+        onSelectPersona={selectPersona}
+        onSavePersona={savePersona}
+        onDeletePersona={removePersona}
         onCreateConversation={createConversationSpace}
         onImport={importFile}
         onInstallPlugin={installPlugin}
@@ -1916,6 +2280,17 @@ export default function App() {
           >
             <PlugsConnected size={18} />
             <span>{selectedProvider?.name ?? "本地 Provider"}</span>
+          </button>
+          <button
+            className="topbar-button persona-button"
+            type="button"
+            aria-label="管理用户人设"
+            onClick={() =>
+              dispatch({ type: "modal/set", modal: { kind: "personas" } })
+            }
+          >
+            <UserCircle size={18} />
+            <span>{activePersona?.name ?? "用户人设"}</span>
           </button>
           <button
             className="topbar-button desktop-label"
@@ -1996,6 +2371,7 @@ export default function App() {
           onSavePrompt={(promptId, content) =>
             changePresetPrompt(promptId, { content })
           }
+          onSaveGeneration={changePresetGeneration}
           onInsertPrompt={(promptId) =>
             changePresetPrompt(promptId, { inserted: true })
           }
@@ -2011,16 +2387,24 @@ export default function App() {
             <div className="conversation-header__identity">
               <div>
                 <h1>{conversation.title}</h1>
-                <p>角色卡 · {selectedCard?.name}</p>
+                <p>
+                  角色卡 · {selectedCard?.name}
+                  {activePersona ? ` · 你是${activePersona.name}` : ""}
+                </p>
               </div>
             </div>
           </header>
 
           <MessageStream
             conversationId={conversation.id}
+            cardId={selectedCard?.id}
+            storageConversationIds={state.conversations
+              .filter((candidate) => candidate.cardId === selectedCard?.id)
+              .map((candidate) => candidate.id)}
             messages={messages}
             generation={state.generation}
             helperRenderSettings={tavernHelperContext?.settings?.render}
+            variablesByMessage={tavernHelperContext?.variables.messages}
             onCopy={copyMessage}
             onUpdate={updateMessage}
             onDelete={deleteMessage}
@@ -2028,6 +2412,7 @@ export default function App() {
             onContinue={continueFromMessage}
             onSelectSwipe={selectSwipe}
             onEmbeddedSend={(content) => void sendMessageContent(content)}
+            onVariablesChange={saveRenderedMessageVariables}
           />
 
           <ConversationComposer
@@ -2059,6 +2444,7 @@ export default function App() {
               })
             }
             onSelectConversation={selectConversation}
+            onDeleteConversation={(target) => void removeConversation(target)}
             onCreateConversation={() =>
               dispatch({
                 type: "modal/set",
@@ -2101,15 +2487,30 @@ export default function App() {
             setTavernHelperRevision((revision) => revision + 1);
             showToast("变量已保存。", "success");
           }}
-          onLoadPrompt={() =>
-            preparePromptTemplate({
+          onLoadPrompt={async () => {
+            const prepared = await preparePromptTemplate({
               conversationId: conversation.id,
               connectionId: state.selectedProviderId,
               ...(state.selectedPresetId
                 ? { presetId: state.selectedPresetId }
                 : {}),
-            })
-          }
+            });
+            const rendered = await renderPromptTemplateMessages(
+              prepared.messages,
+              {
+                enabled: prepared.enabled,
+                context: tavernHelperContext,
+                directives: prepared.directives,
+              },
+            );
+            return {
+              ...prepared,
+              messages: rendered.messages,
+              templateCount: rendered.sourceTemplateCount,
+              renderedCount: rendered.renderedCount,
+              diagnostics: rendered.diagnostics,
+            };
+          }}
         />
 
         <NavigationRail

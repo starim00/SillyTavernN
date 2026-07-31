@@ -1,3 +1,5 @@
+import type { GenerationSettings } from "@stn/contracts";
+
 export type ParticipantKind = "person" | "character" | "narrator" | "system";
 
 export type Participant = {
@@ -13,10 +15,23 @@ export type ConversationSpace = {
   title: string;
   subtitle: string;
   cardId: string;
+  personaId?: string | null;
+  revision?: number;
   worldbookIds: string[];
   updatedLabel: string;
   unreadCount: number;
   pinned: boolean;
+};
+
+export type Persona = {
+  id: string;
+  name: string;
+  description: string;
+  title: string;
+  isDefault: boolean;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type RoleCard = {
@@ -171,7 +186,13 @@ export type Worldbook = {
 export type PromptTraceSegment = {
   id: string;
   label: string;
-  source: "system" | "preset" | "worldbook" | "conversation" | "extension";
+  source:
+    | "system"
+    | "preset"
+    | "worldbook"
+    | "persona"
+    | "conversation"
+    | "extension";
   tokens: number;
   detail: string;
 };
@@ -183,6 +204,7 @@ export type PromptPreset = {
   revision: number;
   mode: "chat-completion" | "text-generation" | "native";
   prompts: PromptPresetEntry[];
+  generation: GenerationSettings;
 };
 
 export type PromptPresetEntry = {
@@ -309,6 +331,7 @@ export type ModalState =
   | { kind: "import" }
   | { kind: "plugins" }
   | { kind: "providers" }
+  | { kind: "personas" }
   | { kind: "library" }
   | { kind: "create_conversation"; cardId: string }
   | { kind: "permission"; worldbookId: string; entryId: string };
@@ -325,6 +348,7 @@ export type WorkspaceState = {
   loading: boolean;
   conversations: ConversationSpace[];
   cards: RoleCard[];
+  personas: Persona[];
   participants: Participant[];
   messagesByConversation: Record<string, WorkspaceMessage[]>;
   worldbooks: Worldbook[];
@@ -352,6 +376,7 @@ export type PersistedWorkspaceState = Pick<
   WorkspaceState,
   | "conversations"
   | "cards"
+  | "personas"
   | "participants"
   | "messagesByConversation"
   | "worldbooks"

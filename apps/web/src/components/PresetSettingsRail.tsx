@@ -7,6 +7,7 @@ import {
 
 import type { PromptPreset } from "../domain/workspace";
 import { PresetDetail } from "./ContextRail";
+import type { PresetGenerationPatch } from "./PresetGenerationControls";
 import { IconButton } from "./WorkspacePrimitives";
 
 type PresetSettingsRailProps = {
@@ -17,6 +18,7 @@ type PresetSettingsRailProps = {
   onDeletePreset: (preset: PromptPreset) => void;
   onTogglePrompt: (promptId: string, enabled: boolean) => Promise<void>;
   onSavePrompt: (promptId: string, content: string) => Promise<void>;
+  onSaveGeneration: (patch: PresetGenerationPatch) => Promise<void>;
   onInsertPrompt: (promptId: string) => Promise<void>;
   onDetachPrompt: (promptId: string) => Promise<void>;
   onReorderPrompts: (promptIds: string[]) => Promise<void>;
@@ -31,6 +33,7 @@ export function PresetSettingsRail({
   onDeletePreset,
   onTogglePrompt,
   onSavePrompt,
+  onSaveGeneration,
   onInsertPrompt,
   onDetachPrompt,
   onReorderPrompts,
@@ -98,6 +101,7 @@ export function PresetSettingsRail({
             preset={preset}
             onToggle={onTogglePrompt}
             onSave={onSavePrompt}
+            onSaveGeneration={onSaveGeneration}
             onInsert={onInsertPrompt}
             onDetach={onDetachPrompt}
             onReorder={onReorderPrompts}

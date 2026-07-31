@@ -21,6 +21,7 @@ import type {
   MessageRole,
   Message,
   InternalMessageRole,
+  Persona,
   Participant,
   Preset,
   ProviderConnection,
@@ -88,6 +89,14 @@ export interface CreateParticipantInput {
   role?: string;
   profile?: JsonObject;
   legacyPayload?: JsonObject;
+}
+
+export interface CreatePersonaInput {
+  id?: string;
+  name: string;
+  description?: string;
+  title?: string;
+  isDefault?: boolean;
 }
 
 export interface CreateCardInput {
@@ -403,25 +412,186 @@ export class AppStore {
       .map((row) => this.mapParticipant(row));
   }
 
+  createPersona(input: CreatePersonaInput): Persona {
+    return this.database.transaction(() => {
+      const now = timestamp();
+      const id = input.id ?? identifier();
+      if (input.isDefault) {
+        this.database.run(
+          "UPDATE personas SET is_default = 0 WHERE is_default = 1",
+        );
+      }
+      this.database.run(
+        `INSERT INTO personas(
+           id, name, description, title, is_default, revision, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+        id,
+        input.name,
+        input.description ?? "",
+        input.title ?? "",
+        input.isDefault ? 1 : 0,
+        now,
+        now,
+      );
+      return this.getPersona(id);
+    });
+  }
+
+  listPersonas(): Persona[] {
+    return this.database
+      .all<Row>(
+        "SELECT * FROM personas ORDER BY is_default DESC, updated_at DESC, id",
+      )
+      .map((row) => this.mapPersona(row));
+  }
+
+  getPersona(id: string): Persona {
+    const row = this.database.get<Row>(
+      "SELECT * FROM personas WHERE id = ?",
+      id,
+    );
+    if (!row) {
+      throw new NotFoundError("persona", id);
+    }
+    return this.mapPersona(row);
+  }
+
+  getDefaultPersona(): Persona | null {
+    const row = this.database.get<Row>(
+      "SELECT * FROM personas WHERE is_default = 1 LIMIT 1",
+    );
+    return row ? this.mapPersona(row) : null;
+  }
+
+  updatePersona(input: {
+    id: string;
+    expectedRevision: number;
+    patch: {
+      name?: string;
+      description?: string;
+      title?: string;
+      isDefault?: boolean;
+    };
+  }): Persona {
+    return this.database.transaction(() => {
+      const current = this.getPersona(input.id);
+      this.assertRevision(
+        "persona",
+        current.id,
+        current.revision,
+        input.expectedRevision,
+      );
+      if (input.patch.isDefault === true) {
+        this.database.run(
+          "UPDATE personas SET is_default = 0 WHERE is_default = 1 AND id <> ?",
+          current.id,
+        );
+      }
+      const next = { ...current, ...input.patch };
+      this.database.run(
+        `UPDATE personas
+         SET name = ?, description = ?, title = ?, is_default = ?,
+             revision = revision + 1, updated_at = ?
+         WHERE id = ? AND revision = ?`,
+        next.name,
+        next.description,
+        next.title,
+        next.isDefault ? 1 : 0,
+        timestamp(),
+        current.id,
+        input.expectedRevision,
+      );
+      const changed = this.database.get<{ count: number }>(
+        "SELECT changes() AS count",
+      );
+      if ((changed?.count ?? 0) !== 1) {
+        throw new ConflictError(
+          `Persona '${current.id}' changed concurrently.`,
+        );
+      }
+      return this.getPersona(current.id);
+    });
+  }
+
+  deletePersona(id: string, expectedRevision: number): Persona {
+    return this.database.transaction(() => {
+      const current = this.getPersona(id);
+      this.assertRevision("persona", id, current.revision, expectedRevision);
+      this.database.run(
+        "DELETE FROM personas WHERE id = ? AND revision = ?",
+        id,
+        expectedRevision,
+      );
+      return current;
+    });
+  }
+
   createConversation(input: {
     id?: string;
     title: string;
     cardId: string;
+    personaId?: string | null;
   }): Conversation {
     return this.database.transaction(() => {
       this.getCard(input.cardId);
       const now = timestamp();
       const id = input.id ?? identifier();
+      const personaId =
+        input.personaId === undefined
+          ? (this.getDefaultPersona()?.id ?? null)
+          : input.personaId;
+      if (personaId !== null) {
+        this.getPersona(personaId);
+      }
       this.database.run(
-        `INSERT INTO conversations(id, title, card_id, revision, created_at, updated_at)
-         VALUES (?, ?, ?, 1, ?, ?)`,
+        `INSERT INTO conversations(
+           id, title, card_id, persona_id, revision, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, 1, ?, ?)`,
         id,
         input.title,
         input.cardId,
+        personaId,
         now,
         now,
       );
       return this.getConversation(id);
+    });
+  }
+
+  setConversationPersona(input: {
+    id: string;
+    personaId: string | null;
+    expectedRevision: number;
+  }): Conversation {
+    return this.database.transaction(() => {
+      const current = this.getConversation(input.id);
+      this.assertRevision(
+        "conversation",
+        input.id,
+        current.revision,
+        input.expectedRevision,
+      );
+      if (input.personaId !== null) {
+        this.getPersona(input.personaId);
+      }
+      this.database.run(
+        `UPDATE conversations
+         SET persona_id = ?, revision = revision + 1, updated_at = ?
+         WHERE id = ? AND revision = ?`,
+        input.personaId,
+        timestamp(),
+        input.id,
+        input.expectedRevision,
+      );
+      const changed = this.database.get<{ count: number }>(
+        "SELECT changes() AS count",
+      );
+      if ((changed?.count ?? 0) !== 1) {
+        throw new ConflictError(
+          `Conversation '${input.id}' changed concurrently.`,
+        );
+      }
+      return this.getConversation(input.id);
     });
   }
 
@@ -489,11 +659,70 @@ export class AppStore {
         current.revision,
         expectedRevision,
       );
+
+      const candidateWorldbookIds = Array.from(
+        new Set(
+          this.database
+            .all<{ worldbook_id: string }>(
+              `SELECT worldbook_id
+               FROM worldbook_bindings
+               WHERE scope_type = 'conversation' AND scope_id = ?`,
+              id,
+            )
+            .map((row) => row.worldbook_id),
+        ),
+      );
+
+      // Artifacts and extension settings intentionally do not have foreign
+      // keys to conversations/messages, so remove their conversation-owned
+      // rows explicitly before the relational cascade runs.
+      this.database.run(
+        `DELETE FROM artifacts
+         WHERE (scope_type = 'conversation' AND scope_id = ?)
+            OR (scope_type = 'message' AND scope_id IN (
+              SELECT id FROM messages WHERE conversation_id = ?
+            ))`,
+        id,
+        id,
+      );
+      this.database.run(
+        "DELETE FROM worldbook_bindings WHERE scope_type = 'conversation' AND scope_id = ?",
+        id,
+      );
+
+      this.database.run(
+        `DELETE FROM extension_settings
+         WHERE extension_id = 'stn.tavern-helper'
+           AND (
+             key = ?
+             OR key IN (
+               SELECT 'variables:message:' || id
+               FROM messages
+               WHERE conversation_id = ?
+             )
+           )`,
+        `variables:conversation:${id}`,
+        id,
+      );
       this.database.run(
         "DELETE FROM conversations WHERE id = ? AND revision = ?",
         id,
         expectedRevision,
       );
+
+      // A worldbook bound only to this conversation is conversation-owned.
+      // Keep books that are still referenced by a card, global scope, or
+      // another conversation.
+      for (const worldbookId of candidateWorldbookIds) {
+        const bindingCount =
+          this.database.get<{ count: number }>(
+            "SELECT COUNT(*) AS count FROM worldbook_bindings WHERE worldbook_id = ?",
+            worldbookId,
+          )?.count ?? 0;
+        if (bindingCount === 0) {
+          this.database.run("DELETE FROM worldbooks WHERE id = ?", worldbookId);
+        }
+      }
       return current;
     });
   }
@@ -1588,12 +1817,28 @@ export class AppStore {
     if (!row) {
       throw new NotFoundError("extension setting", `${extensionId}:${key}`);
     }
-    return {
-      extensionId: String(row.extension_id),
-      key: String(row.key),
-      value: decodeValue(String(row.value_json)),
-      updatedAt: String(row.updated_at),
-    };
+    return this.mapExtensionSetting(row);
+  }
+
+  getLatestMessageExtensionSettingForCard(
+    extensionId: string,
+    cardId: string,
+  ): ExtensionSetting | undefined {
+    const row = this.database.get<Row>(
+      `SELECT settings.*
+       FROM extension_settings AS settings
+       JOIN messages AS message
+         ON settings.key = 'variables:message:' || message.id
+       JOIN conversations AS conversation
+         ON conversation.id = message.conversation_id
+       WHERE settings.extension_id = ?
+         AND conversation.card_id = ?
+       ORDER BY settings.updated_at DESC, message.updated_at DESC, message.id DESC
+       LIMIT 1`,
+      extensionId,
+      cardId,
+    );
+    return row ? this.mapExtensionSetting(row) : undefined;
   }
 
   insertAudit(input: {
@@ -1795,6 +2040,15 @@ export class AppStore {
     };
   }
 
+  private mapExtensionSetting(row: Row): ExtensionSetting {
+    return {
+      extensionId: String(row.extension_id),
+      key: String(row.key),
+      value: decodeValue(String(row.value_json)),
+      updatedAt: String(row.updated_at),
+    };
+  }
+
   private mapParticipant(row: Row): Participant {
     return {
       id: String(row.id),
@@ -1803,6 +2057,19 @@ export class AppStore {
       role: String(row.role),
       profile: decodeObject(String(row.profile_json)),
       legacyPayload: decodeObject(String(row.legacy_payload_json)),
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at),
+    };
+  }
+
+  private mapPersona(row: Row): Persona {
+    return {
+      id: String(row.id),
+      name: String(row.name),
+      description: String(row.description),
+      title: String(row.title),
+      isDefault: asBoolean(row.is_default),
+      revision: Number(row.revision),
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),
     };
@@ -1821,6 +2088,10 @@ export class AppStore {
       id: String(row.id),
       title: String(row.title),
       cardId: String(row.card_id),
+      personaId:
+        row.persona_id === null || row.persona_id === undefined
+          ? null
+          : String(row.persona_id),
       revision: Number(row.revision),
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),

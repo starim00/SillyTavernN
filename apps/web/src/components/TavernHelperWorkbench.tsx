@@ -36,6 +36,14 @@ type PreparedPrompt = {
   messages: PreparedPromptMessage[];
   directives: PromptTemplateDirective[];
   templateCount: number;
+  renderedCount?: number;
+  diagnostics?: Array<{
+    messageIndex: number;
+    message: string;
+    phase?: string;
+    sourceId?: string;
+    sourceLabel?: string;
+  }>;
 };
 
 type VariableTarget = {
@@ -984,8 +992,32 @@ export function TavernHelperWorkbench({
                     <>
                       <p className="helper-prompt-summary">
                         {prompt.messages.length} 条消息 · {prompt.templateCount}{" "}
-                        个模板 · {prompt.enabled ? "模板已启用" : "模板未启用"}
+                        个源模板
+                        {prompt.renderedCount === undefined
+                          ? ""
+                          : ` · 已执行 ${String(prompt.renderedCount)} 个`}
+                        {" · "}
+                        {prompt.enabled ? "模板已启用" : "模板未启用"}
                       </p>
+                      {prompt.diagnostics?.length ? (
+                        <div className="helper-prompt-diagnostics" role="alert">
+                          <strong>
+                            {prompt.diagnostics.length} 处模板没有进入最终请求
+                          </strong>
+                          <ul>
+                            {prompt.diagnostics.map((diagnostic, index) => (
+                              <li
+                                key={`${diagnostic.sourceId ?? diagnostic.messageIndex}-${String(index)}`}
+                              >
+                                {diagnostic.sourceLabel
+                                  ? `${diagnostic.sourceLabel}：`
+                                  : ""}
+                                {diagnostic.message}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
                       <div className="helper-prompt-list">
                         {prompt.messages.map((message, index) => (
                           <details key={`${message.role}-${String(index)}`}>

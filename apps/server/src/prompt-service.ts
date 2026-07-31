@@ -53,6 +53,7 @@ const generationKeys = [
   "frequencyPenalty",
   "presencePenalty",
   "maxOutputTokens",
+  "n",
   "seed",
   "stop",
   "samplerOrder",
@@ -220,6 +221,7 @@ function conversationContract(
   value: ReturnType<AppStore["getConversation"]>,
   participants: readonly StoredParticipant[],
   worldbookIds: readonly string[],
+  personaId: string | null,
 ): Conversation {
   return {
     id: value.id,
@@ -236,6 +238,7 @@ function conversationContract(
       metadata: {},
     })),
     worldbookIds: [...worldbookIds],
+    ...(personaId === null ? {} : { personaId }),
     activeBranchId: `branch-${value.id}`,
     metadata: {},
     revision: value.revision,
@@ -545,6 +548,7 @@ function bindingApplies(
   conversationId: string,
   cardId: string,
   participantIds: ReadonlySet<string>,
+  personaId: string | null,
 ): boolean {
   switch (binding.scopeType) {
     case "global":
@@ -556,7 +560,7 @@ function bindingApplies(
     case "participant":
       return binding.scopeId !== null && participantIds.has(binding.scopeId);
     case "persona":
-      return false;
+      return personaId !== null && binding.scopeId === personaId;
   }
 }
 
@@ -670,6 +674,11 @@ export function prepareConversationPrompt(
   const storedParticipants = store.listConversationParticipants(
     storedConversation.id,
   );
+  const storedPersona =
+    storedConversation.personaId === null
+      ? store.getDefaultPersona()
+      : store.getPersona(storedConversation.personaId);
+  const personaId = storedPersona?.id ?? null;
   const participantIds = new Set(
     storedParticipants.map((participant) => participant.id),
   );
@@ -681,6 +690,7 @@ export function prepareConversationPrompt(
         storedConversation.id,
         storedConversation.cardId,
         participantIds,
+        personaId,
       ),
     )
       ? [
@@ -716,6 +726,7 @@ export function prepareConversationPrompt(
     storedConversation,
     storedParticipants,
     worldbookIds,
+    personaId,
   );
   const participantNames = new Map(
     storedParticipants.map((participant) => [participant.id, participant.name]),
@@ -752,6 +763,12 @@ export function prepareConversationPrompt(
     messages,
     worldbooks: boundWorldbooks,
     ...(preset === undefined ? {} : { preset }),
+    ...(storedPersona?.description
+      ? { persona: storedPersona.description }
+      : {}),
+    ...(storedPersona === null
+      ? {}
+      : { userName: storedPersona.name, personaId: storedPersona.id }),
     regexScripts: regex.scripts,
     tokenBudget: {
       maxContextTokens,

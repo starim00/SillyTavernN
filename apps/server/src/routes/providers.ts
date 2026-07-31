@@ -371,9 +371,15 @@ export async function registerProviderRoutes(
       });
 
       let content = "";
+      const alternativeContent = new Map<number, string>();
       let completed = false;
       let providerFailed = false;
       let providerCancelled = false;
+      let finishReason: "stop" | "length" | "tool-calls" | "cancelled" | null =
+        null;
+      let providerError:
+        { code: string; message: string; retryable: boolean } | undefined;
+      let persistedMessage: { id: string; revision: number } | undefined;
       let toolExecutionClosed = false;
       try {
         let providerMessages = [...requestMessages];
@@ -417,16 +423,39 @@ export async function registerProviderRoutes(
             },
             controller.signal,
           )) {
-            writeEvent(reply, event);
-            if (event.type === "text-delta") {
-              content += event.delta;
-              turnText += event.delta;
+            const choiceIndex =
+              "choiceIndex" in event &&
+              typeof event.choiceIndex === "number" &&
+              Number.isInteger(event.choiceIndex) &&
+              event.choiceIndex >= 0
+                ? event.choiceIndex
+                : 0;
+            if (choiceIndex === 0) {
+              writeEvent(reply, event);
             }
+            if (event.type === "text-delta") {
+              if (choiceIndex === 0) {
+                content += event.delta;
+                turnText += event.delta;
+              } else {
+                alternativeContent.set(
+                  choiceIndex,
+                  `${alternativeContent.get(choiceIndex) ?? ""}${event.delta}`,
+                );
+              }
+            }
+            if (choiceIndex !== 0) continue;
             if (event.type === "error") {
               completed = false;
               providerFailed = true;
+              providerError = {
+                code: event.code,
+                message: event.message,
+                retryable: event.retryable,
+              };
             }
             if (event.type === "finish") {
+              finishReason = event.reason;
               completed = event.reason !== "cancelled";
               providerCancelled = event.reason === "cancelled";
             }
@@ -588,30 +617,115 @@ export async function registerProviderRoutes(
             currentStep: current.currentStep + 1,
           });
         }
+        if (content.length > 0 && !toolExecutionClosed) {
+          const incomplete =
+            !completed ||
+            providerFailed ||
+            providerCancelled ||
+            controller.signal.aborted ||
+            finishReason === "length";
+          const message = context.store.addAssistantMessage({
+            conversationId: request.params.id,
+            content,
+          });
+          const alternatives = [...alternativeContent.entries()]
+            .filter(
+              ([choiceIndex, alternative]) => choiceIndex > 0 && alternative,
+            )
+            .sort(([left], [right]) => left - right)
+            .map(([, alternative]) => alternative);
+          if (alternatives.length > 0) {
+            context.store.addSwipe({
+              messageId: message.id,
+              content,
+              selected: true,
+            });
+            alternatives.forEach((alternative) => {
+              context.store.addSwipe({
+                messageId: message.id,
+                content: alternative,
+              });
+            });
+          }
+          persistedMessage = {
+            id: message.id,
+            revision:
+              message.revision +
+              (alternatives.length > 0 ? alternatives.length + 1 : 0),
+          };
+          writeEvent(reply, {
+            type: "message-persisted",
+            messageId: message.id,
+            revision: persistedMessage.revision,
+            ...(alternatives.length === 0 ? {} : { alternatives }),
+            ...(incomplete
+              ? {
+                  incomplete: true,
+                  reason:
+                    finishReason === "length"
+                      ? "length"
+                      : providerCancelled || controller.signal.aborted
+                        ? "cancelled"
+                        : "error",
+                  ...(providerError === undefined
+                    ? {}
+                    : {
+                        errorCode: providerError.code,
+                        errorMessage: providerError.message,
+                      }),
+                }
+              : {}),
+          });
+        }
+      } catch (error) {
+        providerFailed = true;
+        providerError = {
+          code: "GENERATION_STREAM_FAILED",
+          message: error instanceof Error ? error.message : String(error),
+          retryable: false,
+        };
         if (
-          completed &&
-          !providerFailed &&
           content.length > 0 &&
-          !controller.signal.aborted
+          !toolExecutionClosed &&
+          persistedMessage === undefined
         ) {
           const message = context.store.addAssistantMessage({
             conversationId: request.params.id,
             content,
           });
+          const alternatives = [...alternativeContent.entries()]
+            .filter(
+              ([choiceIndex, alternative]) => choiceIndex > 0 && alternative,
+            )
+            .sort(([left], [right]) => left - right)
+            .map(([, alternative]) => alternative);
+          if (alternatives.length > 0) {
+            context.store.addSwipe({
+              messageId: message.id,
+              content,
+              selected: true,
+            });
+            alternatives.forEach((alternative) => {
+              context.store.addSwipe({
+                messageId: message.id,
+                content: alternative,
+              });
+            });
+          }
           writeEvent(reply, {
             type: "message-persisted",
             messageId: message.id,
-            revision: message.revision,
+            revision:
+              message.revision +
+              (alternatives.length > 0 ? alternatives.length + 1 : 0),
+            incomplete: true,
+            reason: controller.signal.aborted ? "cancelled" : "error",
+            errorCode: providerError.code,
+            errorMessage: providerError.message,
+            ...(alternatives.length === 0 ? {} : { alternatives }),
           });
         }
-      } catch (error) {
-        providerFailed = true;
-        writeEvent(reply, {
-          type: "error",
-          code: "GENERATION_STREAM_FAILED",
-          message: error instanceof Error ? error.message : String(error),
-          retryable: false,
-        });
+        writeEvent(reply, { type: "error", ...providerError });
       } finally {
         if (toolRun !== undefined) {
           try {

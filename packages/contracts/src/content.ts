@@ -39,6 +39,21 @@ export const ParticipantSchema = z
 
 export type Participant = z.infer<typeof ParticipantSchema>;
 
+export const PersonaSchema = z
+  .object({
+    id: EntityIdSchema,
+    name: z.string().trim().min(1).max(512),
+    description: z.string(),
+    title: z.string().max(512),
+    isDefault: z.boolean(),
+    revision: RevisionSchema,
+    createdAt: DateTimeSchema,
+    updatedAt: DateTimeSchema,
+  })
+  .strict();
+
+export type Persona = z.infer<typeof PersonaSchema>;
+
 export const CardKindSchema = z.enum([
   "character",
   "ensemble",

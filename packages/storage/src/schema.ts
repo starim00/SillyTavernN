@@ -496,4 +496,28 @@ export const migrations: readonly Migration[] = [
         ON conversations(card_id, updated_at DESC, id);
     `,
   },
+  {
+    version: 9,
+    name: "user-personas-and-conversation-binding",
+    sql: `
+      CREATE TABLE personas (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        title TEXT NOT NULL DEFAULT '',
+        is_default INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0,1)),
+        revision INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX personas_default_idx
+        ON personas(is_default)
+        WHERE is_default = 1;
+
+      ALTER TABLE conversations
+        ADD COLUMN persona_id TEXT REFERENCES personas(id) ON DELETE SET NULL;
+      CREATE INDEX conversations_persona_idx
+        ON conversations(persona_id, updated_at DESC, id);
+    `,
+  },
 ];

@@ -238,6 +238,58 @@ afterEach(async () => {
 });
 
 describe("server prompt integration", () => {
+  it("uses the active user persona for prompt text and persona-scoped lore", async () => {
+    const created = await application();
+    const { context } = created;
+    const persona = context.store.createPersona({
+      id: "persona-prompt",
+      name: "Mira",
+      description: "{{user}} checks every clue before acting.",
+      isDefault: true,
+    });
+    const card = context.store.createCard({
+      id: "card-persona-prompt",
+      kind: "character",
+      name: "Persona prompt card",
+    }).card;
+    const conversation = context.store.createConversation({
+      id: "conversation-persona-prompt",
+      title: "Persona prompt conversation",
+      cardId: card.id,
+    });
+    const worldbook = context.store.createWorldbook({
+      id: "worldbook-persona-prompt",
+      name: "Persona lore",
+      entries: [
+        {
+          id: "entry-persona-prompt",
+          content: "PERSONA_LORE",
+          metadata: { constant: true },
+        },
+      ],
+    });
+    context.store.bindWorldbook({
+      worldbookId: worldbook.id,
+      scopeType: "persona",
+      scopeId: persona.id,
+    });
+
+    const prompt = prepareConversationPrompt(context.store, {
+      conversationId: conversation.id,
+    });
+
+    const personaSegment = prompt.segments.find(
+      (segment) =>
+        segment.source.kind === "persona" && segment.source.id === persona.id,
+    );
+    expect(personaSegment?.content).toBe(
+      "Mira checks every clue before acting.",
+    );
+    expect(
+      prompt.segments.some((segment) => segment.content === "PERSONA_LORE"),
+    ).toBe(true);
+  });
+
   it("adapts an ensemble, narrator, all binding scopes, preset and generation overrides", async () => {
     const created = await application();
     const fixture = await richWorkspace(created);

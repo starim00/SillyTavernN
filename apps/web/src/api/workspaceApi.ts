@@ -1,9 +1,15 @@
+import {
+  GenerationSettingsSchema,
+  type GenerationSettings,
+} from "@stn/contracts";
+
 import type {
   AgentProposal,
   AgentRun,
   ApiEnvelope,
   ConversationSpace,
   Participant,
+  Persona,
   PromptPreset,
   PromptPresetEntry,
   PromptTraceSegment,
@@ -41,10 +47,22 @@ type ApiConversation = {
   id: string;
   title: string;
   cardId: string;
+  personaId?: string | null;
   participants?: ApiParticipant[];
   worldbookIds?: string[];
   revision?: number;
   subtitle?: string;
+  updatedAt?: string;
+};
+
+type ApiPersona = {
+  id: string;
+  name: string;
+  description?: string;
+  title?: string;
+  isDefault?: boolean;
+  revision?: number;
+  createdAt?: string;
   updatedAt?: string;
 };
 
@@ -125,6 +143,8 @@ type ApiPreset = {
   payload?: {
     mode?: string;
     prompts?: ApiPresetPrompt[];
+    generation?: unknown;
+    [key: string]: unknown;
   };
 };
 
@@ -240,6 +260,7 @@ type ApiAgentPlan = {
 export type ApiBootstrap = {
   conversations: ConversationSpace[];
   cards: RoleCard[];
+  personas?: Persona[];
   participants: Participant[];
   messagesByConversation: Record<string, WorkspaceMessage[]>;
   worldbooks: Worldbook[];
@@ -254,6 +275,11 @@ export type GenerationReceipt =
       messageId: string;
       revision: number;
       content: string;
+      alternatives?: string[];
+      incomplete?: boolean;
+      reason?: "length" | "cancelled" | "error";
+      errorCode?: string;
+      errorMessage?: string;
     }
   | {
       generationId: string;
@@ -469,12 +495,25 @@ const normalizeConversation = (item: ApiConversation): ConversationSpace => {
     title: item.title,
     subtitle: item.subtitle ?? "来自本地工作区的会话",
     cardId: item.cardId,
+    personaId: item.personaId ?? null,
+    revision: item.revision ?? 1,
     worldbookIds: item.worldbookIds ?? [],
     updatedLabel: timeLabel(item.updatedAt),
     unreadCount: 0,
     pinned: false,
   };
 };
+
+const normalizePersona = (item: ApiPersona): Persona => ({
+  id: item.id,
+  name: item.name,
+  description: item.description ?? "",
+  title: item.title ?? "",
+  isDefault: item.isDefault ?? false,
+  revision: item.revision ?? 1,
+  createdAt: item.createdAt ?? new Date(0).toISOString(),
+  updatedAt: item.updatedAt ?? new Date(0).toISOString(),
+});
 
 const normalizeCard = (
   item: ApiCard,
@@ -624,6 +663,105 @@ const presetMarkers: NonNullable<PromptPresetEntry["marker"]>[] = [
   "custom",
 ];
 
+const defaultPresetGeneration = (): GenerationSettings => ({
+  temperature: 1,
+  topP: 1,
+  frequencyPenalty: 0,
+  presencePenalty: 0,
+  maxOutputTokens: 300,
+  n: 1,
+  stream: true,
+  stop: [],
+  samplerOrder: [],
+  additional: {
+    maxContextTokens: 32_768,
+    maxContextUnlocked: false,
+  },
+});
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
+function booleanValue(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function normalizePresetGeneration(item: ApiPreset): GenerationSettings {
+  const defaults = defaultPresetGeneration();
+  const payload = item.payload ?? {};
+  const raw = isRecord(payload.generation) ? payload.generation : payload;
+  const additional = isRecord(raw.additional) ? raw.additional : {};
+  const candidate = {
+    ...defaults,
+    temperature:
+      numberValue(raw.temperature) ??
+      numberValue(raw.temp) ??
+      defaults.temperature,
+    topP: numberValue(raw.topP) ?? numberValue(raw.top_p) ?? defaults.topP,
+    topK: numberValue(raw.topK) ?? numberValue(raw.top_k),
+    minP: numberValue(raw.minP) ?? numberValue(raw.min_p),
+    typicalP:
+      numberValue(raw.typicalP) ??
+      numberValue(raw.typical_p) ??
+      numberValue(raw.typical),
+    topA: numberValue(raw.topA) ?? numberValue(raw.top_a),
+    tfs: numberValue(raw.tfs) ?? numberValue(raw.tail_free_sampling),
+    repetitionPenalty:
+      numberValue(raw.repetitionPenalty) ?? numberValue(raw.repetition_penalty),
+    repetitionPenaltyRange:
+      numberValue(raw.repetitionPenaltyRange) ??
+      numberValue(raw.repetition_penalty_range),
+    frequencyPenalty:
+      numberValue(raw.frequencyPenalty) ??
+      numberValue(raw.frequency_penalty) ??
+      numberValue(raw.freq_pen),
+    presencePenalty:
+      numberValue(raw.presencePenalty) ??
+      numberValue(raw.presence_penalty) ??
+      numberValue(raw.presence_pen),
+    maxOutputTokens:
+      numberValue(raw.maxOutputTokens) ??
+      numberValue(raw.openai_max_tokens) ??
+      numberValue(raw.max_length) ??
+      defaults.maxOutputTokens,
+    n: numberValue(raw.n) ?? defaults.n,
+    seed: numberValue(raw.seed),
+    mirostatMode:
+      numberValue(raw.mirostatMode) ?? numberValue(raw.mirostat_mode),
+    mirostatTau: numberValue(raw.mirostatTau) ?? numberValue(raw.mirostat_tau),
+    mirostatEta: numberValue(raw.mirostatEta) ?? numberValue(raw.mirostat_eta),
+    stream:
+      booleanValue(raw.stream) ??
+      booleanValue(raw.stream_openai) ??
+      defaults.stream,
+    stop: Array.isArray(raw.stop)
+      ? raw.stop.filter((value): value is string => typeof value === "string")
+      : defaults.stop,
+    samplerOrder: Array.isArray(raw.samplerOrder)
+      ? raw.samplerOrder
+      : Array.isArray(raw.sampler_order)
+        ? raw.sampler_order
+        : defaults.samplerOrder,
+    additional: {
+      ...defaults.additional,
+      ...additional,
+      maxContextTokens:
+        numberValue(additional.maxContextTokens) ??
+        numberValue(raw.openai_max_context) ??
+        defaults.additional.maxContextTokens,
+      maxContextUnlocked:
+        booleanValue(additional.maxContextUnlocked) ??
+        booleanValue(raw.max_context_unlocked) ??
+        defaults.additional.maxContextUnlocked,
+    },
+  };
+  const parsed = GenerationSettingsSchema.safeParse(candidate);
+  return parsed.success ? parsed.data : defaults;
+}
+
 const normalizePreset = (item: ApiPreset): PromptPreset => {
   const candidateMode = item.payload?.mode ?? item.kind;
   const mode = presetModes.includes(candidateMode as PromptPreset["mode"])
@@ -668,6 +806,7 @@ const normalizePreset = (item: ApiPreset): PromptPreset => {
     revision: item.revision ?? 0,
     mode,
     prompts,
+    generation: normalizePresetGeneration(item),
   };
 };
 
@@ -837,10 +976,12 @@ export async function loadPromptTraceFromApi(input: {
           ? "worldbook"
           : segment.source.kind === "extension"
             ? "extension"
-            : segment.source.kind === "message" ||
-                segment.source.kind === "conversation"
-              ? "conversation"
-              : "system";
+            : segment.source.kind === "persona"
+              ? "persona"
+              : segment.source.kind === "message" ||
+                  segment.source.kind === "conversation"
+                ? "conversation"
+                : "system";
     return {
       id: segment.id,
       label: segment.source.label,
@@ -991,6 +1132,7 @@ export async function loadWorkspaceFromApi(
   const [
     conversationResult,
     cardResult,
+    personaResult,
     worldbookResult,
     presetResult,
     regexResult,
@@ -998,6 +1140,7 @@ export async function loadWorkspaceFromApi(
   ] = await Promise.all([
     request<ApiEnvelope<ApiConversation[]>>("/conversations"),
     request<ApiEnvelope<ApiCard[]>>("/cards"),
+    request<ApiEnvelope<ApiPersona[]>>("/personas"),
     request<ApiEnvelope<ApiWorldbook[]>>("/worldbooks"),
     request<ApiEnvelope<ApiPreset[]>>("/presets"),
     request<ApiEnvelope<ApiRegexScope[]>>("/regex/scopes"),
@@ -1044,6 +1187,7 @@ export async function loadWorkspaceFromApi(
     cards: cardResult.data.map((card) =>
       normalizeCard(card, conversationResult.data),
     ),
+    personas: personaResult.data.map(normalizePersona),
     participants: [...participantMap.values()],
     messagesByConversation: Object.fromEntries(messagePairs),
     worldbooks: worldbookResult.data.map(normalizeWorldbook),
@@ -1055,10 +1199,34 @@ export async function loadWorkspaceFromApi(
 
 export async function createMessage(
   conversationId: string,
-  input: { content: string; parentMessageId?: string },
+  input: {
+    content: string;
+    parentMessageId?: string;
+    role?: "user" | "assistant";
+  },
 ): Promise<WorkspaceMessage> {
   const result = await request<ApiEnvelope<ApiMessage>>(
     `/conversations/${encodeURIComponent(conversationId)}/messages`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+  return normalizeMessage(result.data);
+}
+
+export async function createTavernHelperMessage(
+  conversationId: string,
+  input: {
+    content: string;
+    parentMessageId?: string;
+    role: "user" | "assistant";
+  },
+): Promise<WorkspaceMessage> {
+  const result = await request<ApiEnvelope<ApiMessage>>(
+    `/compatibility/tavern-helper/conversations/${encodeURIComponent(
+      conversationId,
+    )}/messages`,
     {
       method: "POST",
       body: JSON.stringify(input),
@@ -1214,7 +1382,13 @@ export async function generateConversation(
   let messageId: string | null = null;
   let revision: number | null = null;
   let content = "";
+  let alternatives: string[] | undefined;
   let toolProposalReceived = false;
+  let incomplete = false;
+  let incompleteReason: "length" | "cancelled" | "error" | undefined;
+  let errorCode: string | undefined;
+  let errorMessage: string | undefined;
+  let pendingError: WorkspaceApiError | undefined;
 
   const consume = (frame: string) => {
     const data = dataFromFrame(frame);
@@ -1241,6 +1415,24 @@ export async function generateConversation(
       ) {
         messageId = event.messageId;
         revision = event.revision;
+        alternatives = Array.isArray(event.alternatives)
+          ? event.alternatives.filter(
+              (value): value is string => typeof value === "string",
+            )
+          : undefined;
+        incomplete = event.incomplete === true;
+        incompleteReason =
+          event.reason === "length" ||
+          event.reason === "cancelled" ||
+          event.reason === "error"
+            ? event.reason
+            : undefined;
+        errorCode =
+          typeof event.errorCode === "string" ? event.errorCode : undefined;
+        errorMessage =
+          typeof event.errorMessage === "string"
+            ? event.errorMessage
+            : undefined;
       }
       return;
     }
@@ -1261,16 +1453,18 @@ export async function generateConversation(
       return;
     }
     if (event.type === "error") {
-      throw new WorkspaceApiError(
+      pendingError = new WorkspaceApiError(
         typeof event.message === "string"
           ? event.message
           : "Provider generation failed.",
         502,
         typeof event.code === "string" ? event.code : undefined,
       );
+      return;
     }
     if (event.type === "finish" && event.reason === "cancelled") {
-      throw new GenerationInterruptedError();
+      incomplete = true;
+      incompleteReason = "cancelled";
     }
   };
 
@@ -1299,12 +1493,26 @@ export async function generateConversation(
     if (toolProposalReceived) {
       return { generationId, toolProposalOnly: true };
     }
+    if (pendingError) throw pendingError;
+    if (incompleteReason === "cancelled") {
+      throw new GenerationInterruptedError();
+    }
     throw new WorkspaceApiError(
       "Generation ended before a complete message was persisted.",
       502,
     );
   }
-  return { generationId, messageId, revision, content };
+  return {
+    generationId,
+    messageId,
+    revision,
+    content,
+    ...(alternatives === undefined ? {} : { alternatives }),
+    ...(incomplete ? { incomplete: true } : {}),
+    ...(incompleteReason ? { reason: incompleteReason } : {}),
+    ...(errorCode ? { errorCode } : {}),
+    ...(errorMessage ? { errorMessage } : {}),
+  };
 }
 
 export async function abortGeneration(generationId: string): Promise<void> {
@@ -1425,6 +1633,27 @@ export async function updatePresetPrompt(input: {
         ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
         ...(input.inserted === undefined ? {} : { inserted: input.inserted }),
         ...(input.content === undefined ? {} : { content: input.content }),
+      }),
+    },
+  );
+  return normalizePreset(result.data);
+}
+
+export async function updatePresetGeneration(input: {
+  presetId: string;
+  expectedRevision: number;
+  generation: Partial<GenerationSettings>;
+}): Promise<PromptPreset> {
+  if (Object.keys(input.generation).length === 0) {
+    throw new TypeError("Preset generation update requires a setting.");
+  }
+  const result = await request<ApiEnvelope<ApiPreset>>(
+    `/presets/${encodeURIComponent(input.presetId)}/generation`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        expectedRevision: input.expectedRevision,
+        generation: input.generation,
       }),
     },
   );
@@ -2090,6 +2319,78 @@ export async function createConversationSpace(input: {
       cardId: input.cardId,
     }),
   });
+  return normalizeConversation(result.data);
+}
+
+export async function deleteConversationSpace(input: {
+  conversationId: string;
+  expectedRevision: number;
+}): Promise<void> {
+  await request<ApiEnvelope<unknown>>(
+    `/conversations/${encodeURIComponent(input.conversationId)}`,
+    {
+      method: "DELETE",
+      body: JSON.stringify({ expectedRevision: input.expectedRevision }),
+    },
+  );
+}
+
+export type PersonaInput = {
+  name: string;
+  description: string;
+  title: string;
+  isDefault: boolean;
+};
+
+export async function createPersona(input: PersonaInput): Promise<Persona> {
+  const result = await request<ApiEnvelope<ApiPersona>>("/personas", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return normalizePersona(result.data);
+}
+
+export async function updatePersona(
+  persona: Persona,
+  patch: Partial<PersonaInput>,
+): Promise<Persona> {
+  const result = await request<ApiEnvelope<ApiPersona>>(
+    `/personas/${encodeURIComponent(persona.id)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ expectedRevision: persona.revision, ...patch }),
+    },
+  );
+  return normalizePersona(result.data);
+}
+
+export async function deletePersona(input: {
+  personaId: string;
+  expectedRevision: number;
+}): Promise<void> {
+  await request<ApiEnvelope<unknown>>(
+    `/personas/${encodeURIComponent(input.personaId)}`,
+    {
+      method: "DELETE",
+      body: JSON.stringify({ expectedRevision: input.expectedRevision }),
+    },
+  );
+}
+
+export async function setConversationPersona(
+  conversation: ConversationSpace,
+  personaId: string | null,
+): Promise<ConversationSpace> {
+  const result = await request<ApiEnvelope<ApiConversation>>(
+    `/conversations/${encodeURIComponent(conversation.id)}/persona`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        personaId,
+        expectedRevision: conversation.revision ?? 1,
+      }),
+    },
+  );
   return normalizeConversation(result.data);
 }
 

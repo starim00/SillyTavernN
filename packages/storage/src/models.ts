@@ -66,6 +66,18 @@ export interface Conversation {
   id: string;
   title: string;
   cardId: string;
+  personaId: string | null;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Persona {
+  id: string;
+  name: string;
+  description: string;
+  title: string;
+  isDefault: boolean;
   revision: number;
   createdAt: string;
   updatedAt: string;

@@ -234,6 +234,44 @@ function extensionObject(
   }
 }
 
+function extensionObjectIfPresent(
+  context: ServerContext,
+  key: string,
+): JsonObject | undefined {
+  try {
+    const value = context.store.getExtensionSetting(
+      tavernHelperExtensionId,
+      key,
+    ).value;
+    return isJsonObject(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isCrossConversationMvuState(
+  value: JsonObject | undefined,
+): value is JsonObject {
+  return (
+    value !== undefined &&
+    (Object.hasOwn(value, "stat_data") ||
+      Object.hasOwn(value, "initialized_lorebooks"))
+  );
+}
+
+function latestCardMessageVariables(
+  context: ServerContext,
+  cardId: string,
+): JsonObject | undefined {
+  const setting = context.store.getLatestMessageExtensionSettingForCard(
+    tavernHelperExtensionId,
+    cardId,
+  );
+  const variables =
+    setting && isJsonObject(setting.value) ? setting.value : undefined;
+  return isCrossConversationMvuState(variables) ? variables : undefined;
+}
+
 function sanitizedObject(value: unknown): JsonObject {
   const sanitized = sanitizeJsonValue(value);
   return isJsonObject(sanitized) ? sanitized : {};
@@ -367,6 +405,14 @@ function tavernHelperContext(
       ? card.legacyPayload.normalized
       : {},
   );
+  const persistedCharacterVariables = extensionObjectIfPresent(
+    context,
+    `variables:card:${conversation.cardId}`,
+  );
+  const inheritedMvuVariables =
+    persistedCharacterVariables === undefined
+      ? latestCardMessageVariables(context, conversation.cardId)
+      : undefined;
   const preset =
     input.presetId === undefined
       ? undefined
@@ -487,11 +533,10 @@ function tavernHelperContext(
     worldbooks,
     variables: {
       global: extensionObject(context, "variables:global"),
-      character: extensionObject(
-        context,
-        `variables:card:${conversation.cardId}`,
+      character:
+        persistedCharacterVariables ??
+        inheritedMvuVariables ??
         cardBundle.variables,
-      ),
       preset:
         preset === undefined
           ? {}

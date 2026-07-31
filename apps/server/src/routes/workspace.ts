@@ -13,6 +13,7 @@ const conversationCreateSchema = z
   .object({
     title: z.string().trim().min(1).max(1024),
     cardId: entityId,
+    personaId: entityId.nullish(),
   })
   .strict();
 
@@ -32,8 +33,11 @@ const messageCreateSchema = z
   .object({
     content: z.string().max(2_000_000),
     parentMessageId: entityId.nullish(),
+    role: z.enum(["user", "assistant"]).default("user"),
   })
   .strict();
+
+const tavernHelperMessageCreateSchema = messageCreateSchema;
 
 const messageListQuerySchema = z
   .object({
@@ -141,6 +145,8 @@ function setMetadata(
 
 function conversationDto(context: ServerContext, id: string) {
   const conversation = context.store.getConversation(id);
+  const effectivePersonaId =
+    conversation.personaId ?? context.store.getDefaultPersona()?.id ?? null;
   const participants = context.store.listConversationParticipants(id);
   const bindings = context.store.database.all<{
     worldbook_id: string;
@@ -162,10 +168,15 @@ function conversationDto(context: ServerContext, id: string) {
   );
   return {
     ...conversation,
+    personaId: effectivePersonaId,
     participantIds: participants.map((participant) => participant.id),
     participants,
     worldbookIds,
   };
+}
+
+function personaDto(context: ServerContext, id: string) {
+  return context.store.getPersona(id);
 }
 
 function messageDto(context: ServerContext, id: string) {
@@ -383,6 +394,72 @@ export async function registerWorkspaceRoutes(
     }),
   );
 
+  app.get("/api/personas", async () =>
+    envelope(
+      context.store
+        .listPersonas()
+        .map((persona) => personaDto(context, persona.id)),
+    ),
+  );
+
+  app.post("/api/personas", async (request, reply) => {
+    const input = z
+      .object({
+        name: z.string().trim().min(1).max(512),
+        description: z.string().max(100_000).default(""),
+        title: z.string().max(512).default(""),
+        isDefault: z.boolean().default(false),
+      })
+      .strict()
+      .parse(request.body);
+    const persona = context.store.createPersona(input);
+    return reply.code(201).send(envelope(personaDto(context, persona.id)));
+  });
+
+  app.patch<{ Params: { id: string } }>(
+    "/api/personas/:id",
+    async (request) => {
+      const input = z
+        .object({
+          expectedRevision: z.number().int().nonnegative(),
+          name: z.string().trim().min(1).max(512).optional(),
+          description: z.string().max(100_000).optional(),
+          title: z.string().max(512).optional(),
+          isDefault: z.boolean().optional(),
+        })
+        .strict()
+        .parse(request.body);
+      const persona = context.store.updatePersona({
+        id: request.params.id,
+        expectedRevision: input.expectedRevision,
+        patch: {
+          ...(input.name === undefined ? {} : { name: input.name }),
+          ...(input.description === undefined
+            ? {}
+            : { description: input.description }),
+          ...(input.title === undefined ? {} : { title: input.title }),
+          ...(input.isDefault === undefined
+            ? {}
+            : { isDefault: input.isDefault }),
+        },
+      });
+      return envelope(personaDto(context, persona.id));
+    },
+  );
+
+  app.delete<{ Params: { id: string } }>(
+    "/api/personas/:id",
+    async (request) => {
+      const input = z
+        .object({ expectedRevision: z.number().int().nonnegative() })
+        .strict()
+        .parse(request.body);
+      return envelope(
+        context.store.deletePersona(request.params.id, input.expectedRevision),
+      );
+    },
+  );
+
   app.get("/api/cards", async () =>
     envelope(
       context.store.listCards().map((card) => cardDto(context, card.id)),
@@ -553,6 +630,25 @@ export async function registerWorkspaceRoutes(
     },
   );
 
+  app.patch<{ Params: { id: string } }>(
+    "/api/conversations/:id/persona",
+    async (request) => {
+      const input = z
+        .object({
+          personaId: entityId.nullable(),
+          expectedRevision: z.number().int().nonnegative(),
+        })
+        .strict()
+        .parse(request.body);
+      const conversation = context.store.setConversationPersona({
+        id: request.params.id,
+        personaId: input.personaId,
+        expectedRevision: input.expectedRevision,
+      });
+      return envelope(conversationDto(context, conversation.id));
+    },
+  );
+
   app.delete<{ Params: { id: string } }>(
     "/api/conversations/:id",
     async (request) => {
@@ -560,6 +656,13 @@ export async function registerWorkspaceRoutes(
         .object({ expectedRevision: z.number().int().nonnegative() })
         .strict()
         .parse(request.body);
+      for (const generation of context.generations.values()) {
+        if (generation.conversationId === request.params.id) {
+          generation.controller.abort(
+            new Error("The conversation was deleted."),
+          );
+        }
+      }
       return envelope(
         context.store.deleteConversation(
           request.params.id,
@@ -606,13 +709,46 @@ export async function registerWorkspaceRoutes(
     "/api/conversations/:id/messages",
     async (request, reply) => {
       const input = messageCreateSchema.parse(request.body);
-      const message = context.store.addUserMessage({
-        conversationId: request.params.id,
-        content: input.content,
-        ...(input.parentMessageId
-          ? { parentMessageId: input.parentMessageId }
-          : {}),
-      });
+      const message =
+        input.role === "assistant"
+          ? context.store.addAssistantMessage({
+              conversationId: request.params.id,
+              content: input.content,
+              ...(input.parentMessageId
+                ? { parentMessageId: input.parentMessageId }
+                : {}),
+            })
+          : context.store.addUserMessage({
+              conversationId: request.params.id,
+              content: input.content,
+              ...(input.parentMessageId
+                ? { parentMessageId: input.parentMessageId }
+                : {}),
+            });
+      return reply.code(201).send(envelope(messageDto(context, message.id)));
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    "/api/compatibility/tavern-helper/conversations/:id/messages",
+    async (request, reply) => {
+      const input = tavernHelperMessageCreateSchema.parse(request.body);
+      const message =
+        input.role === "assistant"
+          ? context.store.addAssistantMessage({
+              conversationId: request.params.id,
+              content: input.content,
+              ...(input.parentMessageId
+                ? { parentMessageId: input.parentMessageId }
+                : {}),
+            })
+          : context.store.addUserMessage({
+              conversationId: request.params.id,
+              content: input.content,
+              ...(input.parentMessageId
+                ? { parentMessageId: input.parentMessageId }
+                : {}),
+            });
       return reply.code(201).send(envelope(messageDto(context, message.id)));
     },
   );

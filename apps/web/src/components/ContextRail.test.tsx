@@ -32,6 +32,7 @@ function renderRail(
         onDeletePreset={noop}
         onTogglePrompt={async () => undefined}
         onSavePrompt={async () => undefined}
+        onSaveGeneration={async () => undefined}
         onInsertPrompt={async () => undefined}
         onDetachPrompt={async () => undefined}
         onReorderPrompts={async () => undefined}

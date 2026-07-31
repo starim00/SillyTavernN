@@ -448,6 +448,47 @@ describe("workspaceReducer", () => {
     );
   });
 
+  it("removes a conversation and selects the next history in the same card", () => {
+    const state = createDemoWorkspace();
+    const current = state.conversations.find(
+      (conversation) => conversation.id === state.selectedConversationId,
+    )!;
+    const sibling = {
+      ...current,
+      id: "conversation-delete-sibling",
+      title: "Sibling history",
+    };
+    const withSibling = workspaceReducer(state, {
+      type: "conversation/create",
+      conversation: sibling,
+    });
+    const withDraft = {
+      ...withSibling,
+      draftByConversation: {
+        ...withSibling.draftByConversation,
+        [current.id]: "stale draft",
+      },
+    };
+
+    const deleted = workspaceReducer(withDraft, {
+      type: "conversation/delete",
+      id: current.id,
+    });
+
+    expect(deleted.selectedConversationId).toBe(sibling.id);
+    expect(deleted.conversations.some(({ id }) => id === current.id)).toBe(
+      false,
+    );
+    expect(deleted.messagesByConversation).not.toHaveProperty(current.id);
+    expect(deleted.draftByConversation).not.toHaveProperty(current.id);
+    expect(
+      deleted.cards.find((card) => card.id === current.cardId)
+        ?.conversationCount,
+    ).toBe(
+      state.cards.find((card) => card.id === current.cardId)?.conversationCount,
+    );
+  });
+
   it("edits, adds Swipe candidates, selects them, and deletes a message", () => {
     const state = createDemoWorkspace();
     const message = state.messagesByConversation["conversation-harbor"]?.[0];

@@ -4,6 +4,13 @@ export function seedDevelopmentWorkspace(store: AppStore): void {
   if (store.listConversations().length > 0 || store.listCards().length > 0) {
     return;
   }
+  store.createPersona({
+    id: "persona-traveler",
+    name: "旅人",
+    description: "一名习惯先观察细节、再做决定的旅人。",
+    title: "默认用户人设",
+    isDefault: true,
+  });
   const created = store.createCard({
     id: "card-fog-harbor",
     kind: "character",

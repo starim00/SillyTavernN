@@ -1,3 +1,5 @@
+import { randomInt } from "node:crypto";
+
 import type {
   JsonObject,
   ProviderCapabilities,
@@ -23,18 +25,62 @@ import {
 
 type Fetch = typeof globalThis.fetch;
 
-const internalGenerationFields = new Set(["maxContextTokens", "sourceFormat"]);
+const internalGenerationFields = new Set([
+  "maxContextTokens",
+  "maxContextUnlocked",
+  "sourceFormat",
+]);
 
 interface ToolAccumulator {
   id: string;
   name: string;
   argumentsText: string;
+  choiceIndex: number;
   started: boolean;
+}
+
+const providerFunctionNamePattern = /^[a-zA-Z0-9_-]+$/u;
+
+interface ToolNameAliases {
+  toInternal(name: string): string;
+  toProvider(name: string): string;
+}
+
+function createToolNameAliases(
+  tools: ProviderRequest["tools"],
+): ToolNameAliases {
+  const internalToProvider = new Map<string, string>();
+  const providerToInternal = new Map<string, string>();
+
+  for (const tool of tools ?? []) {
+    const encodedName = providerFunctionNamePattern.test(tool.name)
+      ? tool.name
+      : `stn_${Array.from(new TextEncoder().encode(tool.name), (byte) =>
+          byte.toString(16).padStart(2, "0"),
+        ).join("")}`;
+    let providerName = encodedName;
+    let suffix = 2;
+    while (
+      providerToInternal.has(providerName) &&
+      providerToInternal.get(providerName) !== tool.name
+    ) {
+      providerName = `${encodedName}_${String(suffix)}`;
+      suffix += 1;
+    }
+    internalToProvider.set(tool.name, providerName);
+    providerToInternal.set(providerName, tool.name);
+  }
+
+  return {
+    toInternal: (name) => providerToInternal.get(name) ?? name,
+    toProvider: (name) => internalToProvider.get(name) ?? name,
+  };
 }
 
 function generationPayload(
   connection: ProviderConnection,
   request: ProviderRequest,
+  toolNameAliases: ToolNameAliases,
 ): JsonObject {
   const generation = request.settings ?? {};
   const payload: JsonObject = {
@@ -44,7 +90,7 @@ function generationPayload(
         id: toolCall.id,
         type: "function",
         function: {
-          name: toolCall.name,
+          name: toolNameAliases.toProvider(toolCall.name),
           arguments: JSON.stringify(toolCall.arguments),
         },
       }));
@@ -56,14 +102,21 @@ function generationPayload(
           message.content.length === 0
             ? null
             : message.content,
-        ...(message.name === undefined ? {} : { name: message.name }),
+        ...(message.name === undefined
+          ? {}
+          : {
+              name:
+                message.role === "tool"
+                  ? toolNameAliases.toProvider(message.name)
+                  : message.name,
+            }),
         ...(message.toolCallId === undefined
           ? {}
           : { tool_call_id: message.toolCallId }),
         ...(toolCalls === undefined ? {} : { tool_calls: toolCalls }),
       };
     }),
-    stream: true,
+    stream: generation.stream !== false,
   };
   if (generation.temperature !== undefined)
     payload.temperature = generation.temperature;
@@ -77,7 +130,19 @@ function generationPayload(
   if (generation.maxOutputTokens !== undefined) {
     payload.max_tokens = generation.maxOutputTokens;
   }
-  if (generation.seed !== undefined) payload.seed = generation.seed;
+  if (generation.n !== undefined) payload.n = generation.n;
+  // SillyTavern-compatible presets use -1 as the "random seed" sentinel.
+  // Preserve that behavior while resolving it to a valid unsigned seed at
+  // request time; explicit non-negative seeds remain reproducible.
+  if (generation.seed === -1) {
+    payload.seed = randomInt(0, 0x1_0000_0000);
+  } else if (
+    generation.seed !== undefined &&
+    Number.isSafeInteger(generation.seed) &&
+    generation.seed >= 0
+  ) {
+    payload.seed = generation.seed;
+  }
   if (generation.stop && generation.stop.length > 0)
     payload.stop = generation.stop;
   for (const [key, value] of Object.entries(generation.additional ?? {})) {
@@ -89,7 +154,7 @@ function generationPayload(
     payload.tools = request.tools.map((tool) => ({
       type: "function",
       function: {
-        name: tool.name,
+        name: toolNameAliases.toProvider(tool.name),
         description: tool.description,
         parameters: tool.inputSchema,
       },
@@ -215,96 +280,156 @@ export class OpenAICompatibleProvider implements ModelProvider {
 
     const requestSignal = createRequestSignal(
       signal,
-      this.connection.timeoutMs ?? 60_000,
+      // Reasoning models routed through an OpenAI-compatible proxy can spend
+      // several minutes thinking and streaming a long reply. A one-minute
+      // whole-request deadline cuts off otherwise healthy generations.
+      this.connection.timeoutMs ?? 600_000,
     );
-    const tools = new Map<number, ToolAccumulator>();
+    const toolNameAliases = createToolNameAliases(request.tools);
+    const tools = new Map<string, ToolAccumulator>();
     try {
       const response = await this.fetchImpl(
         joinUrl(this.connection.baseUrl, "/chat/completions"),
         {
           method: "POST",
           headers: safeHeaders(this.connection),
-          body: JSON.stringify(generationPayload(this.connection, request)),
+          body: JSON.stringify(
+            generationPayload(this.connection, request, toolNameAliases),
+          ),
           signal: requestSignal.signal,
         },
       );
       if (!response.ok) throw await responseError(response);
 
       let finishReason: "stop" | "length" | "tool-calls" = "stop";
-      for await (const frame of readSseJson(response)) {
-        if (frame === "[DONE]") break;
+      let sawDone = false;
+      let sawFinishReason = false;
+      const contentType =
+        response.headers.get("content-type")?.toLowerCase() ?? "";
+      const frames =
+        contentType.includes("application/json") ||
+        request.settings?.stream === false
+          ? (async function* () {
+              const object = asJsonObject(await response.json());
+              if (object) yield object;
+            })()
+          : readSseJson(response);
+      for await (const frame of frames) {
+        if (frame === "[DONE]") {
+          sawDone = true;
+          break;
+        }
+        const usage = asJsonObject(frame.usage);
+        if (usage) {
+          yield emit({
+            type: "usage",
+            inputTokens: Number(usage.prompt_tokens ?? 0),
+            outputTokens: Number(usage.completion_tokens ?? 0),
+            ...(typeof usage.prompt_tokens_details === "object" ? {} : {}),
+          });
+        }
         const choices = Array.isArray(frame.choices) ? frame.choices : [];
-        const choice = asJsonObject(choices[0]);
-        if (!choice) {
-          const usage = asJsonObject(frame.usage);
-          if (usage) {
-            yield emit({
-              type: "usage",
-              inputTokens: Number(usage.prompt_tokens ?? 0),
-              outputTokens: Number(usage.completion_tokens ?? 0),
-              ...(typeof usage.prompt_tokens_details === "object" ? {} : {}),
-            });
-          }
-          continue;
-        }
-        const delta = asJsonObject(choice.delta);
-        if (delta) {
-          if (typeof delta.content === "string" && delta.content.length > 0) {
-            yield emit({ type: "text-delta", delta: delta.content });
-          }
-          const reasoning =
-            typeof delta.reasoning_content === "string"
-              ? delta.reasoning_content
-              : typeof delta.reasoning === "string"
-                ? delta.reasoning
-                : undefined;
-          if (reasoning) {
-            yield emit({ type: "reasoning-delta", delta: reasoning });
-          }
-          const toolDeltas = Array.isArray(delta.tool_calls)
-            ? delta.tool_calls
-            : [];
-          for (const raw of toolDeltas) {
-            const item = asJsonObject(raw);
-            if (!item) continue;
-            const index =
-              typeof item.index === "number" ? item.index : tools.size;
-            const functionData = asJsonObject(item.function);
-            const current = tools.get(index) ?? {
-              id:
-                typeof item.id === "string"
-                  ? item.id
-                  : `${request.requestId}-tool-${String(index)}`,
-              name: "",
-              argumentsText: "",
-              started: false,
-            };
-            if (typeof item.id === "string") current.id = item.id;
-            if (typeof functionData?.name === "string") {
-              current.name += functionData.name;
-            }
-            if (!current.started && current.name) {
-              current.started = true;
+        for (const [position, rawChoice] of choices.entries()) {
+          const choice = asJsonObject(rawChoice);
+          if (!choice) continue;
+          const choiceIndex =
+            typeof choice.index === "number" &&
+            Number.isInteger(choice.index) &&
+            choice.index >= 0
+              ? choice.index
+              : position;
+          const delta =
+            asJsonObject(choice.delta) ?? asJsonObject(choice.message);
+          if (delta) {
+            if (typeof delta.content === "string" && delta.content.length > 0) {
               yield emit({
-                type: "tool-call-start",
-                callId: current.id,
-                name: current.name,
+                type: "text-delta",
+                delta: delta.content,
+                ...(choiceIndex === 0 ? {} : { choiceIndex }),
               });
             }
-            if (typeof functionData?.arguments === "string") {
-              current.argumentsText += functionData.arguments;
+            const reasoning =
+              typeof delta.reasoning_content === "string"
+                ? delta.reasoning_content
+                : typeof delta.reasoning === "string"
+                  ? delta.reasoning
+                  : undefined;
+            if (reasoning) {
               yield emit({
-                type: "tool-call-delta",
-                callId: current.id,
-                argumentsDelta: functionData.arguments,
+                type: "reasoning-delta",
+                delta: reasoning,
+                ...(choiceIndex === 0 ? {} : { choiceIndex }),
               });
             }
-            tools.set(index, current);
+            const toolDeltas = Array.isArray(delta.tool_calls)
+              ? delta.tool_calls
+              : [];
+            for (const raw of toolDeltas) {
+              const item = asJsonObject(raw);
+              if (!item) continue;
+              const index =
+                typeof item.index === "number" &&
+                Number.isInteger(item.index) &&
+                item.index >= 0
+                  ? item.index
+                  : 0;
+              const toolKey = `${String(choiceIndex)}:${String(index)}`;
+              const functionData = asJsonObject(item.function);
+              const current = tools.get(toolKey) ?? {
+                id:
+                  typeof item.id === "string"
+                    ? item.id
+                    : `${request.requestId}-choice-${String(choiceIndex)}-tool-${String(index)}`,
+                name: "",
+                argumentsText: "",
+                choiceIndex,
+                started: false,
+              };
+              if (typeof item.id === "string") current.id = item.id;
+              if (typeof functionData?.name === "string") {
+                current.name += functionData.name;
+              }
+              if (!current.started && current.name) {
+                current.started = true;
+                yield emit({
+                  type: "tool-call-start",
+                  callId: current.id,
+                  name: toolNameAliases.toInternal(current.name),
+                  ...(choiceIndex === 0 ? {} : { choiceIndex }),
+                });
+              }
+              if (typeof functionData?.arguments === "string") {
+                current.argumentsText += functionData.arguments;
+                yield emit({
+                  type: "tool-call-delta",
+                  callId: current.id,
+                  argumentsDelta: functionData.arguments,
+                  ...(choiceIndex === 0 ? {} : { choiceIndex }),
+                });
+              }
+              tools.set(toolKey, current);
+            }
+          }
+          const rawFinish = choice.finish_reason;
+          if (typeof rawFinish === "string" && rawFinish.length > 0) {
+            sawFinishReason = true;
+          }
+          if (choiceIndex === 0) {
+            if (rawFinish === "length") finishReason = "length";
+            if (rawFinish === "tool_calls") finishReason = "tool-calls";
           }
         }
-        const rawFinish = choice.finish_reason;
-        if (rawFinish === "length") finishReason = "length";
-        if (rawFinish === "tool_calls") finishReason = "tool-calls";
+      }
+
+      if (!sawDone && !sawFinishReason) {
+        yield emit({
+          type: "error",
+          code: "PROVIDER_STREAM_INCOMPLETE",
+          message:
+            "Provider closed the streaming response before sending a completion marker.",
+          retryable: true,
+        });
+        return;
       }
 
       for (const tool of [...tools.values()]) {
@@ -315,7 +440,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
           yield emit({
             type: "error",
             code: "TOOL_ARGUMENT_INVALID",
-            message: `Provider returned invalid JSON arguments for '${tool.name}'.`,
+            message: `Provider returned invalid JSON arguments for '${toolNameAliases.toInternal(tool.name)}'.`,
             retryable: false,
           });
           continue;
@@ -323,19 +448,23 @@ export class OpenAICompatibleProvider implements ModelProvider {
         yield emit({
           type: "tool-call-complete",
           callId: tool.id,
-          name: tool.name || "unknown-tool",
+          name: toolNameAliases.toInternal(tool.name || "unknown-tool"),
           arguments: args,
+          ...(tool.choiceIndex === 0 ? {} : { choiceIndex: tool.choiceIndex }),
         });
       }
       yield emit({ type: "finish", reason: finishReason });
     } catch (error) {
-      if (requestSignal.signal.aborted) {
+      if (signal?.aborted) {
         yield emit({ type: "finish", reason: "cancelled" });
       } else {
+        const reason: unknown = requestSignal.signal.aborted
+          ? requestSignal.signal.reason
+          : error;
         yield emit({
           type: "error",
           code: "PROVIDER_REQUEST_FAILED",
-          message: error instanceof Error ? error.message : String(error),
+          message: reason instanceof Error ? reason.message : String(reason),
           retryable: true,
         });
       }

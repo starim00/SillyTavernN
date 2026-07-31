@@ -603,6 +603,89 @@ describe("prompt preset routes", () => {
     });
   });
 
+  it("updates generation controls with revision checks and preserves legacy fields", async () => {
+    const { app } = await application();
+    const imported = await app.inject({
+      method: "POST",
+      url: "/api/presets/import",
+      payload: { source, filename: "clean-room-generation.json" },
+    });
+    expect(imported.statusCode).toBe(201);
+    const importedPreset = (
+      imported.json() as {
+        data: { preset: { id: string; revision: number } };
+      }
+    ).data.preset;
+
+    const updated = await app.inject({
+      method: "PATCH",
+      url: `/api/presets/${encodeURIComponent(importedPreset.id)}/generation`,
+      payload: {
+        expectedRevision: importedPreset.revision,
+        generation: {
+          temperature: 1.25,
+          topP: 0.72,
+          frequencyPenalty: -0.2,
+          presencePenalty: 0.35,
+          maxOutputTokens: 2048,
+          n: 3,
+          stream: false,
+          additional: {
+            maxContextTokens: 200_000,
+            maxContextUnlocked: true,
+          },
+        },
+      },
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json()).toMatchObject({
+      data: {
+        revision: importedPreset.revision + 1,
+        payload: {
+          generation: {
+            temperature: 1.25,
+            topP: 0.72,
+            frequencyPenalty: -0.2,
+            presencePenalty: 0.35,
+            maxOutputTokens: 2048,
+            n: 3,
+            stream: false,
+            additional: {
+              maxContextTokens: 200_000,
+              maxContextUnlocked: true,
+            },
+          },
+        },
+      },
+    });
+
+    const exported = await app.inject({
+      method: "GET",
+      url:
+        `/api/presets/${encodeURIComponent(importedPreset.id)}/export` +
+        "?target=sillytavern&format=openai",
+    });
+    expect(exported.json()).toMatchObject({
+      openai_max_context: 200_000,
+      max_context_unlocked: true,
+      openai_max_tokens: 2048,
+      n: 3,
+      stream_openai: false,
+      temperature: 1.25,
+      top_p: 0.72,
+    });
+
+    const stale = await app.inject({
+      method: "PATCH",
+      url: `/api/presets/${encodeURIComponent(importedPreset.id)}/generation`,
+      payload: {
+        expectedRevision: importedPreset.revision,
+        generation: { temperature: 0.1 },
+      },
+    });
+    expect(stale.statusCode).toBe(409);
+  });
+
   it("keeps optional prompt definitions and supports per-prompt activation and content edits", async () => {
     const { app } = await application();
     const optionalSource = {

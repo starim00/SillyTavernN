@@ -288,6 +288,49 @@ describe("native Tavern Helper compatibility routes", () => {
     });
   });
 
+  it("inherits the latest MVU message state across conversations on one card", async () => {
+    const server = await application();
+    const card = server.context.store.createCard({
+      id: "card-cross-conversation-state",
+      kind: "character",
+      name: "Cross-conversation state card",
+    }).card;
+    const first = server.context.store.createConversation({
+      id: "conversation-cross-conversation-first",
+      title: "First state conversation",
+      cardId: card.id,
+    });
+    const firstMessage = server.context.store.addAssistantMessage({
+      id: "message-cross-conversation-first",
+      conversationId: first.id,
+      content: "Opening",
+    });
+    server.context.store.setExtensionSetting(
+      "stn.tavern-helper",
+      `variables:message:${firstMessage.id}`,
+      {
+        initialized_lorebooks: { "Cross-conversation state card": [] },
+        stat_data: { world: { day: 12 }, system: { created: true } },
+      },
+    );
+
+    const second = server.context.store.createConversation({
+      id: "conversation-cross-conversation-second",
+      title: "New state conversation",
+      cardId: card.id,
+    });
+    const response = await server.app.inject({
+      method: "GET",
+      url: `/api/compatibility/tavern-helper?conversationId=${second.id}`,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.variables.character).toEqual({
+      initialized_lorebooks: { "Cross-conversation state card": [] },
+      stat_data: { world: { day: 12 }, system: { created: true } },
+    });
+  });
+
   it("rejects message-variable writes outside the active conversation", async () => {
     const server = await application();
     const card = server.context.store.createCard({

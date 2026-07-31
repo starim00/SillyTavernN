@@ -28,6 +28,7 @@ import {
   undoAgentProposal,
   updateLegacyGrant,
   updatePresetPrompt,
+  updatePresetGeneration,
   updateRegexGrant,
   updateWorldbookEntry,
   updateWorldbookEntryPermission,
@@ -66,6 +67,85 @@ afterEach(() => {
 });
 
 describe("workspace API client", () => {
+  it("patches preset generation controls without replacing prompt definitions", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        data: {
+          id: "preset-generation",
+          name: "生成参数预设",
+          revision: 8,
+          payload: {
+            mode: "chat-completion",
+            prompts: [
+              {
+                id: "main",
+                name: "Main",
+                role: "system",
+                content: "Keep context.",
+                enabled: true,
+                order: 0,
+                systemPrompt: true,
+              },
+            ],
+            generation: {
+              temperature: 1.2,
+              topP: 0.8,
+              frequencyPenalty: -0.1,
+              presencePenalty: 0.2,
+              maxOutputTokens: 2048,
+              n: 2,
+              stream: false,
+              stop: [],
+              samplerOrder: [],
+              additional: {
+                maxContextTokens: 200_000,
+                maxContextUnlocked: true,
+              },
+            },
+          },
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const preset = await updatePresetGeneration({
+      presetId: "preset-generation",
+      expectedRevision: 7,
+      generation: {
+        temperature: 1.2,
+        n: 2,
+        stream: false,
+        additional: { maxContextTokens: 200_000 },
+      },
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/presets/preset-generation/generation",
+      expect.objectContaining({ method: "PATCH" }),
+    );
+    expect(
+      parseRequestBody((fetchMock.mock.calls[0]?.[1] as RequestInit).body),
+    ).toEqual({
+      expectedRevision: 7,
+      generation: {
+        temperature: 1.2,
+        n: 2,
+        stream: false,
+        additional: { maxContextTokens: 200_000 },
+      },
+    });
+    expect(preset).toMatchObject({
+      revision: 8,
+      generation: {
+        temperature: 1.2,
+        n: 2,
+        stream: false,
+        additional: { maxContextTokens: 200_000, maxContextUnlocked: true },
+      },
+      prompts: [expect.objectContaining({ id: "main" })],
+    });
+  });
+
   it("loads every imported preset prompt, including disabled optional entries", async () => {
     const fetchMock = vi.fn((url: string) => {
       if (url === "/api/health") {
@@ -190,6 +270,7 @@ describe("workspace API client", () => {
       if (
         [
           "/api/conversations",
+          "/api/personas",
           "/api/worldbooks",
           "/api/providers/connections",
         ].includes(url)
@@ -546,6 +627,38 @@ describe("workspace API client", () => {
       code: "UPSTREAM_FAILED",
     });
     expect(deltas).toEqual(["半条"]);
+  });
+
+  it("returns and preserves a partial reply when the server persisted it", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          sseResponse([
+            'data: {"type":"generation-id","generationId":"gen-partial"}\n\n',
+            'data: {"type":"text-delta","requestId":"gen-partial","sequence":1,"delta":"已经生成的内容"}\n\n',
+            'data: {"type":"error","code":"PROVIDER_REQUEST_FAILED","message":"upstream disconnected","retryable":true}\n\n',
+            'data: {"type":"message-persisted","messageId":"message-partial","revision":1,"incomplete":true,"reason":"error","errorCode":"PROVIDER_REQUEST_FAILED","errorMessage":"upstream disconnected"}\n\n',
+          ]),
+        ),
+    );
+
+    await expect(
+      generateConversation({
+        conversationId: "conversation-1",
+        connectionId: "cpa",
+      }),
+    ).resolves.toEqual({
+      generationId: "gen-partial",
+      messageId: "message-partial",
+      revision: 1,
+      content: "已经生成的内容",
+      incomplete: true,
+      reason: "error",
+      errorCode: "PROVIDER_REQUEST_FAILED",
+      errorMessage: "upstream disconnected",
+    });
   });
 
   it("exposes only user input and model replies in the message stream", async () => {

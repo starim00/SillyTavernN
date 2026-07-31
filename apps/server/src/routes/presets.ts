@@ -76,6 +76,13 @@ const promptOrderPatchSchema = z
     path: ["promptIds"],
   });
 
+const generationPatchSchema = z
+  .object({
+    expectedRevision: z.number().int().nonnegative(),
+    generation: GenerationSettingsSchema.partial(),
+  })
+  .strict();
+
 const generationKeys = [
   "temperature",
   "topP",
@@ -89,6 +96,7 @@ const generationKeys = [
   "frequencyPenalty",
   "presencePenalty",
   "maxOutputTokens",
+  "n",
   "seed",
   "mirostatMode",
   "mirostatTau",
@@ -644,6 +652,38 @@ export async function registerPresetRoutes(
                   },
                 };
           }),
+        });
+        return context.store.updatePreset({
+          id: current.id,
+          expectedRevision: input.expectedRevision,
+          patch: { payload: jsonObject(nextPreset) },
+        });
+      });
+      return envelope(updated);
+    },
+  );
+
+  app.patch<{ Params: { presetId: string } }>(
+    "/api/presets/:presetId/generation",
+    (request) => {
+      const input = generationPatchSchema.parse(request.body);
+      const updated = context.store.database.transaction(() => {
+        const current = context.store.getPreset(request.params.presetId);
+        const previous = persistedPreset(current);
+        const nextGeneration = GenerationSettingsSchema.parse({
+          ...previous.generation,
+          ...input.generation,
+          stop: input.generation.stop ?? previous.generation.stop,
+          samplerOrder:
+            input.generation.samplerOrder ?? previous.generation.samplerOrder,
+          additional: {
+            ...previous.generation.additional,
+            ...(input.generation.additional ?? {}),
+          },
+        });
+        const nextPreset = PromptPresetSchema.parse({
+          ...previous,
+          generation: nextGeneration,
         });
         return context.store.updatePreset({
           id: current.id,

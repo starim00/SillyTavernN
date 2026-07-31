@@ -10,6 +10,7 @@ import type {
   ModalState,
   PanelId,
   PersistedWorkspaceState,
+  Persona,
   PromptPreset,
   ProviderConnection,
   RegexScope,
@@ -28,7 +29,12 @@ type WorkspaceAction =
   | { type: "bootstrap/demo" }
   | { type: "card/select"; id: string }
   | { type: "conversation/create"; conversation: ConversationSpace }
+  | { type: "conversation/delete"; id: string }
   | { type: "conversation/select"; id: string }
+  | { type: "conversation/persona"; conversation: ConversationSpace }
+  | { type: "persona/replace"; persona: Persona }
+  | { type: "personas/replace"; personas: Persona[] }
+  | { type: "persona/remove"; id: string }
   | { type: "draft/change"; conversationId: string; value: string }
   | { type: "message/append"; message: WorkspaceMessage }
   | {
@@ -168,6 +174,7 @@ export function workspaceReducer(
       const {
         conversations,
         cards,
+        personas = [],
         participants,
         worldbooks,
         presets,
@@ -210,6 +217,7 @@ export function workspaceReducer(
         loading: false,
         conversations,
         cards,
+        personas,
         participants,
         messagesByConversation,
         worldbooks,
@@ -283,6 +291,57 @@ export function workspaceReducer(
         agentRun: null,
       };
     }
+    case "conversation/delete": {
+      const deleted = state.conversations.find(
+        (conversation) => conversation.id === action.id,
+      );
+      if (!deleted) return state;
+      const conversations = state.conversations.filter(
+        (conversation) => conversation.id !== action.id,
+      );
+      const remainingCardConversations = conversations.filter(
+        (conversation) => conversation.cardId === deleted.cardId,
+      );
+      const selectedConversationId =
+        state.selectedConversationId === action.id
+          ? (remainingCardConversations[0]?.id ?? "")
+          : state.selectedConversationId;
+      const messagesByConversation = Object.fromEntries(
+        Object.entries(state.messagesByConversation).filter(
+          ([conversationId]) => conversationId !== action.id,
+        ),
+      );
+      const draftByConversation = Object.fromEntries(
+        Object.entries(state.draftByConversation).filter(
+          ([conversationId]) => conversationId !== action.id,
+        ),
+      );
+      const agentConversationDeleted =
+        state.agentRun?.conversationId === action.id;
+      return {
+        ...state,
+        conversations,
+        cards: state.cards.map((card) =>
+          card.id === deleted.cardId
+            ? {
+                ...card,
+                conversationCount: Math.max(0, card.conversationCount - 1),
+              }
+            : card,
+        ),
+        messagesByConversation,
+        draftByConversation,
+        selectedConversationId,
+        promptTrace:
+          state.selectedConversationId === action.id ? [] : state.promptTrace,
+        generation:
+          state.generation.conversationId === action.id
+            ? idleGeneration()
+            : state.generation,
+        agentProposal: agentConversationDeleted ? null : state.agentProposal,
+        agentRun: agentConversationDeleted ? null : state.agentRun,
+      };
+    }
     case "conversation/select": {
       const selected = state.conversations.find(
         (conversation) => conversation.id === action.id,
@@ -297,6 +356,41 @@ export function workspaceReducer(
         agentRun: null,
       };
     }
+    case "conversation/persona":
+      return {
+        ...state,
+        conversations: state.conversations.map((conversation) =>
+          conversation.id === action.conversation.id
+            ? action.conversation
+            : conversation,
+        ),
+      };
+    case "persona/replace": {
+      const exists = state.personas.some(
+        (persona) => persona.id === action.persona.id,
+      );
+      const nextPersonas = exists
+        ? state.personas.map((persona) =>
+            persona.id === action.persona.id ? action.persona : persona,
+          )
+        : [action.persona, ...state.personas];
+      return {
+        ...state,
+        personas: action.persona.isDefault
+          ? nextPersonas.map((persona) => ({
+              ...persona,
+              isDefault: persona.id === action.persona.id,
+            }))
+          : nextPersonas,
+      };
+    }
+    case "personas/replace":
+      return { ...state, personas: action.personas };
+    case "persona/remove":
+      return {
+        ...state,
+        personas: state.personas.filter((persona) => persona.id !== action.id),
+      };
     case "draft/change":
       return {
         ...state,
@@ -675,6 +769,7 @@ export function loadWorkspaceState(): WorkspaceState {
       ...base,
       conversations: persisted.conversations ?? base.conversations,
       cards: persisted.cards ?? base.cards,
+      personas: persisted.personas ?? base.personas,
       participants: persisted.participants ?? base.participants,
       messagesByConversation:
         persisted.messagesByConversation ?? base.messagesByConversation,
@@ -707,6 +802,7 @@ export function persistWorkspaceState(state: WorkspaceState): void {
   const persisted: PersistedWorkspaceState = {
     conversations: state.conversations,
     cards: state.cards,
+    personas: state.personas,
     participants: state.participants,
     messagesByConversation: state.messagesByConversation,
     worldbooks: state.worldbooks,

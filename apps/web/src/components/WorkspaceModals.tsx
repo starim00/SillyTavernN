@@ -8,15 +8,20 @@ import {
   Plus,
   PuzzlePiece,
   ShieldWarning,
+  Star,
   Trash,
+  UserCircle,
+  UserPlus,
+  PencilSimple,
   X,
 } from "@phosphor-icons/react";
 import { useState, type FormEvent, type ReactNode } from "react";
 
-import type { LegacyHostPluginStatus } from "../api/workspaceApi";
+import type { LegacyHostPluginStatus, PersonaInput } from "../api/workspaceApi";
 import type {
   LegacyPlugin,
   ModalState,
+  Persona,
   ProviderConnection,
   ProviderConnectionInput,
   RoleCard,
@@ -616,6 +621,228 @@ function LibraryModal({
   );
 }
 
+function PersonaEditor({
+  current,
+  online,
+  onSave,
+}: {
+  current?: Persona;
+  online: boolean;
+  onSave: (input: PersonaInput, current?: Persona) => Promise<void>;
+}) {
+  const [name, setName] = useState(current?.name ?? "");
+  const [title, setTitle] = useState(current?.title ?? "");
+  const [description, setDescription] = useState(current?.description ?? "");
+  const [isDefault, setIsDefault] = useState(current?.isDefault ?? false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!name.trim() || submitting) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await onSave(
+        { name: name.trim(), title: title.trim(), description, isDefault },
+        current,
+      );
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "人设保存失败。");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <form className="persona-editor modal-form" onSubmit={submit}>
+      <div className="persona-editor__grid">
+        <label className="field">
+          <span>人设名称</span>
+          <input
+            autoFocus
+            value={name}
+            placeholder="例如：谨慎的旅人"
+            onChange={(event) => setName(event.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span>显示标题（可选）</span>
+          <input
+            value={title}
+            placeholder="例如：调查者"
+            onChange={(event) => setTitle(event.target.value)}
+          />
+        </label>
+        <label className="field persona-editor__wide">
+          <span>人设描述</span>
+          <textarea
+            rows={7}
+            value={description}
+            placeholder="这段描述会作为 Persona Description 提供给模型。支持 {{user}} 等提示词宏。"
+            onChange={(event) => setDescription(event.target.value)}
+          />
+        </label>
+      </div>
+      <label className="check-row">
+        <input
+          type="checkbox"
+          checked={isDefault}
+          onChange={(event) => setIsDefault(event.target.checked)}
+        />
+        <span>设为新对话默认人设</span>
+      </label>
+      <div className="modal-note">
+        <UserCircle size={17} />
+        <span>
+          切换人设只影响当前对话随后发送给模型的身份与描述，不会改写历史消息。
+        </span>
+      </div>
+      {error ? (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+      <footer className="modal-actions">
+        <button
+          className="button button--primary"
+          type="submit"
+          disabled={!online || !name.trim() || submitting}
+        >
+          {current ? <PencilSimple size={17} /> : <UserPlus size={17} />}
+          {submitting ? "正在保存" : current ? "保存人设" : "新增人设"}
+        </button>
+      </footer>
+    </form>
+  );
+}
+
+function PersonasModal({
+  personas,
+  activePersonaId,
+  online,
+  onClose,
+  onSelect,
+  onSave,
+  onDelete,
+}: {
+  personas: Persona[];
+  activePersonaId: string | null;
+  online: boolean;
+  onClose: () => void;
+  onSelect: (persona: Persona) => Promise<void>;
+  onSave: (input: PersonaInput, current?: Persona) => Promise<void>;
+  onDelete: (persona: Persona) => Promise<void>;
+}) {
+  const [editingId, setEditingId] = useState<string | null>(
+    personas[0]?.id ?? null,
+  );
+  const current = personas.find((persona) => persona.id === editingId);
+
+  return (
+    <ModalFrame
+      title="我的人设"
+      description="创建多个用户身份，并在当前对话中随时切换。"
+      icon={<UserCircle size={22} />}
+      onClose={onClose}
+      size="large"
+    >
+      <div className="persona-settings">
+        <div className="persona-list" aria-label="用户人设列表">
+          {personas.map((persona) => {
+            const active = persona.id === activePersonaId;
+            return (
+              <div
+                className={`persona-row${active ? " is-selected" : ""}${
+                  editingId === persona.id ? " is-editing" : ""
+                }`}
+                key={persona.id}
+              >
+                <button
+                  className="persona-row__select"
+                  type="button"
+                  onClick={() => void onSelect(persona)}
+                >
+                  <UserCircle size={19} />
+                  <span>
+                    <strong>{persona.name}</strong>
+                    <small>
+                      {persona.title || persona.description || "暂无描述"}
+                    </small>
+                  </span>
+                  {active ? (
+                    <SurfaceStatus tone="mint">当前</SurfaceStatus>
+                  ) : null}
+                </button>
+                <div className="persona-row__actions">
+                  {persona.isDefault ? (
+                    <span
+                      className="persona-row__default"
+                      title="新对话默认人设"
+                    >
+                      <Star size={14} weight="fill" />
+                    </span>
+                  ) : null}
+                  <IconButton
+                    compact
+                    label={`编辑人设 ${persona.name}`}
+                    icon={<PencilSimple size={15} />}
+                    onClick={() => setEditingId(persona.id)}
+                  />
+                  <IconButton
+                    compact
+                    className="persona-row__delete"
+                    label={`删除人设 ${persona.name}`}
+                    icon={<Trash size={15} />}
+                    onClick={() => void onDelete(persona)}
+                  />
+                </div>
+              </div>
+            );
+          })}
+          {personas.length === 0 ? (
+            <div className="rail-empty">
+              <UserCircle size={24} />
+              <strong>还没有用户人设</strong>
+              <span>先创建一个人设，让模型知道你是谁。</span>
+            </div>
+          ) : null}
+          <button
+            className="button button--secondary button--full"
+            type="button"
+            disabled={!online}
+            onClick={() => setEditingId("new")}
+          >
+            <UserPlus size={17} />
+            新增人设
+          </button>
+        </div>
+        <PersonaEditor
+          key={editingId ?? "new"}
+          {...(current ? { current } : {})}
+          online={online}
+          onSave={async (input, selected) => {
+            await onSave(input, selected);
+            if (!selected) setEditingId(null);
+          }}
+        />
+      </div>
+      {!online ? (
+        <p className="offline-note">连接本地服务后才能保存用户人设。</p>
+      ) : null}
+      <footer className="modal-actions">
+        <button
+          className="button button--primary"
+          type="button"
+          onClick={onClose}
+        >
+          完成
+        </button>
+      </footer>
+    </ModalFrame>
+  );
+}
+
 function CreateConversationModal({
   card,
   onClose,
@@ -778,6 +1005,8 @@ type WorkspaceModalsProps = {
   modal: ModalState;
   apiOnline: boolean;
   cards: RoleCard[];
+  personas?: Persona[];
+  activePersonaId?: string | null;
   plugins: LegacyPlugin[];
   legacyHostPlugins: Record<string, LegacyHostPluginStatus>;
   worldbooks: Worldbook[];
@@ -786,6 +1015,9 @@ type WorkspaceModalsProps = {
   onClose: () => void;
   onSelectCard: (cardId: string) => void;
   onDeleteCard: (card: RoleCard) => void;
+  onSelectPersona?: (persona: Persona) => Promise<void>;
+  onSavePersona?: (input: PersonaInput, current?: Persona) => Promise<void>;
+  onDeletePersona?: (persona: Persona) => Promise<void>;
   onCreateConversation: (input: {
     title: string;
     cardId: string;
@@ -809,6 +1041,8 @@ export function WorkspaceModals({
   modal,
   apiOnline,
   cards,
+  personas = [],
+  activePersonaId = null,
   plugins,
   legacyHostPlugins,
   worldbooks,
@@ -817,6 +1051,9 @@ export function WorkspaceModals({
   onClose,
   onSelectCard,
   onDeleteCard,
+  onSelectPersona,
+  onSavePersona,
+  onDeletePersona,
   onCreateConversation,
   onImport,
   onInstallPlugin,
@@ -855,6 +1092,25 @@ export function WorkspaceModals({
       />
     );
   }
+  if (
+    modal.kind === "personas" &&
+    onSelectPersona &&
+    onSavePersona &&
+    onDeletePersona
+  ) {
+    return (
+      <PersonasModal
+        personas={personas}
+        activePersonaId={activePersonaId}
+        online={apiOnline}
+        onClose={onClose}
+        onSelect={onSelectPersona}
+        onSave={onSavePersona}
+        onDelete={onDeletePersona}
+      />
+    );
+  }
+  if (modal.kind === "personas") return null;
   if (modal.kind === "library") {
     return (
       <LibraryModal

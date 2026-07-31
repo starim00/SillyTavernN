@@ -63,6 +63,8 @@ const ROOT_KNOWN_FIELDS: Readonly<Record<PresetFormat, readonly string[]>> = {
     "repetition_penalty",
     "openai_max_context",
     "openai_max_tokens",
+    "max_context_unlocked",
+    "n",
     "seed",
     "stream_openai",
     "stop",
@@ -435,6 +437,10 @@ function generationOf(source: JsonObject): GenerationSettings {
       Math.trunc(maxContextTokens),
     );
   }
+  const maxContextUnlocked = readBoolean(source, "max_context_unlocked");
+  if (maxContextUnlocked !== undefined) {
+    generation.additional.maxContextUnlocked = maxContextUnlocked;
+  }
   const numbers: Array<
     readonly [
       keyof GenerationSettings,
@@ -470,6 +476,7 @@ function generationOf(source: JsonObject): GenerationSettings {
       ["openai_max_tokens", "max_length", "genamt"],
       (value) => Math.max(1, Math.trunc(value)),
     ],
+    ["n", ["n"], (value) => Math.max(1, Math.trunc(value))],
     ["seed", ["seed"], (value) => Math.trunc(value)],
     [
       "mirostatMode",

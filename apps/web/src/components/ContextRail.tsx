@@ -42,6 +42,10 @@ import type {
   WorldbookEntry,
   WorldbookEntryUpdate,
 } from "../domain/workspace";
+import {
+  PresetGenerationControls,
+  type PresetGenerationPatch,
+} from "./PresetGenerationControls";
 import { IconButton, SurfaceStatus } from "./WorkspacePrimitives";
 import { RegexManager } from "./RegexManager";
 
@@ -279,6 +283,7 @@ export function PresetDetail({
   preset,
   onToggle,
   onSave,
+  onSaveGeneration,
   onInsert,
   onDetach,
   onReorder,
@@ -286,6 +291,7 @@ export function PresetDetail({
   preset: PromptPreset;
   onToggle: (promptId: string, enabled: boolean) => Promise<void>;
   onSave: (promptId: string, content: string) => Promise<void>;
+  onSaveGeneration: (patch: PresetGenerationPatch) => Promise<void>;
   onInsert: (promptId: string) => Promise<void>;
   onDetach: (promptId: string) => Promise<void>;
   onReorder: (promptIds: string[]) => Promise<void>;
@@ -476,6 +482,7 @@ export function PresetDetail({
           {uninsertedPrompts.length} 未插入
         </SurfaceStatus>
       </div>
+      <PresetGenerationControls preset={preset} onSave={onSaveGeneration} />
       {preset.prompts.length > 0 ? (
         <>
           {uninsertedPrompts.length > 0 ? (

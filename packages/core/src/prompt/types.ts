@@ -75,6 +75,7 @@ export interface PromptAssemblyInput {
   readonly worldbooks?: readonly Worldbook[];
   readonly preset?: PromptPreset;
   readonly persona?: string;
+  readonly personaId?: string;
   readonly userName?: string;
   readonly currentInput?: string;
   readonly systemInstruction?: string;

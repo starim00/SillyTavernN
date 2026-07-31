@@ -10,6 +10,7 @@ import {
   Trash,
   X,
 } from "@phosphor-icons/react";
+import { parseDocument } from "htmlparser2";
 import Markdown from "markdown-to-jsx";
 import { marked } from "marked";
 import {
@@ -27,8 +28,6 @@ import type { GenerationState, WorkspaceMessage } from "../domain/workspace";
 import { EmptyState, IconButton } from "./WorkspacePrimitives";
 
 const HTML_MARKUP_PATTERN = /<(?:!doctype|!--|\/?[a-z][^>]*>)/iu;
-const HTML_DOCUMENT_OR_ACTIVE_CONTENT_PATTERN =
-  /<(?:!doctype|!--|\/?(?:html|head|body|base|meta|link|style|script|noscript|iframe|object|embed|canvas|svg|math|template|slot|form|input|button|select|option|textarea|label|fieldset|dialog|video|audio|source|track|picture|img|table|thead|tbody|tfoot|tr|th|td|details|summary|section|article|main|nav|header|footer|aside|address|figure|figcaption|div|span|p|br|hr|h[1-6]|ul|ol|li|blockquote|pre|code|a|strong|em|b|i|u|s|del|ins|mark|small|sub|sup|ruby|rt|rp|time|data|meter|progress)\b[^>]*>)/iu;
 const CUSTOM_DOCUMENT_TAG_PATTERN =
   /<\/?[a-z][\w:.-]*(?:\s[^<>\r\n]*?)?\s*\/?>/giu;
 const FENCED_HTML_PATTERN =
@@ -37,12 +36,11 @@ const FENCED_HTML_BLOCK_PATTERN =
   /```(?:html)?[^\S\r\n]*\r?\n([\s\S]*?)\r?\n```/giu;
 const FULL_HTML_DOCUMENT_PATTERN = /^\s*(?:<!doctype\b[^>]*>\s*)?<html\b/iu;
 const HIDDEN_DOCUMENT_WRAPPER_PATTERN =
-  /<\/?(?:dream|thinking|reasoning|analysis)\b[^>]*>/giu;
-const MIXED_DOCUMENT_HTML_PATTERN =
-  /<style\b[^>]*>[\s\S]*?<\/style>|<script\b[^>]*>[\s\S]*?<\/script>|<!--[\s\S]*?-->|<\/?[a-z][^>]*>/giu;
+  /<\/?(?:dream|thinking|reasoning|analysis|tableedit)\b[^>]*>/giu;
 const FRAME_HEIGHT_MESSAGE_TYPE = "stn:message-frame-height";
 const FRAME_STORAGE_MESSAGE_TYPE = "stn:message-frame-storage";
 const FRAME_SEND_MESSAGE_TYPE = "stn:message-frame-send";
+const FRAME_MVU_UPDATE_MESSAGE_TYPE = "stn:message-frame-mvu-update";
 const FRAME_HEIGHT_MIN = 96;
 const FRAME_HEIGHT_MAX = 1_000_000;
 const FRAME_STORAGE_PREFIX = "sillytavern-n.message-frame-storage.v1:";
@@ -81,6 +79,17 @@ function frameStorageKey(namespace: string): string {
   return `${FRAME_STORAGE_PREFIX}${namespace}`;
 }
 
+export function clearMessageFrameStorage(conversationId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(
+      frameStorageKey(`conversation:${conversationId}`),
+    );
+  } catch {
+    // Storage is optional; an unavailable browser store must not block chat.
+  }
+}
+
 function loadFrameStorage(namespace: string): Record<string, string> {
   if (typeof window === "undefined") return {};
   try {
@@ -96,6 +105,35 @@ function loadFrameStorage(namespace: string): Record<string, string> {
   } catch {
     return {};
   }
+}
+
+function loadFrameStorageWithFallbacks(
+  namespace: string,
+  fallbackNamespaces: readonly string[],
+): Record<string, string> {
+  const primary = loadFrameStorage(namespace);
+  if (fallbackNamespaces.length === 0) return primary;
+
+  const merged = { ...primary };
+  for (const fallbackNamespace of fallbackNamespaces) {
+    const fallback = loadFrameStorage(fallbackNamespace);
+    for (const [key, value] of Object.entries(fallback)) {
+      if (!Object.hasOwn(merged, key)) merged[key] = value;
+    }
+  }
+
+  try {
+    if (JSON.stringify(merged).length > FRAME_STORAGE_MAX_LENGTH) {
+      return primary;
+    }
+  } catch {
+    return primary;
+  }
+
+  if (Object.keys(merged).length !== Object.keys(primary).length) {
+    saveFrameStorage(namespace, merged);
+  }
+  return merged;
 }
 
 function saveFrameStorage(
@@ -122,8 +160,9 @@ function escapeInlineJson(value: unknown): string {
 function frameCompatibilityScript(
   frameId: string,
   storage: Record<string, string>,
+  messageVariables: Record<string, unknown>,
 ): string {
-  return `const __stnFrameId=${escapeInlineJson(frameId)};const __stnValues=new Map(Object.entries(${escapeInlineJson(storage)}));const __stnNotify=(operation,key,value)=>parent.postMessage({type:"${FRAME_STORAGE_MESSAGE_TYPE}",frameId:__stnFrameId,operation,key,value},"*");const __stnLocalStorage={get length(){return __stnValues.size},key(index){return Array.from(__stnValues.keys())[Number(index)]??null},getItem(key){key=String(key);return __stnValues.has(key)?__stnValues.get(key):null},setItem(key,value){key=String(key);value=String(value);__stnValues.set(key,value);__stnNotify("set",key,value)},removeItem(key){key=String(key);__stnValues.delete(key);__stnNotify("remove",key,null)},clear(){__stnValues.clear();__stnNotify("clear","",null)}};const __stnPrompt=(message,defaultValue="")=>typeof window.prompt==="function"?window.prompt(message,defaultValue):(navigator.userActivation?.isActive?String(defaultValue??""):null);const __stnConfirm=(message)=>typeof window.confirm==="function"?window.confirm(message):navigator.userActivation?.isActive===true;const __stnAlert=(message)=>{if(typeof window.alert==="function")window.alert(message)};let __stnPendingInput="";const __stnInputProxy={get value(){return __stnPendingInput},set value(value){__stnPendingInput=String(value)},dispatchEvent(){return true}};const __stnSendProxy={click(){const content=__stnPendingInput.trim();if(content)parent.postMessage({type:"${FRAME_SEND_MESSAGE_TYPE}",frameId:__stnFrameId,content},"*")}};const __stnParentDocument=Object.freeze({querySelector(selector){if(selector==="#send_textarea")return __stnInputProxy;if(selector==="#send_but")return __stnSendProxy;return null}});`;
+  return `const __stnFrameId=${escapeInlineJson(frameId)};const __stnValues=new Map(Object.entries(${escapeInlineJson(storage)}));const __stnNotify=(operation,key,value)=>parent.postMessage({type:"${FRAME_STORAGE_MESSAGE_TYPE}",frameId:__stnFrameId,operation,key,value},"*");const __stnLocalStorage={get length(){return __stnValues.size},key(index){return Array.from(__stnValues.keys())[Number(index)]??null},getItem(key){key=String(key);return __stnValues.has(key)?__stnValues.get(key):null},setItem(key,value){key=String(key);value=String(value);__stnValues.set(key,value);__stnNotify("set",key,value)},removeItem(key){key=String(key);__stnValues.delete(key);__stnNotify("remove",key,null)},clear(){__stnValues.clear();__stnNotify("clear","",null)}};const __stnPrompt=(message,defaultValue="")=>typeof window.prompt==="function"?window.prompt(message,defaultValue):(navigator.userActivation?.isActive?String(defaultValue??""):null);const __stnConfirm=(message)=>typeof window.confirm==="function"?window.confirm(message):navigator.userActivation?.isActive===true;const __stnAlert=(message)=>{if(typeof window.alert==="function")window.alert(message)};let __stnPendingInput="";const __stnInputProxy={get value(){return __stnPendingInput},set value(value){__stnPendingInput=String(value)},dispatchEvent(){return true}};const __stnSendProxy={click(){const content=__stnPendingInput.trim();if(content)parent.postMessage({type:"${FRAME_SEND_MESSAGE_TYPE}",frameId:__stnFrameId,content},"*")}};const __stnParentDocument=Object.freeze({querySelector(selector){if(selector==="#send_textarea")return __stnInputProxy;if(selector==="#send_but")return __stnSendProxy;return null}});const __stnClone=value=>value===undefined?undefined:JSON.parse(JSON.stringify(value));let __stnMvuData=__stnClone(${escapeInlineJson(messageVariables)});const __stnPath=path=>String(path).split(".").filter(Boolean);const __stnGet=(value,path,fallback)=>{let cursor=value;for(const key of __stnPath(path)){if(cursor==null||!Object.prototype.hasOwnProperty.call(Object(cursor),key))return fallback;cursor=cursor[key]}return cursor};const __stnSet=(value,path,next)=>{const parts=__stnPath(path);let cursor=value;parts.forEach((key,index)=>{if(index===parts.length-1){cursor[key]=next;return}if(!cursor[key]||typeof cursor[key]!=="object")cursor[key]={};cursor=cursor[key]});return value};const __stnUnset=(value,path)=>{const parts=__stnPath(path);const key=parts.pop();const parentValue=parts.length?__stnGet(value,parts.join(".")):value;if(parentValue&&key)delete parentValue[key];return value};window._=window._||{get:__stnGet,set:__stnSet,unset:__stnUnset,cloneDeep:__stnClone,isArray:Array.isArray,isEmpty:value=>value==null||(Array.isArray(value)?value.length===0:typeof value==="object"?Object.keys(value).length===0:false)};const __stnMvuEvent="mag_variable_update_ended";window.Mvu={events:{VARIABLE_UPDATE_ENDED:__stnMvuEvent,VARIABLE_INITIALIZED:"mag_variable_initialized"},getMvuData(){return __stnMvuData},async replaceMvuData(value){__stnMvuData=__stnClone(value)||{};parent.postMessage({type:"${FRAME_MVU_UPDATE_MESSAGE_TYPE}",frameId:__stnFrameId,variables:__stnMvuData},"*");document.dispatchEvent(new CustomEvent(__stnMvuEvent,{detail:__stnMvuData,bubbles:true}));return __stnMvuData}};window.getChatMessages=async()=>[{message_id:-1,data:__stnMvuData,swipes_data:[__stnMvuData]}];window.getCurrentMessageId=()=>-1;window.getLastMessageId=()=>-1;`;
 }
 
 function adaptLegacyScriptApis(content: string): string {
@@ -131,6 +170,12 @@ function adaptLegacyScriptApis(content: string): string {
     /(<script\b[^>]*>)([\s\S]*?)(<\/script>)/giu,
     (_match, opening: string, code: string, closing: string) => {
       const adapted = code
+        .replaceAll("window.parent?.Mvu", "window.Mvu")
+        .replaceAll("window.parent.Mvu", "window.Mvu")
+        .replaceAll("window.top?.Mvu", "window.Mvu")
+        .replaceAll("window.top.Mvu", "window.Mvu")
+        .replaceAll("window.parent && window.Mvu", "window.Mvu")
+        .replaceAll("window.top && window.Mvu", "window.Mvu")
         .replaceAll("window.parent.document", "__stnParentDocument")
         .replaceAll("parent.document", "__stnParentDocument")
         .replaceAll("window.localStorage", "__stnLocalStorage")
@@ -155,9 +200,10 @@ function escapeHtmlAttribute(value: string): string {
 }
 
 export function isHtmlDisplayContent(value: string): boolean {
-  const fenced = FENCED_HTML_PATTERN.exec(value)?.[1];
+  const source = value.replace(HIDDEN_DOCUMENT_WRAPPER_PATTERN, "");
+  const fenced = FENCED_HTML_PATTERN.exec(source)?.[1];
   if (fenced !== undefined) return HTML_MARKUP_PATTERN.test(fenced);
-  return HTML_DOCUMENT_OR_ACTIVE_CONTENT_PATTERN.test(value);
+  return HTML_MARKUP_PATTERN.test(source);
 }
 
 export function htmlDisplayContent(value: string): string {
@@ -177,69 +223,99 @@ export type DisplayContentSegment = {
 };
 
 function looseDisplayContentSegment(content: string): DisplayContentSegment {
-  if (FULL_HTML_DOCUMENT_PATTERN.test(content)) {
-    return { kind: "html", content };
+  const visibleContent = content.replace(HIDDEN_DOCUMENT_WRAPPER_PATTERN, "");
+  if (FULL_HTML_DOCUMENT_PATTERN.test(visibleContent)) {
+    return { kind: "html", content: visibleContent };
   }
+  const containsFencedHtml = [
+    ...visibleContent.matchAll(FENCED_HTML_BLOCK_PATTERN),
+  ].some((match) => HTML_MARKUP_PATTERN.test(match[1] ?? ""));
   return {
-    kind: HTML_DOCUMENT_OR_ACTIVE_CONTENT_PATTERN.test(content)
-      ? "mixed"
-      : "markdown",
+    kind:
+      HTML_MARKUP_PATTERN.test(visibleContent) || containsFencedHtml
+        ? "mixed"
+        : "markdown",
     content,
   };
 }
 
-export function mixedDisplayContent(value: string): string {
-  const source = value.replace(HIDDEN_DOCUMENT_WRAPPER_PATTERN, "");
-  let tokenPrefix = "STNMIXEDHTMLTOKEN";
+function startsAtLineBoundary(source: string, index: number): boolean {
+  const lineStart = source.lastIndexOf("\n", Math.max(0, index - 1)) + 1;
+  return source.slice(lineStart, index).trim().length === 0;
+}
+
+function protectCompleteHtmlBlocks(source: string): {
+  blocks: string[];
+  content: string;
+  tokenPrefix: string;
+} {
+  let tokenPrefix = "STNHTMLBLOCK";
   while (source.includes(tokenPrefix)) tokenPrefix += "_";
-  const htmlTokens: string[] = [];
-  const protectedSource = source.replace(
-    MIXED_DOCUMENT_HTML_PATTERN,
-    (html) => {
-      const token = `${tokenPrefix}${String(htmlTokens.length)}END`;
-      htmlTokens.push(html);
-      return token;
-    },
-  );
-  const rendered = marked.parse(protectedSource, {
+
+  const document = parseDocument(source, {
+    recognizeSelfClosing: true,
+    withEndIndices: true,
+    withStartIndices: true,
+  });
+  const ranges = document.children.flatMap((node) => {
+    const start = node.startIndex;
+    const end = node.endIndex;
+    if (
+      node.type === "text" ||
+      typeof start !== "number" ||
+      typeof end !== "number" ||
+      !startsAtLineBoundary(source, start)
+    ) {
+      return [];
+    }
+    return [{ end: end + 1, start }];
+  });
+
+  const blocks: string[] = [];
+  let content = "";
+  let cursor = 0;
+  for (const range of ranges) {
+    content += source.slice(cursor, range.start);
+    const index = blocks.length;
+    blocks.push(source.slice(range.start, range.end));
+    content += `<!--${tokenPrefix}${String(index)}END-->`;
+    cursor = range.end;
+  }
+  content += source.slice(cursor);
+  return { blocks, content, tokenPrefix };
+}
+
+export function mixedDisplayContent(value: string): string {
+  const source = value
+    .replace(HIDDEN_DOCUMENT_WRAPPER_PATTERN, "")
+    .replace(FENCED_HTML_BLOCK_PATTERN, (fence, content: string) =>
+      HTML_MARKUP_PATTERN.test(content) ? content : fence,
+    );
+  const protectedHtml = protectCompleteHtmlBlocks(source);
+  const rendered = marked.parse(protectedHtml.content, {
     async: false,
     breaks: true,
     gfm: true,
   });
   return rendered.replace(
-    new RegExp(`${tokenPrefix}(\\d+)END`, "gu"),
-    (_match, index: string) => htmlTokens[Number(index)] ?? "",
+    new RegExp(`<!--${protectedHtml.tokenPrefix}(\\d+)END-->`, "gu"),
+    (_match, index: string) => protectedHtml.blocks[Number(index)] ?? "",
   );
 }
 
 export function displayContentSegments(value: string): DisplayContentSegment[] {
-  const matches = [...value.matchAll(FENCED_HTML_BLOCK_PATTERN)].filter(
-    (match) => HTML_MARKUP_PATTERN.test(match[1] ?? ""),
-  );
-  if (matches.length === 0) {
-    return [looseDisplayContentSegment(value)];
+  const fenced = FENCED_HTML_PATTERN.exec(value)?.[1];
+  if (fenced !== undefined && HTML_MARKUP_PATTERN.test(fenced)) {
+    return [{ kind: "html", content: fenced }];
   }
-
-  const segments: DisplayContentSegment[] = [];
-  let cursor = 0;
-  const appendLooseContent = (content: string) => {
-    if (markdownDisplayContent(content).length === 0) return;
-    segments.push(looseDisplayContentSegment(content));
-  };
-  for (const match of matches) {
-    const index = match.index ?? cursor;
-    appendLooseContent(value.slice(cursor, index));
-    segments.push({ kind: "html", content: match[1] ?? "" });
-    cursor = index + match[0].length;
-  }
-  appendLooseContent(value.slice(cursor));
-  return segments;
+  return [looseDisplayContentSegment(value)];
 }
 
 export function sandboxedDisplayDocument(
   content: string,
   resizeFrameId?: string,
   frameStorage: Record<string, string> = {},
+  messageVariables: Record<string, unknown> = {},
 ): string {
   const displayContent = adaptLegacyScriptApis(htmlDisplayContent(content));
   const withResizeReporter = resizeFrameId !== undefined;
@@ -250,7 +326,11 @@ export function sandboxedDisplayDocument(
     ? `<script>${FRAME_RESIZE_SCRIPT}</script>`
     : "";
   const compatibilityScript = withResizeReporter
-    ? `<script>${frameCompatibilityScript(resizeFrameId, frameStorage)}</script>`
+    ? `<script>${frameCompatibilityScript(
+        resizeFrameId,
+        frameStorage,
+        messageVariables,
+      )}</script>`
     : "";
   return `<!doctype html>
 <html>
@@ -295,7 +375,11 @@ type SandboxedDisplayFrameProps = {
   displayKind?: "html" | "mixed";
   appliedRegexScriptIds: string[];
   storageNamespace: string;
+  storageFallbackNamespaces?: readonly string[] | undefined;
+  messageVariables?: Record<string, unknown> | undefined;
   onSendMessage?: ((content: string) => void) | undefined;
+  onVariablesChange?:
+    ((variables: Record<string, unknown>) => void) | undefined;
   onHeightChange?: (() => void) | undefined;
 };
 
@@ -305,14 +389,21 @@ function SandboxedDisplayFrame({
   displayKind = "html",
   appliedRegexScriptIds,
   storageNamespace,
+  storageFallbackNamespaces = [],
+  messageVariables = {},
   onSendMessage,
+  onVariablesChange,
   onHeightChange,
 }: SandboxedDisplayFrameProps) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const frameId = useId();
   const initialStorage = useMemo(
-    () => loadFrameStorage(storageNamespace),
-    [storageNamespace],
+    () =>
+      loadFrameStorageWithFallbacks(
+        storageNamespace,
+        storageFallbackNamespaces,
+      ),
+    [storageFallbackNamespaces, storageNamespace],
   );
 
   const handleFrameMessage = useCallback(
@@ -375,9 +466,28 @@ function SandboxedDisplayFrame({
         event.data.content.length <= 100_000
       ) {
         onSendMessage?.(event.data.content.trim());
+        return;
+      }
+
+      if (
+        event.data.type === FRAME_MVU_UPDATE_MESSAGE_TYPE &&
+        isRecord(event.data.variables)
+      ) {
+        try {
+          if (JSON.stringify(event.data.variables).length > 2_000_000) return;
+          onVariablesChange?.(event.data.variables);
+        } catch {
+          // Ignore non-serializable or oversized frame updates.
+        }
       }
     },
-    [frameId, onHeightChange, onSendMessage, storageNamespace],
+    [
+      frameId,
+      onHeightChange,
+      onSendMessage,
+      onVariablesChange,
+      storageNamespace,
+    ],
   );
 
   useEffect(() => {
@@ -393,7 +503,12 @@ function SandboxedDisplayFrame({
       sandbox="allow-scripts allow-downloads allow-modals"
       scrolling="no"
       referrerPolicy="no-referrer"
-      srcDoc={sandboxedDisplayDocument(content, frameId, initialStorage)}
+      srcDoc={sandboxedDisplayDocument(
+        content,
+        frameId,
+        initialStorage,
+        messageVariables,
+      )}
       data-display-kind={displayKind}
       data-applied-regex={appliedRegexScriptIds.join(" ")}
       data-auto-height="true"
@@ -435,6 +550,12 @@ type MessageCardProps = {
     index: number,
   ) => Promise<void> | void;
   onEmbeddedSend?: ((content: string) => void) | undefined;
+  storageNamespace?: string;
+  storageFallbackNamespaces?: readonly string[] | undefined;
+  messageVariables?: Record<string, unknown> | undefined;
+  onVariablesChange?:
+    | ((message: WorkspaceMessage, variables: Record<string, unknown>) => void)
+    | undefined;
   onContentResize?: (() => void) | undefined;
 };
 
@@ -450,6 +571,10 @@ export const MessageCard = memo(function MessageCard({
   onContinue,
   onSelectSwipe,
   onEmbeddedSend,
+  storageNamespace = `conversation:${message.conversationId}`,
+  storageFallbackNamespaces,
+  messageVariables,
+  onVariablesChange,
   onContentResize,
 }: MessageCardProps) {
   const [editing, setEditing] = useState(false);
@@ -527,9 +652,12 @@ export const MessageCard = memo(function MessageCard({
             </button>
           </div>
         </div>
-      ) : !renderRichContent ? (
-        <div className="message-item__content message-item__content--plain">
-          {displayContent}
+      ) : message.role === "user" || !renderRichContent ? (
+        <div data-collapse-code={collapseCodeBlocks}>
+          <MarkdownMessageContent
+            content={displayContent}
+            appliedRegexScriptIds={appliedRegexScriptIds}
+          />
         </div>
       ) : displaysHtml ? (
         <div className="message-item__rich-content">
@@ -549,8 +677,13 @@ export const MessageCard = memo(function MessageCard({
                 }
                 displayKind={segment.kind}
                 appliedRegexScriptIds={appliedRegexScriptIds}
-                storageNamespace={`conversation:${message.conversationId}`}
+                storageNamespace={storageNamespace}
+                storageFallbackNamespaces={storageFallbackNamespaces}
+                messageVariables={messageVariables}
                 onSendMessage={onEmbeddedSend}
+                onVariablesChange={(variables) =>
+                  onVariablesChange?.(message, variables)
+                }
                 onHeightChange={onContentResize}
               />
             ) : (
@@ -641,6 +774,8 @@ export const MessageCard = memo(function MessageCard({
 
 type MessageStreamProps = {
   conversationId: string;
+  cardId?: string | undefined;
+  storageConversationIds?: readonly string[] | undefined;
   messages: WorkspaceMessage[];
   generation: GenerationState;
   onCopy: (message: WorkspaceMessage) => void;
@@ -653,6 +788,10 @@ type MessageStreamProps = {
     index: number,
   ) => Promise<void> | void;
   onEmbeddedSend?: ((content: string) => void) | undefined;
+  variablesByMessage?: Record<string, Record<string, unknown>> | undefined;
+  onVariablesChange?:
+    | ((message: WorkspaceMessage, variables: Record<string, unknown>) => void)
+    | undefined;
   helperRenderSettings?:
     | {
         enabled: boolean;
@@ -664,6 +803,8 @@ type MessageStreamProps = {
 
 export function MessageStream({
   conversationId,
+  cardId,
+  storageConversationIds,
   messages,
   generation,
   onCopy,
@@ -673,6 +814,8 @@ export function MessageStream({
   onContinue,
   onSelectSwipe,
   onEmbeddedSend,
+  variablesByMessage,
+  onVariablesChange,
   helperRenderSettings,
 }: MessageStreamProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -681,6 +824,15 @@ export function MessageStream({
   const showsGeneration =
     generation.status !== "idle" &&
     generation.conversationId === conversationId;
+  const storageConversationKey = (storageConversationIds ?? []).join("\u001f");
+  const storageNamespace = cardId
+    ? `card:${cardId}`
+    : `conversation:${conversationId}`;
+  const storageFallbackNamespaces = useMemo(() => {
+    if (!cardId) return [];
+    const conversationIds = [conversationId, ...(storageConversationIds ?? [])];
+    return [...new Set(conversationIds)].map((id) => `conversation:${id}`);
+  }, [cardId, conversationId, storageConversationKey]);
 
   const scrollToBottom = useCallback(() => {
     const element = viewportRef.current;
@@ -753,6 +905,10 @@ export function MessageStream({
               onContinue={onContinue}
               onSelectSwipe={onSelectSwipe}
               onEmbeddedSend={onEmbeddedSend}
+              storageNamespace={storageNamespace}
+              storageFallbackNamespaces={storageFallbackNamespaces}
+              messageVariables={variablesByMessage?.[message.id]}
+              onVariablesChange={onVariablesChange}
               onContentResize={handleMessageContentResize}
             />
           ))}

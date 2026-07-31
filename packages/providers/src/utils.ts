@@ -127,6 +127,21 @@ export async function* readSseJson(
     }
     if (done) break;
   }
+
+  const finalData = buffer
+    .split(/\r?\n/u)
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trimStart())
+    .join("\n");
+  if (finalData) {
+    if (finalData.trim() === "[DONE]") {
+      yield "[DONE]";
+      return;
+    }
+    const value = JSON.parse(finalData) as unknown;
+    const object = asJsonObject(value);
+    if (object) yield object;
+  }
 }
 
 export function safeHeaders(connection: {

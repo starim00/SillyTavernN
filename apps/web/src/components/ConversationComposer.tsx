@@ -6,6 +6,7 @@ import {
   Plus,
   ShieldCheck,
   StopCircle,
+  Trash,
   Toolbox,
   WarningCircle,
 } from "@phosphor-icons/react";
@@ -44,6 +45,7 @@ type ConversationComposerProps = {
   scriptStatus?: TavernHelperRuntimeStatus;
   onDraftChange: (value: string) => void;
   onSelectConversation: (conversationId: string) => void;
+  onDeleteConversation: (conversation: ConversationSpace) => void;
   onCreateConversation: () => void;
   onOpenCards: () => void;
   onOpenHelperTool: (
@@ -67,6 +69,7 @@ export function ConversationComposer({
   scriptStatus,
   onDraftChange,
   onSelectConversation,
+  onDeleteConversation,
   onCreateConversation,
   onOpenCards,
   onOpenHelperTool,
@@ -231,25 +234,40 @@ export function ConversationComposer({
                   </button>
                 </div>
                 <div className="composer-history__list">
-                  {conversations.map((conversation) => (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className={
-                        conversation.id === selectedConversationId
-                          ? "is-selected"
-                          : ""
-                      }
-                      key={conversation.id}
-                      onClick={() => chooseConversation(conversation.id)}
-                    >
-                      <ChatCircleDots size={15} />
-                      <span>
-                        <strong>{conversation.title}</strong>
-                        <small>{conversation.updatedLabel}</small>
-                      </span>
-                    </button>
-                  ))}
+                  {conversations.map((conversation) => {
+                    const selected = conversation.id === selectedConversationId;
+                    return (
+                      <div
+                        className={`composer-history__item${selected ? " is-selected" : ""}`}
+                        key={conversation.id}
+                      >
+                        <button
+                          className="composer-history__select"
+                          type="button"
+                          role="menuitem"
+                          onClick={() => chooseConversation(conversation.id)}
+                        >
+                          <ChatCircleDots size={15} />
+                          <span>
+                            <strong>{conversation.title}</strong>
+                            <small>{conversation.updatedLabel}</small>
+                          </span>
+                        </button>
+                        <IconButton
+                          className="composer-history__delete"
+                          compact
+                          label={`删除对话 ${conversation.title}`}
+                          icon={<Trash size={15} />}
+                          role="menuitem"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setHistoryOpen(false);
+                            onDeleteConversation(conversation);
+                          }}
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
                 <div className="composer-history__footer">
                   <button

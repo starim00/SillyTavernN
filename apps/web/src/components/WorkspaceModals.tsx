@@ -1,6 +1,10 @@
 import {
+  BookOpenText,
+  BracketsCurly,
   Books,
   Check,
+  CheckCircle,
+  ClockCounterClockwise,
   FileArrowUp,
   Lock,
   LockOpen,
@@ -12,6 +16,7 @@ import {
   Trash,
   UserCircle,
   UserPlus,
+  Wrench,
   PencilSimple,
   X,
 } from "@phosphor-icons/react";
@@ -19,15 +24,22 @@ import { useState, type FormEvent, type ReactNode } from "react";
 
 import type { LegacyHostPluginStatus, PersonaInput } from "../api/workspaceApi";
 import type {
+  AgentProposal,
   LegacyPlugin,
   ModalState,
+  PanelId,
   Persona,
+  PromptPreset,
   ProviderConnection,
   ProviderConnectionInput,
+  RegexScope,
+  RegexScriptDefinition,
   RoleCard,
   Worldbook,
   WorldbookEntry,
+  WorldbookEntryUpdate,
 } from "../domain/workspace";
+import { ExtensionsPanel, RegexRail, WorldbookRail } from "./ContextRail";
 import { IconButton, SurfaceStatus } from "./WorkspacePrimitives";
 
 function ModalFrame({
@@ -43,7 +55,7 @@ function ModalFrame({
   icon: ReactNode;
   onClose: () => void;
   children: ReactNode;
-  size?: "medium" | "large";
+  size?: "medium" | "large" | "wide";
 }) {
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
@@ -1001,15 +1013,245 @@ function PermissionModal({
   );
 }
 
+function RegexModal({
+  card,
+  preset,
+  regexScopes,
+  expanded,
+  onClose,
+  onToggle,
+  onSave,
+}: {
+  card?: RoleCard | null | undefined;
+  preset?: PromptPreset | undefined;
+  regexScopes: RegexScope[];
+  expanded: boolean;
+  onClose: () => void;
+  onToggle: () => void;
+  onSave: (
+    scope: RegexScope,
+    patch: { enabled?: boolean; scripts?: RegexScriptDefinition[] },
+  ) => Promise<void>;
+}) {
+  return (
+    <ModalFrame
+      title="正则"
+      description="管理当前会话使用的全局、角色卡与预设脚本。"
+      icon={<BracketsCurly size={22} />}
+      onClose={onClose}
+      size="large"
+    >
+      <div className="modal-support-content">
+        <RegexRail
+          card={card ?? undefined}
+          preset={preset}
+          regexScopes={regexScopes}
+          expanded={expanded}
+          onToggle={onToggle}
+          onSaveRegexScope={onSave}
+        />
+      </div>
+    </ModalFrame>
+  );
+}
+
+function WorldbookModal({
+  worldbooks,
+  expanded,
+  onClose,
+  onToggle,
+  onPermission,
+  onSave,
+}: {
+  worldbooks: Worldbook[];
+  expanded: boolean;
+  onClose: () => void;
+  onToggle: () => void;
+  onPermission: (worldbookId: string, entryId: string) => void;
+  onSave: (
+    worldbook: Worldbook,
+    entry: WorldbookEntry,
+    patch: WorldbookEntryUpdate,
+  ) => Promise<void>;
+}) {
+  return (
+    <ModalFrame
+      title="世界书"
+      description="管理当前会话绑定的世界书与条目。"
+      icon={<BookOpenText size={22} />}
+      onClose={onClose}
+      size="wide"
+    >
+      <div className="modal-support-content">
+        <WorldbookRail
+          worldbooks={worldbooks}
+          expanded={expanded}
+          onToggle={onToggle}
+          onPermission={onPermission}
+          onSaveWorldbookEntry={onSave}
+        />
+      </div>
+    </ModalFrame>
+  );
+}
+
+function ExtensionsModal({
+  plugins,
+  pluginRealms,
+  onClose,
+  onOpenPlugins,
+}: {
+  plugins: LegacyPlugin[];
+  pluginRealms: ReactNode;
+  onClose: () => void;
+  onOpenPlugins: () => void;
+}) {
+  return (
+    <ModalFrame
+      title="扩展"
+      description="查看兼容插件及其提供的功能菜单。"
+      icon={<PuzzlePiece size={22} />}
+      onClose={onClose}
+      size="large"
+    >
+      <div className="modal-support-content modal-support-content--extensions">
+        <ExtensionsPanel
+          plugins={plugins}
+          pluginRealms={pluginRealms}
+          onOpenPlugins={onOpenPlugins}
+        />
+      </div>
+    </ModalFrame>
+  );
+}
+
+function AgentProposalModal({
+  proposal,
+  onClose,
+  onConfirm,
+  onReject,
+  onUndo,
+}: {
+  proposal: AgentProposal;
+  onClose: () => void;
+  onConfirm: () => void;
+  onReject: () => void;
+  onUndo: () => void;
+}) {
+  const proposalStatus =
+    proposal.status === "blocked"
+      ? "权限已阻止"
+      : proposal.status === "awaiting_confirmation"
+        ? "等待确认"
+        : proposal.status === "applied"
+          ? "已应用"
+          : "已撤销";
+
+  return (
+    <ModalFrame
+      title="模型工具提案"
+      description="模型请求修改世界书时，需要在此处单独确认。"
+      icon={<Wrench size={22} />}
+      onClose={onClose}
+      size="large"
+    >
+      <div className="modal-support-content">
+        <article className={`tool-proposal tool-proposal--${proposal.status}`}>
+          <div className="tool-proposal__header">
+            <strong>{proposal.title}</strong>
+            <SurfaceStatus
+              tone={
+                proposal.status === "applied"
+                  ? "mint"
+                  : proposal.status === "awaiting_confirmation"
+                    ? "coral"
+                    : "slate"
+              }
+            >
+              {proposal.status === "applied" ? (
+                <CheckCircle size={13} />
+              ) : (
+                <Wrench size={13} />
+              )}
+              {proposalStatus}
+            </SurfaceStatus>
+          </div>
+          <p>{proposal.rationale}</p>
+          <pre>{proposal.diffLines.join("\n")}</pre>
+          {proposal.status === "awaiting_confirmation" ? (
+            <div className="tool-proposal__actions">
+              <button
+                className="button button--quiet"
+                type="button"
+                onClick={onReject}
+              >
+                <X size={16} />
+                拒绝提案
+              </button>
+              <button
+                className="button button--primary"
+                type="button"
+                onClick={onConfirm}
+              >
+                <CheckCircle size={17} />
+                确认并应用
+              </button>
+            </div>
+          ) : null}
+          {proposal.status === "blocked" ? (
+            <button
+              className="button button--quiet button--full"
+              type="button"
+              onClick={onReject}
+            >
+              <X size={16} />
+              拒绝被阻止的提案
+            </button>
+          ) : null}
+          {proposal.status === "applied" ? (
+            <button
+              className="button button--quiet button--full"
+              type="button"
+              onClick={onUndo}
+            >
+              <ClockCounterClockwise size={17} />
+              撤销这次写入
+            </button>
+          ) : null}
+          <small>
+            目标：{proposal.worldbookName} · 世界书修订{" "}
+            {proposal.beforeRevision}
+            {proposal.targetEntryId ? (
+              <>
+                {" "}
+                · 条目 {proposal.targetEntryTitle ?? "未命名条目"}（
+                {proposal.targetEntryId}）· 条目修订{" "}
+                {proposal.beforeEntryRevision ?? "未知"}
+              </>
+            ) : null}
+          </small>
+        </article>
+      </div>
+    </ModalFrame>
+  );
+}
+
 type WorkspaceModalsProps = {
   modal: ModalState;
   apiOnline: boolean;
   cards: RoleCard[];
+  selectedCard?: RoleCard | null | undefined;
+  preset?: PromptPreset | undefined;
+  regexScopes?: RegexScope[];
+  expandedPanels?: Record<PanelId, boolean>;
   personas?: Persona[];
   activePersonaId?: string | null;
   plugins: LegacyPlugin[];
+  pluginRealms?: ReactNode;
   legacyHostPlugins: Record<string, LegacyHostPluginStatus>;
   worldbooks: Worldbook[];
+  activeWorldbooks?: Worldbook[];
+  agentProposal?: AgentProposal | null;
   providerConnections: ProviderConnection[];
   selectedProviderId: string;
   onClose: () => void;
@@ -1030,6 +1272,21 @@ type WorkspaceModalsProps = {
     entry: WorldbookEntry,
     editable: boolean,
   ) => Promise<void>;
+  onRequestWorldbookPermission?: (worldbookId: string, entryId: string) => void;
+  onTogglePanel?: (panel: PanelId) => void;
+  onSaveRegexScope?: (
+    scope: RegexScope,
+    patch: { enabled?: boolean; scripts?: RegexScriptDefinition[] },
+  ) => Promise<void>;
+  onSaveWorldbookEntry?: (
+    worldbook: Worldbook,
+    entry: WorldbookEntry,
+    patch: WorldbookEntryUpdate,
+  ) => Promise<void>;
+  onOpenPlugins?: () => void;
+  onConfirmToolProposal?: () => void;
+  onRejectToolProposal?: () => void;
+  onUndoToolProposal?: () => void;
   onSelectProvider: (providerId: string) => void;
   onSaveProvider: (
     input: ProviderConnectionInput,
@@ -1041,11 +1298,18 @@ export function WorkspaceModals({
   modal,
   apiOnline,
   cards,
+  selectedCard = null,
+  preset,
+  regexScopes = [],
+  expandedPanels = { preset: false, regex: true, worldbooks: true },
   personas = [],
   activePersonaId = null,
   plugins,
+  pluginRealms = null,
   legacyHostPlugins,
   worldbooks,
+  activeWorldbooks = [],
+  agentProposal = null,
   providerConnections,
   selectedProviderId,
   onClose,
@@ -1059,6 +1323,14 @@ export function WorkspaceModals({
   onInstallPlugin,
   onTogglePlugin,
   onPermission,
+  onRequestWorldbookPermission = () => undefined,
+  onTogglePanel = () => undefined,
+  onSaveRegexScope = async () => undefined,
+  onSaveWorldbookEntry = async () => undefined,
+  onOpenPlugins = () => undefined,
+  onConfirmToolProposal = () => undefined,
+  onRejectToolProposal = () => undefined,
+  onUndoToolProposal = () => undefined,
   onSelectProvider,
   onSaveProvider,
 }: WorkspaceModalsProps) {
@@ -1079,6 +1351,52 @@ export function WorkspaceModals({
         onToggle={onTogglePlugin}
       />
     );
+  }
+  if (modal.kind === "extensions") {
+    return (
+      <ExtensionsModal
+        plugins={plugins}
+        pluginRealms={pluginRealms}
+        onClose={onClose}
+        onOpenPlugins={onOpenPlugins}
+      />
+    );
+  }
+  if (modal.kind === "regex") {
+    return (
+      <RegexModal
+        card={selectedCard}
+        preset={preset}
+        regexScopes={regexScopes}
+        expanded={expandedPanels.regex}
+        onClose={onClose}
+        onToggle={() => onTogglePanel("regex")}
+        onSave={onSaveRegexScope}
+      />
+    );
+  }
+  if (modal.kind === "worldbooks") {
+    return (
+      <WorldbookModal
+        worldbooks={activeWorldbooks}
+        expanded={expandedPanels.worldbooks}
+        onClose={onClose}
+        onToggle={() => onTogglePanel("worldbooks")}
+        onPermission={onRequestWorldbookPermission}
+        onSave={onSaveWorldbookEntry}
+      />
+    );
+  }
+  if (modal.kind === "agent_proposal") {
+    return agentProposal ? (
+      <AgentProposalModal
+        proposal={agentProposal}
+        onClose={onClose}
+        onConfirm={onConfirmToolProposal}
+        onReject={onRejectToolProposal}
+        onUndo={onUndoToolProposal}
+      />
+    ) : null;
   }
   if (modal.kind === "providers") {
     return (

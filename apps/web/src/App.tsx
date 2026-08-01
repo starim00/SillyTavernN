@@ -1,4 +1,5 @@
 import {
+  BracketsCurly,
   BookOpenText,
   Books,
   ChatCircleDots,
@@ -45,7 +46,6 @@ import {
   loadLegacyGrants,
   loadLegacyHostHealth,
   loadPendingAgentWorldbookProposal,
-  loadPromptTraceFromApi,
   loadTavernHelperContext,
   loadWorkspaceFromApi,
   preparePromptTemplate,
@@ -85,7 +85,6 @@ import type {
   TavernHelperSource,
 } from "./compat/tavernHelperTypes";
 import { CardConversationEntry } from "./components/CardConversationEntry";
-import { ContextRail, ExtensionsDrawer } from "./components/ContextRail";
 import { ConversationComposer } from "./components/ConversationComposer";
 import {
   canonicalLegacyPluginId,
@@ -186,7 +185,6 @@ export default function App() {
     Record<string, boolean>
   >({});
   const [presetSettingsOpen, setPresetSettingsOpen] = useState(false);
-  const [extensionDrawerOpen, setExtensionDrawerOpen] = useState(false);
   const [tavernHelperWorkbenchOpen, setTavernHelperWorkbenchOpen] =
     useState(false);
   const [tavernHelperInitialTool, setTavernHelperInitialTool] =
@@ -355,7 +353,7 @@ export default function App() {
     const closeSupportingDrawers = (matches: boolean) => {
       if (!matches) return;
       dispatch({ type: "nav/set", open: false });
-      dispatch({ type: "context/set", open: false });
+      dispatch({ type: "modal/set", modal: { kind: "closed" } });
       setPresetSettingsOpen(false);
     };
     closeSupportingDrawers(compactLayout.matches);
@@ -401,21 +399,6 @@ export default function App() {
   const preset = state.presets.find(
     (candidate) => candidate.id === state.selectedPresetId,
   );
-  const messageRevisionKey = messages
-    .map((message) => `${message.id}:${String(message.revision)}`)
-    .join("|");
-  const regexRevisionKey = state.regexScopes
-    .filter(
-      (scope) =>
-        (scope.scope === "global" && scope.id === "global") ||
-        (scope.scope === "card" && scope.id === selectedCard?.id) ||
-        (scope.scope === "preset" && scope.id === preset?.id),
-    )
-    .map(
-      (scope) =>
-        `${scope.scope}:${scope.id}:${scope.revision}:${String(scope.enabled)}`,
-    )
-    .join("|");
   const draft = conversation
     ? (state.draftByConversation[conversation.id] ?? "")
     : "";
@@ -427,32 +410,6 @@ export default function App() {
     state.personas.find((persona) => persona.id === conversation?.personaId) ??
     state.personas.find((persona) => persona.isDefault) ??
     null;
-
-  useEffect(() => {
-    if (!state.apiOnline || !conversation) return;
-    let active = true;
-    void loadPromptTraceFromApi({
-      conversationId: conversation.id,
-      connectionId: state.selectedProviderId,
-      ...(preset ? { presetId: preset.id } : {}),
-    })
-      .then((segments) => {
-        if (active) dispatch({ type: "promptTrace/replace", segments });
-      })
-      .catch(() => {
-        if (active) dispatch({ type: "promptTrace/replace", segments: [] });
-      });
-    return () => {
-      active = false;
-    };
-  }, [
-    conversation,
-    messageRevisionKey,
-    preset,
-    regexRevisionKey,
-    state.apiOnline,
-    state.selectedProviderId,
-  ]);
 
   const showToast = useCallback(
     (message: string, tone: "success" | "info" | "warning" = "info") => {
@@ -817,7 +774,7 @@ export default function App() {
         if ("toolProposalOnly" in receipt) {
           showToast(
             surfacedToolProposal
-              ? "模型工具提案已放入会话上下文，等待你的确认。"
+              ? "模型工具提案已打开确认弹窗，等待你的确认。"
               : "模型返回了当前客户端无法处理的工具提案。",
             surfacedToolProposal ? "success" : "warning",
           );
@@ -2189,11 +2146,18 @@ export default function App() {
         modal={state.modal}
         apiOnline={state.apiOnline}
         cards={state.cards}
+        selectedCard={selectedCard}
+        preset={preset}
+        regexScopes={state.regexScopes}
+        expandedPanels={state.expandedPanels}
         personas={state.personas}
         activePersonaId={activePersona?.id ?? null}
         plugins={state.plugins}
+        pluginRealms={legacyRealmPanels}
         legacyHostPlugins={legacyHostPlugins}
         worldbooks={state.worldbooks}
+        activeWorldbooks={boundWorldbooks}
+        agentProposal={state.agentProposal}
         providerConnections={state.providerConnections}
         selectedProviderId={state.selectedProviderId}
         onClose={() =>
@@ -2209,6 +2173,21 @@ export default function App() {
         onInstallPlugin={installPlugin}
         onTogglePlugin={togglePlugin}
         onPermission={changePermission}
+        onRequestWorldbookPermission={(worldbookId, entryId) =>
+          dispatch({
+            type: "modal/set",
+            modal: { kind: "permission", worldbookId, entryId },
+          })
+        }
+        onTogglePanel={(panel) => dispatch({ type: "panel/toggle", panel })}
+        onSaveRegexScope={changeRegexScope}
+        onSaveWorldbookEntry={saveWorldbookEntry}
+        onOpenPlugins={() =>
+          dispatch({ type: "modal/set", modal: { kind: "plugins" } })
+        }
+        onConfirmToolProposal={() => void confirmToolProposal()}
+        onRejectToolProposal={() => void rejectToolProposal()}
+        onUndoToolProposal={() => void undoAppliedToolProposal()}
         onSelectProvider={(id) => dispatch({ type: "provider/select", id })}
         onSaveProvider={saveProvider}
       />
@@ -2306,14 +2285,24 @@ export default function App() {
           <button
             className="topbar-button"
             type="button"
-            aria-label="打开上下文菜单"
-            onClick={() => {
-              setExtensionDrawerOpen(false);
-              dispatch({ type: "context/set", open: true });
-            }}
+            aria-label="打开正则菜单"
+            onClick={() =>
+              dispatch({ type: "modal/set", modal: { kind: "regex" } })
+            }
+          >
+            <BracketsCurly size={18} />
+            <span>正则</span>
+          </button>
+          <button
+            className="topbar-button"
+            type="button"
+            aria-label="打开世界书菜单"
+            onClick={() =>
+              dispatch({ type: "modal/set", modal: { kind: "worldbooks" } })
+            }
           >
             <BookOpenText size={18} />
-            <span>上下文</span>
+            <span>世界书</span>
           </button>
           <button
             className="topbar-button"
@@ -2328,10 +2317,9 @@ export default function App() {
             className="topbar-button"
             type="button"
             aria-label="打开扩展菜单"
-            onClick={() => {
-              dispatch({ type: "context/set", open: false });
-              setExtensionDrawerOpen(true);
-            }}
+            onClick={() =>
+              dispatch({ type: "modal/set", modal: { kind: "extensions" } })
+            }
           >
             <PuzzlePiece size={18} />
             <span>扩展</span>
@@ -2531,38 +2519,6 @@ export default function App() {
           }
           onClose={() => dispatch({ type: "nav/set", open: false })}
         />
-        <ContextRail
-          open={state.contextOpen}
-          card={selectedCard ?? undefined}
-          worldbooks={boundWorldbooks}
-          preset={preset}
-          regexScopes={state.regexScopes}
-          promptTrace={state.promptTrace}
-          proposal={state.agentProposal}
-          expandedPanels={state.expandedPanels}
-          onTogglePanel={(panel) => dispatch({ type: "panel/toggle", panel })}
-          onClose={() => dispatch({ type: "context/set", open: false })}
-          onPermission={(worldbookId, entryId) =>
-            dispatch({
-              type: "modal/set",
-              modal: { kind: "permission", worldbookId, entryId },
-            })
-          }
-          onSaveWorldbookEntry={saveWorldbookEntry}
-          onSaveRegexScope={changeRegexScope}
-          onConfirmToolProposal={() => void confirmToolProposal()}
-          onRejectToolProposal={() => void rejectToolProposal()}
-          onUndoToolProposal={() => void undoAppliedToolProposal()}
-        />
-        <ExtensionsDrawer
-          open={extensionDrawerOpen}
-          plugins={state.plugins}
-          pluginRealms={legacyRealmPanels}
-          onClose={() => setExtensionDrawerOpen(false)}
-          onOpenPlugins={() =>
-            dispatch({ type: "modal/set", modal: { kind: "plugins" } })
-          }
-        />
       </div>
 
       {presetSettingsOpen ? (
@@ -2581,18 +2537,6 @@ export default function App() {
           onClick={() => dispatch({ type: "nav/set", open: false })}
         />
       ) : null}
-      {state.contextOpen || extensionDrawerOpen ? (
-        <button
-          className="drawer-scrim drawer-scrim--context"
-          aria-label={extensionDrawerOpen ? "关闭扩展菜单" : "关闭上下文菜单"}
-          type="button"
-          onClick={() => {
-            setExtensionDrawerOpen(false);
-            dispatch({ type: "context/set", open: false });
-          }}
-        />
-      ) : null}
-
       {workspaceOverlays}
     </div>
   );

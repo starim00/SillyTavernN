@@ -11,7 +11,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { parseDocument } from "htmlparser2";
-import Markdown from "markdown-to-jsx";
+import Markdown, { RuleType, type MarkdownToJSX } from "markdown-to-jsx";
 import { marked } from "marked";
 import {
   memo,
@@ -22,6 +22,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 
 import type { GenerationState, WorkspaceMessage } from "../domain/workspace";
@@ -45,12 +46,45 @@ const FRAME_HEIGHT_MIN = 96;
 const FRAME_HEIGHT_MAX = 1_000_000;
 const FRAME_STORAGE_PREFIX = "sillytavern-n.message-frame-storage.v1:";
 const FRAME_STORAGE_MAX_LENGTH = 512_000;
+const DIALOGUE_PATTERN =
+  /“[^”\r\n]*”|「[^」\r\n]*」|『[^』\r\n]*』|〝[^〞\r\n]*〞|(?<![\p{L}\p{N}_])"[^"\r\n]{1,160}"(?![\p{L}\p{N}_])/gu;
 const MARKDOWN_OPTIONS = {
   disableParsingRawHTML: true,
   forceBlock: true,
+  renderRule(next: () => ReactNode, node: MarkdownToJSX.ASTNode): ReactNode {
+    if (node.type === RuleType.text) {
+      return highlightDialogueText(node.text);
+    }
+    return next();
+  },
   wrapper: null,
 } as const;
 const FRAME_RESIZE_SCRIPT = `(()=>{const meta=document.querySelector('meta[name="stn-frame-id"]');if(!meta)return;const frameId=meta.content;let queued=false;const report=()=>{queued=false;const body=document.body;if(!body)return;const height=Math.ceil(Math.max(body.scrollHeight,body.offsetHeight,body.getBoundingClientRect().height));parent.postMessage({type:"stn:message-frame-height",frameId,height},"*")};const queue=()=>{if(queued)return;queued=true;requestAnimationFrame(report)};new ResizeObserver(queue).observe(document.body);addEventListener("load",queue);queue()})();`;
+
+export function highlightDialogueText(text: string): ReactNode {
+  const matches = [...text.matchAll(DIALOGUE_PATTERN)];
+  if (matches.length === 0) return text;
+
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+  for (const [index, match] of matches.entries()) {
+    const dialogue = match[0];
+    const start = match.index;
+    if (!dialogue || start === undefined) continue;
+    if (start > cursor) parts.push(text.slice(cursor, start));
+    parts.push(
+      <span
+        className="message-item__dialogue"
+        key={`dialogue-${String(start)}-${String(index)}`}
+      >
+        {dialogue}
+      </span>,
+    );
+    cursor = start + dialogue.length;
+  }
+  if (cursor < text.length) parts.push(text.slice(cursor));
+  return parts;
+}
 
 function sandboxContentSecurityPolicy(): string {
   return [
@@ -155,6 +189,10 @@ function escapeInlineJson(value: unknown): string {
     .replaceAll("<", "\\u003c")
     .replaceAll("\u2028", "\\u2028")
     .replaceAll("\u2029", "\\u2029");
+}
+
+function frameDialogueDecorationScript(): string {
+  return `<style>html,body{background:#ffffff!important;color:#202124!important}body>p,body>p *,body>li,body>li *,body>blockquote,body>blockquote *,body>h1,body>h1 *,body>h2,body>h2 *,body>h3,body>h3 *,body>h4,body>h4 *,body>h5,body>h5 *,body>h6,body>h6 *{color:#202124!important}.stn-message-dialogue{color:#8b1e1e!important;font-weight:650}</style><script>(()=>{const pattern=new RegExp(${escapeInlineJson(DIALOGUE_PATTERN.source)},"gu");const skipped=new Set(["SCRIPT","STYLE","PRE","CODE","TEXTAREA","NOSCRIPT"]);const decorate=()=>{const root=document.body;if(!root)return;const walker=document.createTreeWalker(root,4);const nodes=[];let node=walker.nextNode();while(node){const parent=node.parentElement;if(parent&&!parent.closest(".stn-message-dialogue")&&!skipped.has(parent.tagName)){pattern.lastIndex=0;if(pattern.test(node.nodeValue??""))nodes.push(node)}node=walker.nextNode()}for(const textNode of nodes){const value=textNode.nodeValue??"";pattern.lastIndex=0;const matches=[...value.matchAll(pattern)];if(!matches.length)continue;const fragment=document.createDocumentFragment();let cursor=0;for(const match of matches){const dialogue=match[0],start=match.index;if(!dialogue||start===undefined)continue;if(start>cursor)fragment.append(document.createTextNode(value.slice(cursor,start)));const span=document.createElement("span");span.className="stn-message-dialogue";span.textContent=dialogue;fragment.append(span);cursor=start+dialogue.length}if(cursor<value.length)fragment.append(document.createTextNode(value.slice(cursor)));textNode.replaceWith(fragment)}};decorate();new MutationObserver(decorate).observe(document.body,{subtree:true,childList:true})})()</script>`;
 }
 
 function frameCompatibilityScript(
@@ -341,14 +379,14 @@ export function sandboxedDisplayDocument(
     ${resizeMetadata}
     <style>
       :root { color-scheme: light; }
-      html, body { margin: 0; background: #fffdf8; color: #30414f; overflow: visible; }
-      body { box-sizing: border-box; width: 100%; padding: 14px 16px; font: 14px/1.72 ui-serif, "Songti SC", "Noto Serif CJK SC", serif; overflow-wrap: anywhere; }
+      html, body { margin: 0; background: #ffffff; color: #202124; overflow: visible; }
+      body { box-sizing: border-box; width: 100%; padding: 14px 16px; font: 14px/1.72 system-ui, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; overflow-wrap: anywhere; }
       img, video, svg, canvas { max-width: 100%; height: auto; }
       pre { white-space: pre-wrap; }
       a { color: #416f88; }
     </style>
   </head>
-  <body>${compatibilityScript}${displayContent}${resizeScript}</body>
+  <body>${compatibilityScript}${displayContent}${frameDialogueDecorationScript()}${resizeScript}</body>
 </html>`;
 }
 

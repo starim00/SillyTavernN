@@ -17,7 +17,6 @@ import {
   loadLegacyGrants,
   loadLegacyHostHealth,
   loadPendingAgentWorldbookProposal,
-  loadPromptTraceFromApi,
   loadWorkspaceFromApi,
   planAgentWorldbookChange,
   proposalFromGenerationToolEvent,
@@ -560,43 +559,6 @@ describe("workspace API client", () => {
       expectedRevision: worldbook.revision,
       expectedEntryRevision: blockedEntry.revision,
     });
-  });
-
-  it("loads a real prompt trace without exposing segment content as UI detail", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse({
-        data: {
-          segments: [
-            {
-              id: "segment-worldbook",
-              role: "system",
-              content: "private prompt content",
-              position: "before-history",
-              tokenEstimate: 17,
-              source: { kind: "worldbook", label: "港区钟楼" },
-            },
-          ],
-        },
-      }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    const trace = await loadPromptTraceFromApi({
-      conversationId: "conversation-harbor",
-      connectionId: "fake",
-      presetId: "preset-longform",
-    });
-
-    expect(trace).toEqual([
-      {
-        id: "segment-worldbook",
-        label: "港区钟楼",
-        source: "worldbook",
-        tokens: 17,
-        detail: "before-history · system",
-      },
-    ]);
-    expect(JSON.stringify(trace)).not.toContain("private prompt content");
   });
 
   it("rejects a partial preview when the stream reports an error", async () => {

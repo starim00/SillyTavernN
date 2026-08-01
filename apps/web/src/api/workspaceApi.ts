@@ -12,7 +12,6 @@ import type {
   Persona,
   PromptPreset,
   PromptPresetEntry,
-  PromptTraceSegment,
   ProviderConnection,
   ProviderConnectionInput,
   RegexDiagnostic,
@@ -120,6 +119,7 @@ type ApiWorldbookEntry = {
   insertionRole?: string;
   order?: number;
   priority?: number;
+  probability?: number;
   agentEditable?: boolean;
   revision?: number;
 };
@@ -618,6 +618,11 @@ const normalizeWorldbookEntry = (entry: ApiWorldbookEntry): WorldbookEntry => {
     insertionRole: worldbookInsertionRole(entry.insertionRole),
     order: entry.order ?? 0,
     priority: entry.priority ?? entry.order ?? 0,
+    probability:
+      typeof entry.probability === "number" &&
+      Number.isFinite(entry.probability)
+        ? Math.max(0, Math.min(100, entry.probability))
+        : 100,
     agentEditable: entry.agentEditable ?? false,
     revision: entry.revision ?? 1,
   };
@@ -925,71 +930,6 @@ export async function loadConversationMessages(
       (message) => message.role === "user" || message.role === "assistant",
     )
     .map(normalizeMessage);
-}
-
-export async function loadPromptTraceFromApi(input: {
-  conversationId: string;
-  connectionId: string;
-  presetId?: string;
-}): Promise<PromptTraceSegment[]> {
-  const result = await request<ApiEnvelope<{ segments: unknown[] }>>(
-    `/conversations/${encodeURIComponent(input.conversationId)}/prompt-preview`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        connectionId: input.connectionId,
-        ...(input.presetId ? { presetId: input.presetId } : {}),
-      }),
-      timeoutMs: 10_000,
-    },
-  );
-  if (!Array.isArray(result.data.segments)) {
-    throw new WorkspaceApiError("Prompt preview has no segment list.", 502);
-  }
-  return result.data.segments.map((value) => {
-    if (
-      !isRecord(value) ||
-      typeof value.id !== "string" ||
-      typeof value.role !== "string" ||
-      typeof value.position !== "string" ||
-      typeof value.tokenEstimate !== "number" ||
-      !isRecord(value.source) ||
-      typeof value.source.kind !== "string" ||
-      typeof value.source.label !== "string"
-    ) {
-      throw new WorkspaceApiError(
-        "Prompt preview contains an invalid segment.",
-        502,
-      );
-    }
-    const segment = value as {
-      id: string;
-      role: string;
-      position: string;
-      tokenEstimate: number;
-      source: { kind: string; label: string };
-    };
-    const source: PromptTraceSegment["source"] =
-      segment.source.kind === "preset"
-        ? "preset"
-        : segment.source.kind === "worldbook"
-          ? "worldbook"
-          : segment.source.kind === "extension"
-            ? "extension"
-            : segment.source.kind === "persona"
-              ? "persona"
-              : segment.source.kind === "message" ||
-                  segment.source.kind === "conversation"
-                ? "conversation"
-                : "system";
-    return {
-      id: segment.id,
-      label: segment.source.label,
-      source,
-      tokens: segment.tokenEstimate,
-      detail: `${segment.position} · ${segment.role}`,
-    };
-  });
 }
 
 export async function loadTavernHelperContext(input: {

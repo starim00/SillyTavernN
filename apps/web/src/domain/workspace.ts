@@ -141,6 +141,7 @@ export type WorldbookEntry = {
   insertionRole: "system" | "user" | "assistant";
   order: number;
   priority: number;
+  probability: number;
   agentEditable: boolean;
   revision: number;
 };
@@ -169,7 +170,9 @@ export type WorldbookEntryUpdate = Pick<
   | "insertionRole"
   | "order"
   | "priority"
->;
+> & {
+  probability?: number;
+};
 
 export type Worldbook = {
   id: string;
@@ -181,20 +184,6 @@ export type Worldbook = {
   hitCount: number;
   hits: WorldbookHit[];
   entries: WorldbookEntry[];
-};
-
-export type PromptTraceSegment = {
-  id: string;
-  label: string;
-  source:
-    | "system"
-    | "preset"
-    | "worldbook"
-    | "persona"
-    | "conversation"
-    | "extension";
-  tokens: number;
-  detail: string;
 };
 
 export type PromptPreset = {
@@ -324,12 +313,16 @@ export type AgentRun = {
   updatedAt: string;
 };
 
-export type PanelId = "context" | "preset" | "regex" | "worldbooks" | "trace";
+export type PanelId = "preset" | "regex" | "worldbooks";
 
 export type ModalState =
   | { kind: "closed" }
   | { kind: "import" }
   | { kind: "plugins" }
+  | { kind: "extensions" }
+  | { kind: "regex" }
+  | { kind: "worldbooks" }
+  | { kind: "agent_proposal" }
   | { kind: "providers" }
   | { kind: "personas" }
   | { kind: "library" }
@@ -357,7 +350,6 @@ export type WorkspaceState = {
   providerConnections: ProviderConnection[];
   selectedProviderId: string;
   plugins: LegacyPlugin[];
-  promptTrace: PromptTraceSegment[];
   agentProposal: AgentProposal | null;
   agentRun: AgentRun | null;
   generation: GenerationState;
@@ -367,7 +359,6 @@ export type WorkspaceState = {
   expandedPanels: Record<PanelId, boolean>;
   draftByConversation: Record<string, string>;
   navOpen: boolean;
-  contextOpen: boolean;
   modal: ModalState;
   toast: ToastState;
 };

@@ -7,13 +7,15 @@ import type {
   PromptPreset,
   RegexScope,
 } from "../domain/workspace";
-import { ContextRail, ExtensionsDrawer } from "./ContextRail";
+import { ExtensionsPanel, RegexRail, WorldbookRail } from "./ContextRail";
 import { PresetSettingsRail } from "./PresetSettingsRail";
+import { WorkspaceModals } from "./WorkspaceModals";
 
-function renderRail(
+function renderRailFixture(
   proposal: AgentProposal | null,
   presetOverride?: PromptPreset,
   regexScopesOverride?: RegexScope[],
+  includeIndependentRails = true,
 ): string {
   const state = createDemoWorkspace();
   const conversation = state.conversations.find(
@@ -38,28 +40,58 @@ function renderRail(
         onReorderPrompts={async () => undefined}
         onClose={noop}
       />
-      <ContextRail
-        open
-        card={state.cards.find(
+      {includeIndependentRails ? (
+        <>
+          <RegexRail
+            card={state.cards.find(
+              (candidate) => candidate.id === conversation.cardId,
+            )}
+            preset={presetOverride ?? state.presets[0]}
+            regexScopes={regexScopesOverride ?? state.regexScopes}
+            expanded={regexScopesOverride !== undefined}
+            onToggle={noop}
+            onSaveRegexScope={async () => undefined}
+          />
+          <WorldbookRail
+            worldbooks={state.worldbooks.filter((worldbook) =>
+              worldbookIds.has(worldbook.id),
+            )}
+            expanded={state.expandedPanels.worldbooks}
+            onToggle={noop}
+            onPermission={noop}
+            onSaveWorldbookEntry={async () => undefined}
+          />
+        </>
+      ) : null}
+      <WorkspaceModals
+        modal={proposal ? { kind: "agent_proposal" } : { kind: "closed" }}
+        apiOnline={false}
+        cards={state.cards}
+        selectedCard={state.cards.find(
           (candidate) => candidate.id === conversation.cardId,
         )}
-        worldbooks={state.worldbooks.filter((worldbook) =>
+        preset={presetOverride ?? state.presets[0]}
+        expandedPanels={state.expandedPanels}
+        personas={state.personas}
+        plugins={state.plugins}
+        legacyHostPlugins={{}}
+        worldbooks={state.worldbooks}
+        activeWorldbooks={state.worldbooks.filter((worldbook) =>
           worldbookIds.has(worldbook.id),
         )}
-        preset={presetOverride ?? state.presets[0]}
-        regexScopes={regexScopesOverride ?? state.regexScopes}
-        promptTrace={state.promptTrace}
-        proposal={proposal}
-        expandedPanels={{
-          ...state.expandedPanels,
-          preset: true,
-          regex: regexScopesOverride !== undefined,
-        }}
-        onTogglePanel={noop}
+        agentProposal={proposal}
+        providerConnections={state.providerConnections}
+        selectedProviderId={state.selectedProviderId}
         onClose={noop}
-        onPermission={noop}
-        onSaveWorldbookEntry={async () => undefined}
-        onSaveRegexScope={async () => undefined}
+        onSelectCard={noop}
+        onDeleteCard={noop}
+        onCreateConversation={async () => undefined}
+        onImport={async () => undefined}
+        onInstallPlugin={async () => undefined}
+        onTogglePlugin={async () => undefined}
+        onPermission={async () => undefined}
+        onSelectProvider={noop}
+        onSaveProvider={async () => state.providerConnections[0]!}
         onConfirmToolProposal={noop}
         onRejectToolProposal={noop}
         onUndoToolProposal={noop}
@@ -68,55 +100,71 @@ function renderRail(
   );
 }
 
+function renderRail(
+  proposal: AgentProposal | null,
+  presetOverride?: PromptPreset,
+  regexScopesOverride?: RegexScope[],
+): string {
+  return renderRailFixture(proposal, presetOverride, regexScopesOverride);
+}
+
 describe("ContextRail", () => {
-  it("keeps card context and installed plugin menus in separate drawers", () => {
+  it("renders support panels without a context drawer", () => {
     const state = createDemoWorkspace();
     const noop = vi.fn();
-    const contextHtml = renderRail(null);
+    const supportHtml = renderRail(null);
     const extensionsHtml = renderToStaticMarkup(
-      <ExtensionsDrawer
-        open
+      <ExtensionsPanel
         plugins={state.plugins}
         pluginRealms={<iframe title="插件运行菜单" />}
-        onClose={noop}
         onOpenPlugins={noop}
       />,
     );
 
-    expect(contextHtml).toContain('aria-label="上下文菜单"');
-    expect(contextHtml).toContain("当前角色卡、正则、世界书与提示词轨迹");
-    expect(contextHtml).not.toContain("兼容插件");
-    expect(contextHtml).not.toContain("<iframe");
+    expect(supportHtml).not.toContain("上下文菜单");
+    expect(supportHtml).toContain("当前作用域");
+    expect(supportHtml).toContain("当前会话");
+    expect(supportHtml).not.toContain("提示词轨迹");
 
-    expect(extensionsHtml).toContain('aria-label="扩展菜单"');
-    expect(extensionsHtml).toContain("已安装插件及插件提供的功能菜单");
+    expect(extensionsHtml).not.toContain("extensions-drawer");
     expect(extensionsHtml).toContain("JS-Slash-Runner");
     expect(extensionsHtml).toContain("ST-Prompt-Template");
     expect(extensionsHtml).toContain('title="插件运行菜单"');
-    expect(extensionsHtml).not.toContain("当前会话");
-    expect(extensionsHtml).not.toContain("正则 ·");
-    expect(extensionsHtml).not.toContain("世界书");
   });
 
-  it("shows concrete worldbook entries with independent AI edit controls", () => {
+  it("shows concrete worldbook entries with combined AI edit controls", () => {
     const state = createDemoWorkspace();
     const html = renderRail(state.agentProposal);
 
     expect(html).toContain("旧港钟楼");
     expect(html).toContain("北侧浅滩");
+    expect(html).toContain("标题（备注）");
+    expect(html).toContain("触发策略");
+    expect(html).toContain("永久启用");
+    expect(html).toContain("关键词匹配");
+    expect(html).toContain("触发概率 %");
+    expect(html).toContain("100%");
     expect(html).toContain("条目修订 3");
     expect(html).toContain("AI 禁止编辑");
     expect(html).toContain("AI 可编辑");
-    expect(html).toContain("允许 AI 编辑");
-    expect(html).toContain("禁止 AI 编辑");
-    expect(html).toContain("关键词召回");
-    expect(html).toContain("永久启用");
+    expect(html).toContain('aria-label="允许 AI 编辑条目 旧港钟楼"');
+    expect(html).toContain('aria-label="禁止 AI 编辑条目 北侧浅滩"');
+    expect(html).toContain('aria-label="停用条目 旧港钟楼"');
+    expect(html).toContain('aria-label="停用条目 北侧浅滩"');
+    expect(html).toContain('aria-label="启用条目 调查场景节奏"');
+    expect(html).toContain(
+      'aria-label="切换条目 旧港钟楼 的触发策略，当前为关键词匹配"',
+    );
+    expect(html).toContain("已启用");
     expect(html).toContain("已停用");
     expect(html).toContain("编辑条目");
     expect(html).toContain("默认（沿用原始位置）");
+    expect(html).not.toContain("从角色卡导入 · 条目默认禁止 AI 编辑");
+    expect(html).not.toContain("钟楼的机械记录与港区潮位表保持同步。");
+    expect(html).not.toContain("永久启用条目无需关键词即可进入提示词。");
   });
 
-  it("keeps chat tool decisions in context without an independent Agent window", () => {
+  it("keeps chat tool decisions in a dedicated modal", () => {
     const state = createDemoWorkspace();
     const awaiting = renderRail(state.agentProposal);
     const applied = renderRail({
@@ -281,7 +329,7 @@ describe("ContextRail", () => {
 
     const html = renderRail(null, preset, scopes);
 
-    expect(html).toContain("正则 · 1");
+    expect(html).toContain("当前作用域 · 1");
     expect(html).toContain("全局");
     expect(html).toContain("当前角色卡");
     expect(html).toContain("当前预设");

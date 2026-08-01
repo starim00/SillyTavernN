@@ -15,6 +15,7 @@ import {
 import {
   displayContentSegments,
   htmlDisplayContent,
+  highlightDialogueText,
   isHtmlDisplayContent,
   markdownDisplayContent,
   mixedDisplayContent,
@@ -352,6 +353,40 @@ describe("workspace components", () => {
     expect(html).not.toContain("<iframe");
   });
 
+  it("marks quoted dialogue without changing code blocks", () => {
+    const message: WorkspaceMessage = {
+      id: "message-dialogue-styling",
+      conversationId: "conversation-test",
+      role: "assistant",
+      content:
+        '普通叙述。\n\n“先别关灯。” 港务员压低声音。\n\n```json\n{"text":"不要染色"}\n```',
+      createdLabel: "10:33",
+      revision: 1,
+    };
+    const noop = vi.fn();
+    const html = renderToStaticMarkup(
+      <MessageCard
+        message={message}
+        isLast
+        onCopy={noop}
+        onUpdate={noop}
+        onDelete={noop}
+        onRegenerate={noop}
+        onContinue={noop}
+        onSelectSwipe={noop}
+      />,
+    );
+
+    expect(highlightDialogueText("“对白”与普通正文")).toBeTruthy();
+    expect(html).toContain(
+      '<span class="message-item__dialogue">“先别关灯。”</span>',
+    );
+    expect(html).toContain("{&quot;text&quot;:&quot;不要染色&quot;}");
+    expect(html).not.toContain(
+      'class="message-item__dialogue">{&quot;text&quot;',
+    );
+  });
+
   it("always parses user Markdown instead of treating wrappers as rich HTML", () => {
     const displayContent = `<init_data>
 \`\`\`yaml
@@ -457,6 +492,11 @@ describe("workspace components", () => {
     expect(sourceDocument).toContain("navigate-to 'none'");
     expect(sourceDocument).toContain("media-src http: https: data: blob:");
     expect(sourceDocument).toContain("style-src 'unsafe-inline' http: https:");
+    expect(sourceDocument).toContain("body>p");
+    expect(sourceDocument).toContain("color:#202124!important");
+    expect(sourceDocument).toContain("stn-message-dialogue");
+    expect(sourceDocument).not.toContain("background:#fff1f0");
+    expect(sourceDocument).toContain("new MutationObserver(decorate)");
     expect(resizableSourceDocument).toContain(
       '<meta name="stn-frame-id" content="frame-test">',
     );

@@ -85,6 +85,7 @@ const worldbookEntryUpdateSchema = z
     insertionRole: z.enum(["system", "user", "assistant"]).optional(),
     order: z.number().finite().min(-1_000_000).max(1_000_000).optional(),
     priority: z.number().finite().min(-1_000_000).max(1_000_000).optional(),
+    probability: z.number().finite().min(0).max(100).optional(),
   })
   .strict();
 
@@ -252,6 +253,9 @@ function worldbookDto(context: ServerContext, id: string) {
       );
       const outletName = metadataString(entry.metadata, "outletName");
       const insertionRole = metadataString(entry.metadata, "insertionRole");
+      const extensions = isJsonObject(entry.metadata.extensions)
+        ? entry.metadata.extensions
+        : undefined;
       return {
         ...entry,
         title:
@@ -307,6 +311,13 @@ function worldbookDto(context: ServerContext, id: string) {
             : "system",
         order: entry.position,
         priority: metadataNumber(entry.metadata, "priority") ?? 0,
+        probability:
+          extensions === undefined
+            ? 100
+            : Math.max(
+                0,
+                Math.min(100, metadataNumber(extensions, "probability") ?? 100),
+              ),
       };
     }),
   };
@@ -903,6 +914,13 @@ export async function registerWorkspaceRoutes(
         setMetadata(metadata, "legacyInsertionOrder", input.order);
       }
       setMetadata(metadata, "priority", input.priority);
+      if (input.probability !== undefined) {
+        const extensions = isJsonObject(metadata.extensions)
+          ? { ...metadata.extensions }
+          : {};
+        extensions.probability = input.probability;
+        metadata.extensions = extensions;
+      }
 
       context.store.updateWorldbookEntryHuman({
         worldbookId: request.params.worldbookId,

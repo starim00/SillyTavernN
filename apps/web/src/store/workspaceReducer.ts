@@ -49,7 +49,6 @@ type WorkspaceAction =
   | { type: "message/swipe-select"; messageId: string; index: number }
   | { type: "panel/toggle"; panel: PanelId }
   | { type: "nav/set"; open: boolean }
-  | { type: "context/set"; open: boolean }
   | { type: "modal/set"; modal: ModalState }
   | { type: "preset/select"; id: string }
   | { type: "preset/replace"; preset: PromptPreset }
@@ -63,10 +62,6 @@ type WorkspaceAction =
       entry: WorldbookEntry;
     }
   | { type: "worldbooks/replace"; worldbooks: Worldbook[] }
-  | {
-      type: "promptTrace/replace";
-      segments: WorkspaceState["promptTrace"];
-    }
   | {
       type: "generation/start";
       conversationId: string;
@@ -224,7 +219,6 @@ export function workspaceReducer(
         presets,
         regexScopes: action.payload.regexScopes,
         providerConnections: action.payload.providerConnections,
-        promptTrace: [],
         selectedProviderId,
         selectedPresetId,
         selectedCardId,
@@ -248,7 +242,7 @@ export function workspaceReducer(
         selectedCardId: action.id,
         selectedConversationId,
         navOpen: false,
-        contextOpen: false,
+        modal: { kind: "closed" },
         agentProposal: null,
         agentRun: null,
       };
@@ -332,8 +326,6 @@ export function workspaceReducer(
         messagesByConversation,
         draftByConversation,
         selectedConversationId,
-        promptTrace:
-          state.selectedConversationId === action.id ? [] : state.promptTrace,
         generation:
           state.generation.conversationId === action.id
             ? idleGeneration()
@@ -351,7 +343,7 @@ export function workspaceReducer(
         ...state,
         selectedConversationId: action.id,
         navOpen: false,
-        contextOpen: false,
+        modal: { kind: "closed" },
         agentProposal: null,
         agentRun: null,
       };
@@ -501,8 +493,6 @@ export function workspaceReducer(
       };
     case "nav/set":
       return { ...state, navOpen: action.open };
-    case "context/set":
-      return { ...state, contextOpen: action.open };
     case "modal/set":
       return { ...state, modal: action.modal };
     case "preset/select":
@@ -572,8 +562,6 @@ export function workspaceReducer(
           action.worldbooks,
         ),
       };
-    case "promptTrace/replace":
-      return { ...state, promptTrace: action.segments };
     case "generation/start":
       return {
         ...state,
@@ -624,11 +612,15 @@ export function workspaceReducer(
         ...state,
         agentProposal: action.proposal,
         agentRun: action.run,
-        contextOpen: true,
-        expandedPanels: { ...state.expandedPanels, context: true },
+        modal: { kind: "agent_proposal" },
       };
     case "agent/rejected":
-      return { ...state, agentProposal: null, agentRun: null };
+      return {
+        ...state,
+        agentProposal: null,
+        agentRun: null,
+        modal: { kind: "closed" },
+      };
     case "agent/run":
       return { ...state, agentRun: action.run };
     case "agent/applied": {
@@ -725,6 +717,7 @@ const withPersistedWorldbookEntry = (entry: WorldbookEntry): WorldbookEntry => {
     insertionRole: persisted.insertionRole ?? "system",
     order: persisted.order ?? 0,
     priority: persisted.priority ?? persisted.order ?? 0,
+    probability: persisted.probability ?? 100,
   };
 };
 
@@ -749,7 +742,6 @@ export function loadWorkspaceState(): WorkspaceState {
         ...base,
         selectedCardId: "",
         selectedConversationId: "",
-        contextOpen: false,
         agentProposal: null,
       };
     }
@@ -759,7 +751,6 @@ export function loadWorkspaceState(): WorkspaceState {
         ...base,
         selectedCardId: "",
         selectedConversationId: "",
-        contextOpen: false,
         agentProposal: null,
       };
     }
@@ -791,7 +782,6 @@ export function loadWorkspaceState(): WorkspaceState {
       ...base,
       selectedCardId: "",
       selectedConversationId: "",
-      contextOpen: false,
       agentProposal: null,
     };
   }

@@ -3,8 +3,6 @@ import {
   BracketsCurly,
   CaretDown,
   CaretRight,
-  CheckCircle,
-  ClockCounterClockwise,
   DotsSixVertical,
   FloppyDisk,
   LinkBreak,
@@ -12,10 +10,9 @@ import {
   LockOpen,
   MagnifyingGlass,
   PencilSimple,
+  Power,
   Plus,
   PuzzlePiece,
-  ShieldCheck,
-  Wrench,
   X,
 } from "@phosphor-icons/react";
 import {
@@ -29,12 +26,9 @@ import {
 } from "react";
 
 import type {
-  AgentProposal,
   LegacyPlugin,
-  PanelId,
   PromptPreset,
   PromptPresetEntry,
-  PromptTraceSegment,
   RegexScope,
   RegexScriptDefinition,
   RoleCard,
@@ -627,6 +621,26 @@ function insertionPositionLabel(
     : insertionPositionLabels[value];
 }
 
+const insertionRoleLabels: Record<WorldbookEntry["insertionRole"], string> = {
+  system: "系统",
+  user: "用户",
+  assistant: "助手",
+};
+
+function worldbookEntryModeLabel(entry: WorldbookEntry): string {
+  return entry.constant ? "永久启用" : "关键词匹配";
+}
+
+function worldbookEntryPlacementLabel(entry: WorldbookEntry): string {
+  if (entry.insertionPosition === "at-depth") {
+    return `@D ${insertionRoleLabels[entry.insertionRole]}在深度`;
+  }
+  if (entry.insertionPosition === "outlet") {
+    return entry.outletName ? `出口 · ${entry.outletName}` : "命名出口";
+  }
+  return insertionPositionLabel(entry.insertionPosition);
+}
+
 function compactKeywordRows(values: string[]): string[] {
   return [...new Set(values.filter((keyword) => keyword.length > 0))];
 }
@@ -712,6 +726,7 @@ function editableWorldbookEntry(entry: WorldbookEntry): WorldbookEntryUpdate {
     insertionRole: entry.insertionRole,
     order: entry.order,
     priority: entry.priority,
+    probability: entry.probability,
   };
 }
 
@@ -737,10 +752,45 @@ function WorldbookEntryItem({
   const [secondaryKeys, setSecondaryKeys] = useState(() => [
     ...entry.secondaryKeys,
   ]);
-  const preview =
-    entry.content.length > 240
-      ? `${entry.content.slice(0, 240)}…`
-      : entry.content;
+
+  const toggleEnabled = async () => {
+    if (saving || editing) return;
+    const enabled = !entry.enabled;
+    setSaving(true);
+    try {
+      await onSave(worldbook, entry, {
+        ...editableWorldbookEntry(entry),
+        enabled,
+      });
+      setDraft((current) => ({ ...current, enabled }));
+    } catch {
+      // The parent surface reports the durable server error.
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleTriggerMode = async () => {
+    if (saving || editing) return;
+    const constant = !entry.constant;
+    setSaving(true);
+    try {
+      await onSave(worldbook, entry, {
+        ...editableWorldbookEntry(entry),
+        constant,
+        selective: !constant,
+      });
+      setDraft((current) => ({
+        ...current,
+        constant,
+        selective: !constant,
+      }));
+    } catch {
+      // The parent surface reports the durable server error.
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -765,9 +815,13 @@ function WorldbookEntryItem({
     <li
       className={`worldbook-entry${
         entry.enabled ? "" : " worldbook-entry--disabled"
-      }`}
+      }${editing ? " worldbook-entry--editing" : ""}`}
     >
-      <div className="worldbook-entry__header">
+      <div
+        className={`worldbook-entry__header${
+          editing ? "" : " worldbook-entry__header--editing-only"
+        }`}
+      >
         <div>
           <strong>{entry.title}</strong>
           <span>
@@ -776,17 +830,33 @@ function WorldbookEntryItem({
           </span>
         </div>
         <div className="worldbook-entry__statuses">
-          <SurfaceStatus tone={entry.enabled ? "mint" : "slate"}>
-            {entry.enabled
-              ? entry.constant
-                ? "永久启用"
-                : "关键词召回"
-              : "已停用"}
-          </SurfaceStatus>
-          <SurfaceStatus tone={entry.agentEditable ? "mint" : "slate"}>
+          <button
+            className={`worldbook-entry__toggle${
+              entry.enabled ? " worldbook-entry__toggle--enabled" : ""
+            }`}
+            type="button"
+            aria-pressed={entry.enabled}
+            aria-label={`${entry.enabled ? "停用" : "启用"}条目 ${entry.title}`}
+            title={`${entry.enabled ? "停用" : "启用"}此条目`}
+            disabled={saving || editing}
+            onClick={() => void toggleEnabled()}
+          >
+            <Power size={13} />
+            {entry.enabled ? "已启用" : "已停用"}
+          </button>
+          <button
+            className={`surface-status worldbook-entry__permission surface-status--${
+              entry.agentEditable ? "mint" : "slate"
+            }`}
+            type="button"
+            aria-pressed={entry.agentEditable}
+            aria-label={`${entry.agentEditable ? "禁止" : "允许"} AI 编辑条目 ${entry.title}`}
+            title={`${entry.agentEditable ? "禁止" : "允许"} AI 编辑此条目`}
+            onClick={() => onPermission(worldbook.id, entry.id)}
+          >
             {entry.agentEditable ? <LockOpen size={13} /> : <Lock size={13} />}
             {entry.agentEditable ? "AI 可编辑" : "AI 禁止编辑"}
-          </SurfaceStatus>
+          </button>
         </div>
       </div>
       {editing ? (
@@ -967,6 +1037,22 @@ function WorldbookEntryItem({
                 }
               />
             </label>
+            <label className="field">
+              <span>触发概率 %</span>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={draft.probability ?? 100}
+                disabled={saving}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    probability: event.target.valueAsNumber || 0,
+                  }))
+                }
+              />
+            </label>
           </div>
           {draft.insertionPosition === "outlet" ? (
             <label className="field">
@@ -1078,101 +1164,111 @@ function WorldbookEntryItem({
           </div>
         </form>
       ) : (
-        <>
-          <p>{preview || "此条目暂无正文。"}</p>
-          {entry.primaryKeys.length > 0 ? (
-            <div className="worldbook-entry__keys" aria-label="主要关键词">
-              {entry.primaryKeys.map((key, index) => (
-                <span key={`${key}-${String(index)}`}>{key}</span>
-              ))}
-            </div>
-          ) : entry.constant ? (
-            <small className="worldbook-entry__constant-note">
-              永久启用条目无需关键词即可进入提示词。
-            </small>
-          ) : (
-            <small className="worldbook-entry__constant-note">
-              没有主要关键词时不会被关键词召回。
-            </small>
-          )}
-          <div className="worldbook-entry__actions">
+        <div className="worldbook-entry__row" role="row">
+          <button
+            className={`worldbook-entry__enabled${
+              entry.enabled ? " worldbook-entry__enabled--on" : ""
+            }`}
+            type="button"
+            aria-pressed={entry.enabled}
+            aria-label={`${entry.enabled ? "停用" : "启用"}条目 ${entry.title}`}
+            title={`${entry.enabled ? "停用" : "启用"}此条目`}
+            disabled={saving}
+            onClick={() => void toggleEnabled()}
+          >
+            <Power size={15} />
+          </button>
+          <button
+            className="worldbook-entry__title"
+            type="button"
+            onClick={() => setEditing(true)}
+            title="编辑条目"
+          >
+            <strong>{entry.title}</strong>
+            <span>条目修订 {entry.revision}</span>
+          </button>
+          <button
+            className={`worldbook-entry__mode${
+              entry.constant ? " worldbook-entry__mode--constant" : ""
+            }`}
+            type="button"
+            aria-pressed={entry.constant}
+            aria-label={`切换条目 ${entry.title} 的触发策略，当前为${worldbookEntryModeLabel(entry)}`}
+            title="切换永久启用与关键词匹配"
+            disabled={saving}
+            onClick={() => void toggleTriggerMode()}
+          >
+            <Power size={13} weight="fill" />
+            <span>{worldbookEntryModeLabel(entry)}</span>
+            <CaretDown size={12} />
+          </button>
+          <span
+            className="worldbook-entry__placement"
+            title={worldbookEntryPlacementLabel(entry)}
+          >
+            {worldbookEntryPlacementLabel(entry)}
+          </span>
+          <span className="worldbook-entry__number">
+            {entry.insertionDepth ?? "—"}
+          </span>
+          <span className="worldbook-entry__number">{entry.order}</span>
+          <span className="worldbook-entry__number">{entry.probability}%</span>
+          <div className="worldbook-entry__row-actions">
             <button
-              className="text-button"
+              className={`worldbook-entry__permission worldbook-entry__icon-action surface-status--${
+                entry.agentEditable ? "mint" : "slate"
+              }`}
               type="button"
-              onClick={() => setEditing(true)}
-            >
-              <PencilSimple size={14} />
-              编辑条目
-            </button>
-            <button
-              className="text-button"
-              type="button"
+              aria-pressed={entry.agentEditable}
+              aria-label={`${entry.agentEditable ? "禁止" : "允许"} AI 编辑条目 ${entry.title}`}
+              title={`${entry.agentEditable ? "禁止" : "允许"} AI 编辑此条目`}
               onClick={() => onPermission(worldbook.id, entry.id)}
             >
-              {entry.agentEditable ? "禁止 AI 编辑" : "允许 AI 编辑"}
+              {entry.agentEditable ? (
+                <LockOpen size={14} />
+              ) : (
+                <Lock size={14} />
+              )}
+              <span className="sr-only">
+                {entry.agentEditable ? "AI 可编辑" : "AI 禁止编辑"}
+              </span>
+            </button>
+            <button
+              className="worldbook-entry__icon-action"
+              type="button"
+              aria-label={`编辑条目 ${entry.title}`}
+              title="编辑条目"
+              onClick={() => setEditing(true)}
+            >
+              <PencilSimple size={15} />
             </button>
           </div>
-        </>
+        </div>
       )}
     </li>
   );
 }
 
-type ContextRailProps = {
-  open: boolean;
+type RegexRailProps = {
   card: RoleCard | undefined;
-  worldbooks: Worldbook[];
   preset: PromptPreset | undefined;
   regexScopes: RegexScope[];
-  promptTrace: PromptTraceSegment[];
-  proposal: AgentProposal | null;
-  expandedPanels: Record<PanelId, boolean>;
-  onTogglePanel: (panel: PanelId) => void;
-  onClose: () => void;
-  onPermission: (worldbookId: string, entryId: string) => void;
-  onSaveWorldbookEntry: (
-    worldbook: Worldbook,
-    entry: WorldbookEntry,
-    patch: WorldbookEntryUpdate,
-  ) => Promise<void>;
+  expanded: boolean;
+  onToggle: () => void;
   onSaveRegexScope: (
     scope: RegexScope,
     patch: { enabled?: boolean; scripts?: RegexScriptDefinition[] },
   ) => Promise<void>;
-  onConfirmToolProposal: () => void;
-  onRejectToolProposal: () => void;
-  onUndoToolProposal: () => void;
 };
 
-export function ContextRail({
-  open,
+export function RegexRail({
   card,
-  worldbooks,
   preset,
   regexScopes,
-  promptTrace,
-  proposal,
-  expandedPanels,
-  onTogglePanel,
-  onClose,
-  onPermission,
-  onSaveWorldbookEntry,
+  expanded,
+  onToggle,
   onSaveRegexScope,
-  onConfirmToolProposal,
-  onRejectToolProposal,
-  onUndoToolProposal,
-}: ContextRailProps) {
-  const proposalWorldbook = worldbooks.find(
-    (worldbook) => worldbook.id === proposal?.worldbookId,
-  );
-  const proposalStatus =
-    proposal?.status === "blocked"
-      ? "权限已阻止"
-      : proposal?.status === "awaiting_confirmation"
-        ? "等待确认"
-        : proposal?.status === "applied"
-          ? "已应用"
-          : "已撤销";
+}: RegexRailProps) {
   const currentRegexScopes = regexScopes.filter(
     (scope) =>
       (scope.scope === "global" && scope.id === "global") ||
@@ -1185,330 +1281,182 @@ export function ContextRail({
   );
 
   return (
-    <aside
-      className={`extensions-drawer${open ? " extensions-drawer--open" : ""}`}
-      aria-label="上下文菜单"
+    <SupportPanel
+      id="regex-panel"
+      title={`当前作用域 · ${currentRegexCount}`}
+      icon={<BracketsCurly size={18} />}
+      expanded={expanded}
+      onToggle={onToggle}
     >
-      <div className="extensions-drawer__header">
-        <div>
-          <strong>上下文</strong>
-          <span>当前角色卡、正则、世界书与提示词轨迹</span>
-        </div>
-        <IconButton
-          label="关闭上下文菜单"
-          icon={<X size={18} />}
-          onClick={onClose}
-          compact
-        />
-      </div>
-
-      <div className="extensions-drawer__scroll">
-        <SupportPanel
-          id="context-panel"
-          title="当前会话"
-          icon={<ShieldCheck size={18} />}
-          expanded={expandedPanels.context}
-          onToggle={() => onTogglePanel("context")}
-        >
-          <dl className="context-facts">
-            <div>
-              <dt>角色卡</dt>
-              <dd>{card?.name ?? "未找到绑定角色卡"}</dd>
-            </div>
-            <div>
-              <dt>预设</dt>
-              <dd>{preset?.name ?? "未选择"}</dd>
-            </div>
-          </dl>
-        </SupportPanel>
-
-        <SupportPanel
-          id="regex-panel"
-          title={`正则 · ${currentRegexCount}`}
-          icon={<BracketsCurly size={18} />}
-          expanded={expandedPanels.regex}
-          onToggle={() => onTogglePanel("regex")}
-        >
-          <RegexManager
-            scopes={currentRegexScopes}
-            {...(card ? { cardId: card.id } : {})}
-            {...(preset ? { presetId: preset.id } : {})}
-            onSaveScope={onSaveRegexScope}
-          />
-        </SupportPanel>
-
-        {proposal ? (
-          <section className="tool-proposal-section" aria-label="模型工具提案">
-            <div className="tool-proposal-section__label">
-              <Wrench size={16} />
-              <strong>模型工具提案</strong>
-              <span>仅在普通聊天产生待处理操作时显示</span>
-            </div>
-            <article
-              className={`tool-proposal tool-proposal--${proposal.status}`}
-            >
-              <div className="tool-proposal__header">
-                <strong>{proposal.title}</strong>
-                <SurfaceStatus
-                  tone={
-                    proposal.status === "applied"
-                      ? "mint"
-                      : proposal.status === "awaiting_confirmation"
-                        ? "coral"
-                        : "slate"
-                  }
-                >
-                  {proposal.status === "applied" ? (
-                    <CheckCircle size={13} />
-                  ) : (
-                    <Wrench size={13} />
-                  )}
-                  {proposalStatus}
-                </SurfaceStatus>
-              </div>
-              <p>{proposal.rationale}</p>
-              <pre>{proposal.diffLines.join("\n")}</pre>
-              {proposal.status === "awaiting_confirmation" ? (
-                <div className="tool-proposal__actions">
-                  <button
-                    className="button button--quiet"
-                    type="button"
-                    onClick={onRejectToolProposal}
-                  >
-                    <X size={16} />
-                    拒绝提案
-                  </button>
-                  <button
-                    className="button button--primary"
-                    type="button"
-                    onClick={onConfirmToolProposal}
-                  >
-                    <CheckCircle size={17} />
-                    确认并应用
-                  </button>
-                </div>
-              ) : null}
-              {proposal.status === "blocked" ? (
-                <button
-                  className="button button--quiet button--full"
-                  type="button"
-                  onClick={onRejectToolProposal}
-                >
-                  <X size={16} />
-                  拒绝被阻止的提案
-                </button>
-              ) : null}
-              {proposal.status === "applied" ? (
-                <button
-                  className="button button--quiet button--full"
-                  type="button"
-                  onClick={onUndoToolProposal}
-                >
-                  <ClockCounterClockwise size={17} />
-                  撤销这次写入
-                </button>
-              ) : null}
-              <small>
-                目标：{proposalWorldbook?.name ?? proposal.worldbookName} ·
-                世界书修订 {proposal.beforeRevision}
-                {proposal.targetEntryId ? (
-                  <>
-                    {" "}
-                    · 条目 {proposal.targetEntryTitle ?? "未命名条目"}（
-                    {proposal.targetEntryId}）· 条目修订{" "}
-                    {proposal.beforeEntryRevision ?? "未知"}
-                  </>
-                ) : null}
-              </small>
-            </article>
-          </section>
-        ) : null}
-
-        <SupportPanel
-          id="worldbook-panel"
-          title={`世界书 · ${worldbooks.length}`}
-          icon={<BookOpenText size={18} />}
-          expanded={expandedPanels.worldbooks}
-          onToggle={() => onTogglePanel("worldbooks")}
-        >
-          <div className="worldbook-stack">
-            {worldbooks.map((worldbook) => (
-              <article className="worldbook-item" key={worldbook.id}>
-                <div className="worldbook-item__header">
-                  <div>
-                    <strong>{worldbook.name}</strong>
-                    <span>
-                      {worldbook.entries.length} 个条目 · 修订{" "}
-                      {worldbook.revision}
-                    </span>
-                  </div>
-                </div>
-                <p className="worldbook-item__description">
-                  {worldbook.description}
-                </p>
-                {worldbook.entries.length > 0 ? (
-                  <ul className="worldbook-entry-list">
-                    {worldbook.entries.map((entry) => (
-                      <WorldbookEntryItem
-                        key={`${entry.id}:${entry.revision}`}
-                        worldbook={worldbook}
-                        entry={entry}
-                        onPermission={onPermission}
-                        onSave={onSaveWorldbookEntry}
-                      />
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="support-empty">这本世界书还没有具体条目。</p>
-                )}
-              </article>
-            ))}
-            {worldbooks.length === 0 ? (
-              <p className="support-empty">此会话暂未绑定世界书。</p>
-            ) : null}
-          </div>
-        </SupportPanel>
-
-        <SupportPanel
-          id="trace-panel"
-          title="提示词轨迹"
-          icon={<BracketsCurly size={18} />}
-          expanded={expandedPanels.trace}
-          onToggle={() => onTogglePanel("trace")}
-        >
-          <ol className="trace-list">
-            {promptTrace.map((segment) => (
-              <li key={segment.id}>
-                <span
-                  className={`trace-dot trace-dot--${segment.source}`}
-                  aria-hidden="true"
-                />
-                <div>
-                  <strong>{segment.label}</strong>
-                  <p>{segment.detail}</p>
-                </div>
-                <span>{segment.tokens}</span>
-              </li>
-            ))}
-          </ol>
-        </SupportPanel>
-      </div>
-    </aside>
+      <RegexManager
+        scopes={currentRegexScopes}
+        {...(card ? { cardId: card.id } : {})}
+        {...(preset ? { presetId: preset.id } : {})}
+        onSaveScope={onSaveRegexScope}
+      />
+    </SupportPanel>
   );
 }
 
-type ExtensionsDrawerProps = {
-  open: boolean;
+type WorldbookRailProps = {
+  worldbooks: Worldbook[];
+  expanded: boolean;
+  onToggle: () => void;
+  onPermission: (worldbookId: string, entryId: string) => void;
+  onSaveWorldbookEntry: (
+    worldbook: Worldbook,
+    entry: WorldbookEntry,
+    patch: WorldbookEntryUpdate,
+  ) => Promise<void>;
+};
+
+export function WorldbookRail({
+  worldbooks,
+  expanded,
+  onToggle,
+  onPermission,
+  onSaveWorldbookEntry,
+}: WorldbookRailProps) {
+  return (
+    <SupportPanel
+      id="worldbook-panel"
+      title={`当前会话 · ${worldbooks.length} 本`}
+      icon={<BookOpenText size={18} />}
+      expanded={expanded}
+      onToggle={onToggle}
+    >
+      <div className="worldbook-stack">
+        {worldbooks.map((worldbook) => (
+          <article className="worldbook-item" key={worldbook.id}>
+            <div className="worldbook-item__header">
+              <div>
+                <strong>{worldbook.name}</strong>
+                <span>
+                  {worldbook.entries.length} 个条目 · 修订 {worldbook.revision}
+                </span>
+              </div>
+            </div>
+            {worldbook.entries.length > 0 ? (
+              <div
+                className="worldbook-entry-table"
+                role="table"
+                aria-label={`${worldbook.name} 条目`}
+              >
+                <div className="worldbook-entry-table__header" role="row">
+                  <span aria-hidden="true" />
+                  <span>标题（备注）</span>
+                  <span>触发策略</span>
+                  <span>插入位置</span>
+                  <span>深度</span>
+                  <span>顺序</span>
+                  <span>触发概率 %</span>
+                  <span>操作</span>
+                </div>
+                <ul className="worldbook-entry-list" role="rowgroup">
+                  {worldbook.entries.map((entry) => (
+                    <WorldbookEntryItem
+                      key={`${entry.id}:${entry.revision}`}
+                      worldbook={worldbook}
+                      entry={entry}
+                      onPermission={onPermission}
+                      onSave={onSaveWorldbookEntry}
+                    />
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <p className="support-empty">这本世界书还没有具体条目。</p>
+            )}
+          </article>
+        ))}
+        {worldbooks.length === 0 ? (
+          <p className="support-empty">此会话暂未绑定世界书。</p>
+        ) : null}
+      </div>
+    </SupportPanel>
+  );
+}
+
+type ExtensionsPanelProps = {
   plugins: LegacyPlugin[];
   pluginRealms: ReactNode;
-  onClose: () => void;
   onOpenPlugins: () => void;
 };
 
-export function ExtensionsDrawer({
-  open,
+export function ExtensionsPanel({
   plugins,
   pluginRealms,
-  onClose,
   onOpenPlugins,
-}: ExtensionsDrawerProps) {
+}: ExtensionsPanelProps) {
   return (
-    <aside
-      className={`extensions-drawer extensions-drawer--plugins${
-        open ? " extensions-drawer--open" : ""
-      }`}
-      aria-label="扩展菜单"
-    >
-      <div className="extensions-drawer__header">
+    <section className="extension-plugins" aria-labelledby="plugin-menu-title">
+      <div className="extension-plugins__heading">
         <div>
-          <strong>扩展</strong>
-          <span>已安装插件及插件提供的功能菜单</span>
+          <PuzzlePiece size={17} />
+          <strong id="plugin-menu-title">兼容插件</strong>
         </div>
-        <IconButton
-          label="关闭扩展菜单"
-          icon={<X size={18} />}
-          onClick={onClose}
-          compact
-        />
+        <button className="text-button" type="button" onClick={onOpenPlugins}>
+          管理插件
+        </button>
       </div>
-      <div className="extensions-drawer__scroll">
-        <section
-          className="extension-plugins"
-          aria-labelledby="plugin-menu-title"
-        >
-          <div className="extension-plugins__heading">
-            <div>
-              <PuzzlePiece size={17} />
-              <strong id="plugin-menu-title">兼容插件</strong>
-            </div>
-            <button
-              className="text-button"
-              type="button"
-              onClick={onOpenPlugins}
-            >
-              管理插件
-            </button>
-          </div>
-          <div className="extension-plugin-list">
-            {plugins.map((plugin) => {
-              const nativeReplacement =
-                plugin.id === "plugin-js-slash-runner" ||
-                plugin.id === "plugin-st-prompt-template";
-              const active =
-                plugin.status === "enabled" && plugin.trust === "trusted";
-              return (
-                <details className="extension-plugin" key={plugin.id}>
-                  <summary>
-                    <span>
-                      <PuzzlePiece size={15} />
-                      <strong>{plugin.name}</strong>
-                    </span>
-                    <SurfaceStatus
-                      tone={nativeReplacement || active ? "mint" : "slate"}
-                    >
-                      {nativeReplacement
-                        ? "原生接管"
-                        : active
-                          ? "菜单已接入"
-                          : "未启用"}
-                    </SurfaceStatus>
-                  </summary>
-                  <div>
-                    <p>
-                      {plugin.id === "plugin-js-slash-runner"
-                        ? "角色卡与预设脚本由内置酒馆助手接口执行。"
-                        : plugin.id === "plugin-st-prompt-template"
-                          ? "EJS 与模板指令由原生请求管线处理。"
-                          : plugin.description}
-                    </p>
-                    <small>
-                      {plugin.version} ·{" "}
-                      {nativeReplacement
-                        ? "卡片与预设能力由内置兼容层执行"
-                        : "独立兼容域运行"}
-                    </small>
-                    <button
-                      className="button button--quiet button--full"
-                      type="button"
-                      onClick={onOpenPlugins}
-                    >
-                      查看权限与加载详情
-                    </button>
-                  </div>
-                </details>
-              );
-            })}
-            {plugins.length === 0 ? (
-              <p className="support-empty">
-                还没有兼容插件；安装后菜单项会自动出现在这里。
-              </p>
-            ) : null}
-          </div>
-          <div className="legacy-plugin-realms" aria-label="兼容插件菜单">
-            {pluginRealms}
-          </div>
-        </section>
+      <div className="extension-plugin-list">
+        {plugins.map((plugin) => {
+          const nativeReplacement =
+            plugin.id === "plugin-js-slash-runner" ||
+            plugin.id === "plugin-st-prompt-template";
+          const active =
+            plugin.status === "enabled" && plugin.trust === "trusted";
+          return (
+            <details className="extension-plugin" key={plugin.id}>
+              <summary>
+                <span>
+                  <PuzzlePiece size={15} />
+                  <strong>{plugin.name}</strong>
+                </span>
+                <SurfaceStatus
+                  tone={nativeReplacement || active ? "mint" : "slate"}
+                >
+                  {nativeReplacement
+                    ? "原生接管"
+                    : active
+                      ? "菜单已接入"
+                      : "未启用"}
+                </SurfaceStatus>
+              </summary>
+              <div>
+                <p>
+                  {plugin.id === "plugin-js-slash-runner"
+                    ? "角色卡与预设脚本由内置酒馆助手接口执行。"
+                    : plugin.id === "plugin-st-prompt-template"
+                      ? "EJS 与模板指令由原生请求管线处理。"
+                      : plugin.description}
+                </p>
+                <small>
+                  {plugin.version} ·{" "}
+                  {nativeReplacement
+                    ? "卡片与预设能力由内置兼容层执行"
+                    : "独立兼容域运行"}
+                </small>
+                <button
+                  className="button button--quiet button--full"
+                  type="button"
+                  onClick={onOpenPlugins}
+                >
+                  查看权限与加载详情
+                </button>
+              </div>
+            </details>
+          );
+        })}
+        {plugins.length === 0 ? (
+          <p className="support-empty">
+            还没有兼容插件；安装后菜单项会自动出现在这里。
+          </p>
+        ) : null}
       </div>
-    </aside>
+      <div className="legacy-plugin-realms" aria-label="兼容插件菜单">
+        {pluginRealms}
+      </div>
+    </section>
   );
 }

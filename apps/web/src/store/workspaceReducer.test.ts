@@ -258,7 +258,7 @@ describe("workspaceReducer", () => {
 
     expect(next.selectedCardId).toBe("world-drifting-archive");
     expect(next.selectedConversationId).toBe("conversation-archive");
-    expect(next.contextOpen).toBe(false);
+    expect(next.modal).toEqual({ kind: "closed" });
   });
 
   it("updates only the selected worldbook entry permission", () => {
@@ -353,7 +353,7 @@ describe("workspaceReducer", () => {
     });
   });
 
-  it("surfaces a live model-tool proposal in the ordinary context rail", () => {
+  it("surfaces a live model-tool proposal in its dedicated modal", () => {
     const state = createDemoWorkspace();
     const next = workspaceReducer(state, {
       type: "agent/proposed",
@@ -373,8 +373,8 @@ describe("workspaceReducer", () => {
 
     expect(next.agentProposal?.id).toBe("call-live");
     expect(next.agentRun?.status).toBe("waiting_confirmation");
-    expect(next.contextOpen).toBe(true);
-    expect(next.expandedPanels.context).toBe(true);
+    expect(next.modal).toEqual({ kind: "agent_proposal" });
+    expect(next.expandedPanels).not.toHaveProperty("context");
     expect(next.expandedPanels).not.toHaveProperty("agent");
   });
 

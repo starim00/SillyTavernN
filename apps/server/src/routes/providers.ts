@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { once } from "node:events";
 
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 
-import type { ProviderEvent } from "@stn/contracts";
+import { ProviderEventSchema, type ProviderEvent } from "@stn/contracts";
 import type {
   ProviderMessage,
   ProviderMessageToolCall,
@@ -37,6 +38,8 @@ const promptRequestSchema = z
 
 const generationRequestSchema = promptRequestSchema
   .extend({
+    targetMessageId: z.string().trim().min(1).max(256).optional(),
+    expectedMessageRevision: z.number().int().nonnegative().optional(),
     messagesOverride: z
       .array(
         z
@@ -61,7 +64,20 @@ const generationRequestSchema = promptRequestSchema
       .max(512)
       .default([]),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    if (
+      (value.targetMessageId === undefined) !==
+      (value.expectedMessageRevision === undefined)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "targetMessageId and expectedMessageRevision must be provided together.",
+        path: ["targetMessageId"],
+      });
+    }
+  });
 const maxWorldbookToolTurns = 4;
 
 const worldbookTools = builtInTools.filter((tool) =>
@@ -78,11 +94,47 @@ const providerWorldbookTools: readonly ProviderTool[] = worldbookTools.map(
   }),
 );
 
-function writeEvent(
-  reply: { raw: { write: (value: string) => boolean } },
+class GenerationLimitError extends Error {
+  readonly code = "GENERATION_LIMIT_EXCEEDED";
+}
+
+async function writeEvent(
+  reply: FastifyReply,
   event: ProviderEvent | { type: string; [key: string]: unknown },
+  maxFrameBytes: number,
+): Promise<void> {
+  const frame = `data: ${JSON.stringify(event)}\n\n`;
+  if (Buffer.byteLength(frame, "utf8") > maxFrameBytes) {
+    throw new GenerationLimitError("SSE frame exceeded its byte budget.");
+  }
+  if (reply.raw.write(frame)) return;
+  await Promise.race([
+    once(reply.raw, "drain"),
+    once(reply.raw, "close").then(() => {
+      throw new Error("Generation client disconnected during backpressure.");
+    }),
+  ]);
+}
+
+function assertGenerationInputBudget(
+  input: z.infer<typeof generationRequestSchema>,
+  maxInputBytes: number,
 ): void {
-  reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+  const bytes = Buffer.byteLength(
+    JSON.stringify({
+      messagesOverride: input.messagesOverride ?? [],
+      injects: input.injects,
+    }),
+    "utf8",
+  );
+  if (bytes > maxInputBytes) {
+    throw new StorageError(
+      "GENERATION_INPUT_LIMIT_EXCEEDED",
+      "Generation input exceeds the configured byte budget.",
+      413,
+      { maxInputBytes, actualBytes: bytes },
+    );
+  }
 }
 
 function generationObjective(messages: readonly ProviderMessage[]): string {
@@ -298,7 +350,7 @@ export async function registerProviderRoutes(
       const provider = await context.providers.get(input.connectionId);
       const capabilities = provider.capabilities();
       return envelope(
-        prepareConversationPrompt(context.store, {
+        await prepareConversationPrompt(context.store, {
           conversationId: request.params.id,
           ...(input.presetId === undefined ? {} : { presetId: input.presetId }),
           ...(input.settings === undefined ? {} : { settings: input.settings }),
@@ -312,14 +364,64 @@ export async function registerProviderRoutes(
     },
   );
 
-  app.post<{ Params: { id: string } }>(
-    "/api/conversations/:id/generate",
-    async (request, reply) => {
-      const input = generationRequestSchema.parse(request.body);
-      const provider = await context.providers.get(input.connectionId);
+  const generate = async (
+    request: FastifyRequest<{ Params: { id: string } }>,
+    reply: FastifyReply,
+    targetMessageId?: string,
+  ) => {
+    const targetMessage =
+      targetMessageId === undefined
+        ? undefined
+        : context.store.getMessage(targetMessageId);
+    const conversationId = targetMessage?.conversationId ?? request.params.id;
+    const body =
+      typeof request.body === "object" && request.body !== null
+        ? request.body
+        : {};
+    const input = generationRequestSchema.parse(
+      targetMessageId === undefined
+        ? body
+        : {
+            ...body,
+            targetMessageId,
+          },
+    );
+    const budget = context.generationBudget;
+    assertGenerationInputBudget(input, budget.maxInputBytes);
+    if (
+      [...context.generations.values()].some(
+        (generation) => generation.conversationId === conversationId,
+      )
+    ) {
+      throw new StorageError(
+        "GENERATION_ALREADY_ACTIVE",
+        "This conversation already has an active generation.",
+        409,
+      );
+    }
+    const generationId = randomUUID();
+    const controller = new AbortController();
+    context.generations.set(generationId, {
+      id: generationId,
+      conversationId,
+      controller,
+    });
+    const provider = await context.providers
+      .get(input.connectionId)
+      .catch((error: unknown) => {
+        context.generations.delete(generationId);
+        throw error;
+      });
+    let setup: {
+      capabilities: ReturnType<typeof provider.capabilities>;
+      prompt: Awaited<ReturnType<typeof prepareConversationPrompt>>;
+      compatibilityMessages: readonly ProviderMessage[];
+      toolRun: ReturnType<typeof startGenerationToolRun> | undefined;
+    };
+    try {
       const capabilities = provider.capabilities();
-      const prompt = prepareConversationPrompt(context.store, {
-        conversationId: request.params.id,
+      const prompt = await prepareConversationPrompt(context.store, {
+        conversationId,
         ...(input.presetId === undefined ? {} : { presetId: input.presetId }),
         ...(input.settings === undefined ? {} : { settings: input.settings }),
         ...(capabilities.maxContextTokens === undefined
@@ -330,143 +432,198 @@ export async function registerProviderRoutes(
         input.messagesOverride ?? prompt.messages,
         input.injects,
       );
-      const generationId = randomUUID();
-      const toolRun = capabilities.nativeToolCalling
-        ? startGenerationToolRun(context, {
-            generationId,
-            conversationId: request.params.id,
-            connectionId: input.connectionId,
-            model: provider.id,
-            messages: compatibilityMessages,
-          })
-        : undefined;
-      const requestMessages: readonly ProviderMessage[] =
-        toolRun === undefined
-          ? compatibilityMessages
-          : [toolContextMessage(toolRun.worldbooks), ...compatibilityMessages];
-      const accessibleWorldbookIds = new Set(
-        toolRun?.worldbooks.map((worldbook) => worldbook.id) ?? [],
-      );
-      const controller = new AbortController();
-      context.generations.set(generationId, {
-        id: generationId,
-        conversationId: request.params.id,
-        controller,
-      });
-      reply.hijack();
-      reply.raw.statusCode = 200;
-      reply.raw.setHeader("Content-Type", "text/event-stream; charset=utf-8");
-      reply.raw.setHeader("Cache-Control", "no-cache, no-transform");
-      reply.raw.setHeader("Connection", "keep-alive");
-      reply.raw.flushHeaders();
-      const onClose = () => {
-        if (!reply.raw.writableEnded) {
-          controller.abort(new Error("Generation client disconnected."));
-        }
+      setup = {
+        capabilities,
+        prompt,
+        compatibilityMessages,
+        toolRun: capabilities.nativeToolCalling
+          ? startGenerationToolRun(context, {
+              generationId,
+              conversationId,
+              connectionId: input.connectionId,
+              model: provider.id,
+              messages: compatibilityMessages,
+            })
+          : undefined,
       };
-      reply.raw.once("close", onClose);
-      writeEvent(reply, {
+    } catch (error) {
+      context.generations.delete(generationId);
+      throw error;
+    }
+    const { prompt, compatibilityMessages, toolRun } = setup;
+    const requestMessages: readonly ProviderMessage[] =
+      toolRun === undefined
+        ? compatibilityMessages
+        : [toolContextMessage(toolRun.worldbooks), ...compatibilityMessages];
+    const accessibleWorldbookIds = new Set(
+      toolRun?.worldbooks.map((worldbook) => worldbook.id) ?? [],
+    );
+    reply.hijack();
+    reply.raw.statusCode = 200;
+    reply.raw.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+    reply.raw.setHeader("Cache-Control", "no-cache, no-transform");
+    reply.raw.setHeader("Connection", "keep-alive");
+    reply.raw.flushHeaders();
+    const onClose = () => {
+      if (!reply.raw.writableEnded) {
+        controller.abort(new Error("Generation client disconnected."));
+      }
+    };
+    reply.raw.once("close", onClose);
+    await writeEvent(
+      reply,
+      {
         type: "generation-id",
         generationId,
-      });
+      },
+      budget.maxSseFrameBytes,
+    );
 
-      let content = "";
-      const alternativeContent = new Map<number, string>();
-      let completed = false;
-      let providerFailed = false;
-      let providerCancelled = false;
-      let finishReason: "stop" | "length" | "tool-calls" | "cancelled" | null =
-        null;
-      let providerError:
-        { code: string; message: string; retryable: boolean } | undefined;
-      let persistedMessage: { id: string; revision: number } | undefined;
-      let toolExecutionClosed = false;
-      try {
-        let providerMessages = [...requestMessages];
-        for (let turn = 0; turn < maxWorldbookToolTurns; turn += 1) {
-          const providerRequestId =
-            turn === 0 ? generationId : `${generationId}-tool-${String(turn)}`;
-          const readToolCalls: ProviderMessageToolCall[] = [];
-          const readToolMessages: ProviderMessage[] = [];
-          let turnText = "";
-          let canContinueWithReadResults = true;
-          completed = false;
+    let content = "";
+    const alternativeContent = new Map<number, string>();
+    let completed = false;
+    let providerFailed = false;
+    let providerCancelled = false;
+    let finishReason: "stop" | "length" | "tool-calls" | "cancelled" | null =
+      null;
+    let providerError:
+      { code: string; message: string; retryable: boolean } | undefined;
+    let persistedMessage: { id: string; revision: number } | undefined;
+    let persistenceStarted = false;
+    let toolExecutionClosed = false;
+    let eventCount = 0;
+    let outputBytes = 0;
+    let toolCallCount = 0;
+    const choiceIndexes = new Set<number>();
+    try {
+      let providerMessages = [...requestMessages];
+      for (let turn = 0; turn < maxWorldbookToolTurns; turn += 1) {
+        const providerRequestId =
+          turn === 0 ? generationId : `${generationId}-tool-${String(turn)}`;
+        const readToolCalls: ProviderMessageToolCall[] = [];
+        const readToolMessages: ProviderMessage[] = [];
+        let turnText = "";
+        let canContinueWithReadResults = true;
+        completed = false;
 
-          for await (const event of provider.generate(
-            {
-              requestId: providerRequestId,
-              messages: providerMessages,
-              textPrompt:
-                input.injects.length === 0 &&
-                input.messagesOverride === undefined
-                  ? prompt.textPrompt
-                  : compatibilityMessages
-                      .map((message) => `${message.role}: ${message.content}`)
-                      .join("\n\n"),
-              settings: prompt.generation,
+        for await (const rawEvent of provider.generate(
+          {
+            requestId: providerRequestId,
+            messages: providerMessages,
+            textPrompt:
+              input.injects.length === 0 && input.messagesOverride === undefined
+                ? prompt.textPrompt
+                : compatibilityMessages
+                    .map((message) => `${message.role}: ${message.content}`)
+                    .join("\n\n"),
+            settings: prompt.generation,
+            ...(toolRun === undefined ? {} : { tools: providerWorldbookTools }),
+            metadata: {
+              conversationId,
+              ...(prompt.presetId === undefined
+                ? {}
+                : { presetId: prompt.presetId }),
+              promptSegmentIds: prompt.segments.map((segment) => segment.id),
               ...(toolRun === undefined
                 ? {}
-                : { tools: providerWorldbookTools }),
-              metadata: {
-                conversationId: request.params.id,
-                ...(prompt.presetId === undefined
-                  ? {}
-                  : { presetId: prompt.presetId }),
-                promptSegmentIds: prompt.segments.map((segment) => segment.id),
-                ...(toolRun === undefined
-                  ? {}
-                  : {
-                      agentRunId: toolRun.run.id,
-                      agentRunStep: turn + 1,
-                    }),
-              },
+                : {
+                    agentRunId: toolRun.run.id,
+                    agentRunStep: turn + 1,
+                  }),
             },
-            controller.signal,
-          )) {
-            const choiceIndex =
-              "choiceIndex" in event &&
-              typeof event.choiceIndex === "number" &&
-              Number.isInteger(event.choiceIndex) &&
-              event.choiceIndex >= 0
-                ? event.choiceIndex
-                : 0;
+          },
+          controller.signal,
+        )) {
+          const parsedEvent = ProviderEventSchema.safeParse(rawEvent);
+          if (!parsedEvent.success) {
+            throw new StorageError(
+              "PROVIDER_EVENT_INVALID",
+              "Provider returned an invalid stream event.",
+              502,
+            );
+          }
+          const event = parsedEvent.data;
+          eventCount += 1;
+          if (eventCount > budget.maxEvents) {
+            throw new GenerationLimitError(
+              "Provider event count exceeded its budget.",
+            );
+          }
+          const choiceIndex =
+            "choiceIndex" in event &&
+            typeof event.choiceIndex === "number" &&
+            Number.isInteger(event.choiceIndex) &&
+            event.choiceIndex >= 0
+              ? event.choiceIndex
+              : 0;
+          choiceIndexes.add(choiceIndex);
+          if (
+            choiceIndex >= budget.maxChoices ||
+            choiceIndexes.size > budget.maxChoices
+          ) {
+            throw new GenerationLimitError(
+              "Provider choice count exceeded its budget.",
+            );
+          }
+          if (choiceIndex === 0) {
+            await writeEvent(reply, event, budget.maxSseFrameBytes);
+          }
+          if (event.type === "text-delta") {
+            outputBytes += Buffer.byteLength(event.delta, "utf8");
+            if (outputBytes > budget.maxOutputBytes) {
+              throw new GenerationLimitError(
+                "Provider output exceeded its byte budget.",
+              );
+            }
             if (choiceIndex === 0) {
-              writeEvent(reply, event);
+              content += event.delta;
+              turnText += event.delta;
+            } else {
+              alternativeContent.set(
+                choiceIndex,
+                `${alternativeContent.get(choiceIndex) ?? ""}${event.delta}`,
+              );
             }
-            if (event.type === "text-delta") {
-              if (choiceIndex === 0) {
-                content += event.delta;
-                turnText += event.delta;
-              } else {
-                alternativeContent.set(
-                  choiceIndex,
-                  `${alternativeContent.get(choiceIndex) ?? ""}${event.delta}`,
-                );
-              }
-            }
-            if (choiceIndex !== 0) continue;
-            if (event.type === "error") {
-              completed = false;
-              providerFailed = true;
-              providerError = {
-                code: event.code,
-                message: event.message,
-                retryable: event.retryable,
-              };
-            }
-            if (event.type === "finish") {
-              finishReason = event.reason;
-              completed = event.reason !== "cancelled";
-              providerCancelled = event.reason === "cancelled";
-            }
-            if (event.type !== "tool-call-complete" || toolRun === undefined) {
-              continue;
-            }
+          }
+          if (choiceIndex !== 0) continue;
+          if (event.type === "error") {
+            completed = false;
+            providerFailed = true;
+            providerError = {
+              code: event.code,
+              message: event.message,
+              retryable: event.retryable,
+            };
+          }
+          if (event.type === "finish") {
+            finishReason = event.reason;
+            completed = event.reason !== "cancelled";
+            providerCancelled = event.reason === "cancelled";
+          }
+          if (event.type !== "tool-call-complete" || toolRun === undefined) {
+            continue;
+          }
+          toolCallCount += 1;
+          if (toolCallCount > budget.maxToolCalls) {
+            throw new GenerationLimitError(
+              "Provider tool call count exceeded its budget.",
+            );
+          }
+          if (
+            Buffer.byteLength(JSON.stringify(event.arguments), "utf8") >
+            budget.maxToolArgumentsBytes
+          ) {
+            throw new GenerationLimitError(
+              "Provider tool arguments exceeded their byte budget.",
+            );
+          }
 
-            const tool = worldbookToolsByName.get(event.name);
-            if (tool === undefined) {
-              canContinueWithReadResults = false;
-              writeEvent(reply, {
+          const tool = worldbookToolsByName.get(event.name);
+          if (tool === undefined) {
+            canContinueWithReadResults = false;
+            await writeEvent(
+              reply,
+              {
                 type: "tool-rejected",
                 generationId,
                 runId: toolRun.run.id,
@@ -476,12 +633,16 @@ export async function registerProviderRoutes(
                 code: "TOOL_NOT_OFFERED",
                 message:
                   "The provider requested a tool that was not offered for ordinary chat.",
-              });
-              continue;
-            }
-            if (toolExecutionClosed) {
-              canContinueWithReadResults = false;
-              writeEvent(reply, {
+              },
+              budget.maxSseFrameBytes,
+            );
+            continue;
+          }
+          if (toolExecutionClosed) {
+            canContinueWithReadResults = false;
+            await writeEvent(
+              reply,
+              {
                 type: "tool-rejected",
                 generationId,
                 runId: toolRun.run.id,
@@ -491,18 +652,22 @@ export async function registerProviderRoutes(
                 code: "AGENT_RUN_WAITING_CONFIRMATION",
                 message:
                   "A write proposal is already waiting for confirmation; later tool calls were not executed.",
-              });
-              continue;
-            }
-            if (
-              !referencedWorldbookIsAccessible(
-                tool,
-                event.arguments,
-                accessibleWorldbookIds,
-              )
-            ) {
-              canContinueWithReadResults = false;
-              writeEvent(reply, {
+              },
+              budget.maxSseFrameBytes,
+            );
+            continue;
+          }
+          if (
+            !referencedWorldbookIsAccessible(
+              tool,
+              event.arguments,
+              accessibleWorldbookIds,
+            )
+          ) {
+            canContinueWithReadResults = false;
+            await writeEvent(
+              reply,
+              {
                 type: "tool-rejected",
                 generationId,
                 runId: toolRun.run.id,
@@ -512,33 +677,37 @@ export async function registerProviderRoutes(
                 code: "WORLD_BOOK_NOT_AVAILABLE",
                 message:
                   "The requested worldbook is not available to this conversation.",
-              });
-              continue;
-            }
-            try {
-              const result = context.agents.executeTool({
-                runId: toolRun.run.id,
-                idempotencyKey:
-                  `${toolRun.run.id}:turn:${String(turn + 1)}:` +
-                  `provider:${event.callId}`,
-                toolName: event.name,
+              },
+              budget.maxSseFrameBytes,
+            );
+            continue;
+          }
+          try {
+            const result = context.agents.executeTool({
+              runId: toolRun.run.id,
+              idempotencyKey:
+                `${toolRun.run.id}:turn:${String(turn + 1)}:` +
+                `provider:${event.callId}`,
+              toolName: event.name,
+              arguments: event.arguments,
+              ...(tool.effect === "read" ? {} : { proposalOnly: true }),
+            });
+            if (tool.effect === "read") {
+              const resultValue = result.result ?? null;
+              readToolCalls.push({
+                id: event.callId,
+                name: event.name,
                 arguments: event.arguments,
-                ...(tool.effect === "read" ? {} : { proposalOnly: true }),
               });
-              if (tool.effect === "read") {
-                const resultValue = result.result ?? null;
-                readToolCalls.push({
-                  id: event.callId,
-                  name: event.name,
-                  arguments: event.arguments,
-                });
-                readToolMessages.push({
-                  role: "tool",
-                  content: JSON.stringify(resultValue),
-                  name: event.name,
-                  toolCallId: event.callId,
-                });
-                writeEvent(reply, {
+              readToolMessages.push({
+                role: "tool",
+                content: JSON.stringify(resultValue),
+                name: event.name,
+                toolCallId: event.callId,
+              });
+              await writeEvent(
+                reply,
+                {
                   type: "tool-result",
                   generationId,
                   runId: toolRun.run.id,
@@ -546,29 +715,37 @@ export async function registerProviderRoutes(
                   providerCallId: event.callId,
                   toolCall: result.call,
                   result: resultValue,
-                });
-              } else {
-                if (result.call.status !== "awaiting_confirmation") {
-                  throw new StorageError(
-                    "AGENT_PROPOSAL_REQUIRED",
-                    "An ordinary-chat write tool must remain pending until user confirmation.",
-                    500,
-                  );
-                }
-                toolExecutionClosed = true;
-                canContinueWithReadResults = false;
-                writeEvent(reply, {
+                },
+                budget.maxSseFrameBytes,
+              );
+            } else {
+              if (result.call.status !== "awaiting_confirmation") {
+                throw new StorageError(
+                  "AGENT_PROPOSAL_REQUIRED",
+                  "An ordinary-chat write tool must remain pending until user confirmation.",
+                  500,
+                );
+              }
+              toolExecutionClosed = true;
+              canContinueWithReadResults = false;
+              await writeEvent(
+                reply,
+                {
                   type: "tool-proposal",
                   generationId,
                   providerRequestId,
                   run: context.agents.getRun(toolRun.run.id),
                   toolCall: result.call,
-                });
-              }
-            } catch (error) {
-              canContinueWithReadResults = false;
-              const structured = toolError(error);
-              writeEvent(reply, {
+                },
+                budget.maxSseFrameBytes,
+              );
+            }
+          } catch (error) {
+            canContinueWithReadResults = false;
+            const structured = toolError(error);
+            await writeEvent(
+              reply,
+              {
                 type: "tool-rejected",
                 generationId,
                 runId: toolRun.run.id,
@@ -576,87 +753,112 @@ export async function registerProviderRoutes(
                 providerCallId: event.callId,
                 toolName: event.name,
                 ...structured,
-              });
-            }
+              },
+              budget.maxSseFrameBytes,
+            );
           }
+        }
 
-          if (
-            toolRun === undefined ||
-            providerFailed ||
-            providerCancelled ||
-            controller.signal.aborted ||
-            toolExecutionClosed ||
-            !canContinueWithReadResults ||
-            readToolCalls.length === 0
-          ) {
-            break;
-          }
-          if (turn + 1 >= maxWorldbookToolTurns) {
-            writeEvent(reply, {
+        if (
+          toolRun === undefined ||
+          providerFailed ||
+          providerCancelled ||
+          controller.signal.aborted ||
+          toolExecutionClosed ||
+          !canContinueWithReadResults ||
+          readToolCalls.length === 0
+        ) {
+          break;
+        }
+        if (turn + 1 >= maxWorldbookToolTurns) {
+          await writeEvent(
+            reply,
+            {
               type: "tool-rejected",
               generationId,
               runId: toolRun.run.id,
               code: "TOOL_TURN_LIMIT_REACHED",
               message:
                 "The ordinary-chat generation reached its read-tool continuation limit.",
-            });
-            break;
-          }
-
-          providerMessages = [
-            ...providerMessages,
-            {
-              role: "assistant",
-              content: turnText,
-              toolCalls: readToolCalls,
             },
-            ...readToolMessages,
-          ];
-          const current = context.agents.getRun(toolRun.run.id);
-          context.agents.transitionRun(current.id, ["running"], "running", {
-            currentStep: current.currentStep + 1,
-          });
+            budget.maxSseFrameBytes,
+          );
+          break;
         }
-        if (content.length > 0 && !toolExecutionClosed) {
-          const incomplete =
-            !completed ||
-            providerFailed ||
-            providerCancelled ||
-            controller.signal.aborted ||
-            finishReason === "length";
-          const message = context.store.addAssistantMessage({
-            conversationId: request.params.id,
-            content,
-          });
-          const alternatives = [...alternativeContent.entries()]
-            .filter(
-              ([choiceIndex, alternative]) => choiceIndex > 0 && alternative,
-            )
-            .sort(([left], [right]) => left - right)
-            .map(([, alternative]) => alternative);
-          if (alternatives.length > 0) {
-            context.store.addSwipe({
-              messageId: message.id,
-              content,
-              selected: true,
-            });
-            alternatives.forEach((alternative) => {
-              context.store.addSwipe({
-                messageId: message.id,
-                content: alternative,
-              });
-            });
-          }
-          persistedMessage = {
-            id: message.id,
-            revision:
-              message.revision +
-              (alternatives.length > 0 ? alternatives.length + 1 : 0),
-          };
-          writeEvent(reply, {
+
+        providerMessages = [
+          ...providerMessages,
+          {
+            role: "assistant",
+            content: turnText,
+            toolCalls: readToolCalls,
+          },
+          ...readToolMessages,
+        ];
+        const current = context.agents.getRun(toolRun.run.id);
+        context.agents.transitionRun(current.id, ["running"], "running", {
+          currentStep: current.currentStep + 1,
+        });
+      }
+      if (content.length > 0 && !toolExecutionClosed) {
+        const incomplete =
+          !completed ||
+          providerFailed ||
+          providerCancelled ||
+          controller.signal.aborted ||
+          finishReason === "length";
+        const alternatives = [...alternativeContent.entries()]
+          .filter(
+            ([choiceIndex, alternative]) => choiceIndex > 0 && alternative,
+          )
+          .sort(([left], [right]) => left - right)
+          .map(([, alternative]) => alternative);
+        persistenceStarted = true;
+        const persisted = context.store.persistAssistantGeneration({
+          conversationId,
+          content,
+          alternatives,
+          status:
+            finishReason === "length"
+              ? "partial"
+              : providerCancelled || controller.signal.aborted
+                ? "cancelled"
+                : providerFailed || !completed
+                  ? "error"
+                  : "complete",
+          finishReason:
+            finishReason === "length"
+              ? "length"
+              : providerCancelled || controller.signal.aborted
+                ? "cancelled"
+                : providerFailed || !completed
+                  ? "provider-error"
+                  : finishReason === "tool-calls"
+                    ? "tool-calls"
+                    : "stop",
+          ...(providerError === undefined
+            ? {}
+            : { providerErrorCode: providerError.code }),
+          ...(input.targetMessageId === undefined
+            ? {}
+            : {
+                targetMessageId: input.targetMessageId,
+                expectedMessageRevision: input.expectedMessageRevision!,
+              }),
+        });
+        persistedMessage = {
+          id: persisted.message.id,
+          revision: persisted.message.revision,
+        };
+        await writeEvent(
+          reply,
+          {
             type: "message-persisted",
-            messageId: message.id,
+            messageId: persisted.message.id,
             revision: persistedMessage.revision,
+            state: persisted.message.generationStatus,
+            finishReason: persisted.message.finishReason,
+            providerErrorCode: persisted.message.providerErrorCode,
             ...(alternatives.length === 0 ? {} : { alternatives }),
             ...(incomplete
               ? {
@@ -675,90 +877,139 @@ export async function registerProviderRoutes(
                       }),
                 }
               : {}),
-          });
-        }
-      } catch (error) {
-        providerFailed = true;
-        providerError = {
-          code: "GENERATION_STREAM_FAILED",
-          message: error instanceof Error ? error.message : String(error),
-          retryable: false,
-        };
-        if (
-          content.length > 0 &&
-          !toolExecutionClosed &&
-          persistedMessage === undefined
-        ) {
-          const message = context.store.addAssistantMessage({
-            conversationId: request.params.id,
-            content,
-          });
-          const alternatives = [...alternativeContent.entries()]
-            .filter(
-              ([choiceIndex, alternative]) => choiceIndex > 0 && alternative,
-            )
-            .sort(([left], [right]) => left - right)
-            .map(([, alternative]) => alternative);
-          if (alternatives.length > 0) {
-            context.store.addSwipe({
-              messageId: message.id,
-              content,
-              selected: true,
-            });
-            alternatives.forEach((alternative) => {
-              context.store.addSwipe({
-                messageId: message.id,
-                content: alternative,
-              });
-            });
-          }
-          writeEvent(reply, {
+          },
+          budget.maxSseFrameBytes,
+        );
+      }
+    } catch (error) {
+      const limitExceeded = error instanceof GenerationLimitError;
+      providerFailed = true;
+      providerError = {
+        code: limitExceeded
+          ? "GENERATION_LIMIT_EXCEEDED"
+          : "GENERATION_STREAM_FAILED",
+        message: error instanceof Error ? error.message : String(error),
+        retryable: false,
+      };
+      if (
+        content.length > 0 &&
+        !toolExecutionClosed &&
+        persistedMessage === undefined &&
+        !persistenceStarted
+      ) {
+        const alternatives = [...alternativeContent.entries()]
+          .filter(
+            ([choiceIndex, alternative]) => choiceIndex > 0 && alternative,
+          )
+          .sort(([left], [right]) => left - right)
+          .map(([, alternative]) => alternative);
+        const persisted = context.store.persistAssistantGeneration({
+          conversationId,
+          content,
+          alternatives,
+          status: limitExceeded
+            ? "partial"
+            : controller.signal.aborted
+              ? "cancelled"
+              : "error",
+          finishReason: limitExceeded
+            ? "limit"
+            : controller.signal.aborted
+              ? "cancelled"
+              : "provider-error",
+          providerErrorCode: providerError.code,
+          ...(input.targetMessageId === undefined
+            ? {}
+            : {
+                targetMessageId: input.targetMessageId,
+                expectedMessageRevision: input.expectedMessageRevision!,
+              }),
+        });
+        await writeEvent(
+          reply,
+          {
             type: "message-persisted",
-            messageId: message.id,
-            revision:
-              message.revision +
-              (alternatives.length > 0 ? alternatives.length + 1 : 0),
+            messageId: persisted.message.id,
+            revision: persisted.message.revision,
+            state: persisted.message.generationStatus,
+            finishReason: persisted.message.finishReason,
+            providerErrorCode: persisted.message.providerErrorCode,
             incomplete: true,
-            reason: controller.signal.aborted ? "cancelled" : "error",
+            reason: limitExceeded
+              ? "limit"
+              : controller.signal.aborted
+                ? "cancelled"
+                : "error",
             errorCode: providerError.code,
             errorMessage: providerError.message,
             ...(alternatives.length === 0 ? {} : { alternatives }),
-          });
-        }
-        writeEvent(reply, { type: "error", ...providerError });
-      } finally {
-        if (toolRun !== undefined) {
-          try {
-            const current = context.agents.getRun(toolRun.run.id);
-            if (controller.signal.aborted || providerCancelled) {
-              context.agents.cancelRun(current.id, current.requestedBy);
-            } else if (
-              current.status === "queued" ||
-              current.status === "running"
-            ) {
-              context.agents.transitionRun(
-                current.id,
-                [current.status],
-                providerFailed ? "failed" : "completed",
-                { currentStep: current.currentStep },
-              );
-            }
-          } catch (error) {
-            const structured = toolError(error);
-            writeEvent(reply, {
+          },
+          budget.maxSseFrameBytes,
+        );
+      }
+      if (limitExceeded) {
+        controller.abort(error);
+        await writeEvent(
+          reply,
+          {
+            type: "generation-limit",
+            code: providerError.code,
+            message: providerError.message,
+          },
+          budget.maxSseFrameBytes,
+        );
+      }
+      await writeEvent(
+        reply,
+        { type: "error", ...providerError },
+        budget.maxSseFrameBytes,
+      );
+    } finally {
+      if (toolRun !== undefined) {
+        try {
+          const current = context.agents.getRun(toolRun.run.id);
+          if (controller.signal.aborted || providerCancelled) {
+            context.agents.cancelRun(current.id, current.requestedBy);
+          } else if (
+            current.status === "queued" ||
+            current.status === "running"
+          ) {
+            context.agents.transitionRun(
+              current.id,
+              [current.status],
+              providerFailed ? "failed" : "completed",
+              { currentStep: current.currentStep },
+            );
+          }
+        } catch (error) {
+          const structured = toolError(error);
+          await writeEvent(
+            reply,
+            {
               type: "error",
               code: "AGENT_RUN_FINALIZE_FAILED",
               message: structured.message,
               retryable: false,
-            });
-          }
+            },
+            budget.maxSseFrameBytes,
+          );
         }
-        context.generations.delete(generationId);
-        reply.raw.removeListener("close", onClose);
-        if (!reply.raw.writableEnded) reply.raw.end();
       }
-      return reply;
-    },
+      context.generations.delete(generationId);
+      reply.raw.removeListener("close", onClose);
+      if (!reply.raw.writableEnded) reply.raw.end();
+    }
+    return reply;
+  };
+
+  app.post<{ Params: { id: string } }>(
+    "/api/conversations/:id/generate",
+    (request, reply) => generate(request, reply),
+  );
+
+  app.post<{ Params: { id: string } }>(
+    "/api/messages/:id/regenerate",
+    (request, reply) => generate(request, reply, request.params.id),
   );
 
   app.post<{ Params: { id: string } }>(

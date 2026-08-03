@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@fastify/cors": "11.3.0",
+    "@fastify/multipart": "^10.1.0",
     "@stn/contracts": "*",
     "@stn/core": "*",
     "@stn/extension-sdk": "*",

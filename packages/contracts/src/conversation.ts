@@ -73,7 +73,7 @@ export const MessageSchema = z
     author: MessageAuthorSchema,
     swipes: z.array(MessageSwipeSchema).min(1),
     activeSwipeId: EntityIdSchema,
-    state: z.enum(["draft", "complete", "cancelled", "error"]),
+    state: z.enum(["draft", "complete", "partial", "cancelled", "error"]),
     toolCallId: EntityIdSchema.optional(),
     metadata: JsonObjectSchema,
     compatibility: CompatibilityEnvelopeSchema.optional(),

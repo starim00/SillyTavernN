@@ -47,7 +47,9 @@ several people, a narrator, or a world without changing the card/chat model.
 - SSE text deltas, structured tool-call events, abort, timeout, and error handling.
 - Agent disabled for providers without native tool calling.
 
-Exit: interrupted generation never persists a partial assistant message.
+Exit: interrupted, cancelled, truncated, or resource-limited generation with
+visible content persists atomically with an explicit state and finish reason;
+empty interrupted output does not create a message.
 
 ## Phase 5 — Prompt presets
 

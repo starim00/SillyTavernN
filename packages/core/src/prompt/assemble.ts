@@ -317,7 +317,10 @@ export function assemblePrompt(
   const macroRuntime = input.macroRuntime ?? createPromptMacroRuntime();
   const baseMacros = macroContext(input, participants);
   const messages = [...(input.messages ?? [])]
-    .filter((message) => message.state === "complete")
+    .filter(
+      (message) =>
+        message.state !== "draft" && activeMessageContent(message).length > 0,
+    )
     .sort(
       (left, right) =>
         left.sequence - right.sequence || left.id.localeCompare(right.id),

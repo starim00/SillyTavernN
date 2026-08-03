@@ -16,6 +16,8 @@ import type {
   CardKind,
   Conversation,
   ExtensionSetting,
+  GenerationFinishReason,
+  GenerationStatus,
   JsonObject,
   JsonValue,
   MessageRole,
@@ -89,6 +91,37 @@ export interface CreateParticipantInput {
   role?: string;
   profile?: JsonObject;
   legacyPayload?: JsonObject;
+}
+
+export interface PersistAssistantGenerationInput {
+  conversationId: string;
+  content: string;
+  alternatives?: readonly string[];
+  status: GenerationStatus;
+  finishReason: GenerationFinishReason;
+  providerErrorCode?: string;
+  targetMessageId?: string;
+  expectedMessageRevision?: number;
+}
+
+export interface PersistAssistantGenerationResult {
+  message: Message;
+  swipes: Swipe[];
+}
+
+export interface ConversationPageCursor {
+  updatedAt: string;
+  id: string;
+}
+
+export interface MessagePageCursor {
+  createdAt: string;
+  id: string;
+}
+
+export interface PageResult<T> {
+  items: T[];
+  hasMore: boolean;
 }
 
 export interface CreatePersonaInput {
@@ -601,6 +634,40 @@ export class AppStore {
       .map((row) => this.mapConversation(row));
   }
 
+  listConversationsPage(input: {
+    cardId?: string;
+    limit: number;
+    before?: ConversationPageCursor;
+  }): PageResult<Conversation> {
+    const params: Array<string | number> = [];
+    const predicates: string[] = [];
+    if (input.cardId !== undefined) {
+      this.getCard(input.cardId);
+      predicates.push("card_id = ?");
+      params.push(input.cardId);
+    }
+    if (input.before !== undefined) {
+      predicates.push("(updated_at < ? OR (updated_at = ? AND id > ?))");
+      params.push(
+        input.before.updatedAt,
+        input.before.updatedAt,
+        input.before.id,
+      );
+    }
+    params.push(input.limit + 1);
+    const rows = this.database.all<Row>(
+      `SELECT * FROM conversations
+       ${predicates.length === 0 ? "" : `WHERE ${predicates.join(" AND ")}`}
+       ORDER BY updated_at DESC, id
+       LIMIT ?`,
+      ...params,
+    );
+    return {
+      items: rows.slice(0, input.limit).map((row) => this.mapConversation(row)),
+      hasMore: rows.length > input.limit,
+    };
+  }
+
   listCardConversations(cardId: string): Conversation[] {
     this.getCard(cardId);
     return this.database
@@ -903,6 +970,7 @@ export class AppStore {
         now,
         current.conversationId,
       );
+      this.touchConversation(current.conversationId, now);
       return this.getMessage(current.id);
     });
   }
@@ -938,34 +1006,83 @@ export class AppStore {
 
   listMessages(conversationId: string): Array<Message & { swipes: Swipe[] }> {
     this.getConversation(conversationId);
-    return this.database
-      .all<Row>(
+    return this.attachConversationSwipes(
+      this.database.all<Row>(
         `SELECT * FROM messages
          WHERE conversation_id = ?
          ORDER BY rowid`,
         conversationId,
-      )
-      .map((row) => {
-        const message = this.mapMessage(row);
-        return { ...message, swipes: this.listSwipes(message.id) };
-      });
+      ),
+      conversationId,
+    );
   }
 
   listChatMessages(
     conversationId: string,
   ): Array<Message & { swipes: Swipe[] }> {
     this.getConversation(conversationId);
-    return this.database
-      .all<Row>(
+    return this.attachConversationSwipes(
+      this.database.all<Row>(
         `SELECT * FROM messages
          WHERE conversation_id = ? AND role IN ('user', 'assistant')
          ORDER BY rowid`,
         conversationId,
-      )
-      .map((row) => {
-        const message = this.mapMessage(row);
-        return { ...message, swipes: this.listSwipes(message.id) };
-      });
+      ),
+      conversationId,
+    );
+  }
+
+  listChatMessagesPage(input: {
+    conversationId: string;
+    limit: number;
+    before?: MessagePageCursor;
+  }): PageResult<Message & { swipes: Swipe[] }> {
+    this.getConversation(input.conversationId);
+    const params: Array<string | number> = [input.conversationId];
+    let cursorPredicate = "";
+    if (input.before !== undefined) {
+      cursorPredicate = "AND (created_at < ? OR (created_at = ? AND id < ?))";
+      params.push(
+        input.before.createdAt,
+        input.before.createdAt,
+        input.before.id,
+      );
+    }
+    params.push(input.limit + 1);
+    const rows = this.database.all<Row>(
+      `SELECT * FROM messages
+       WHERE conversation_id = ? AND role IN ('user', 'assistant')
+       ${cursorPredicate}
+       ORDER BY created_at DESC, id DESC
+       LIMIT ?`,
+      ...params,
+    );
+    const pageRows = rows.slice(0, input.limit);
+    const messages = pageRows.map((row) => this.mapMessage(row));
+    const swipesByMessage = new Map<string, Swipe[]>();
+    if (messages.length > 0) {
+      const placeholders = messages.map(() => "?").join(",");
+      for (const row of this.database.all<Row>(
+        `SELECT * FROM swipes
+         WHERE message_id IN (${placeholders})
+         ORDER BY message_id, position, id`,
+        ...messages.map((message) => message.id),
+      )) {
+        const swipe = this.mapSwipe(row);
+        const current = swipesByMessage.get(swipe.messageId) ?? [];
+        current.push(swipe);
+        swipesByMessage.set(swipe.messageId, current);
+      }
+    }
+    return {
+      items: messages
+        .map((message) => ({
+          ...message,
+          swipes: swipesByMessage.get(message.id) ?? [],
+        }))
+        .reverse(),
+      hasMore: rows.length > input.limit,
+    };
   }
 
   addSwipe(input: {
@@ -1001,11 +1118,140 @@ export class AppStore {
         now,
       );
       this.database.run(
-        "UPDATE messages SET revision = revision + 1, updated_at = ? WHERE id = ?",
-        now,
-        message.id,
+        input.selected
+          ? `UPDATE messages
+             SET content = ?, revision = revision + 1, updated_at = ?
+             WHERE id = ?`
+          : "UPDATE messages SET revision = revision + 1, updated_at = ? WHERE id = ?",
+        ...(input.selected
+          ? [input.content, now, message.id]
+          : [now, message.id]),
       );
+      this.touchConversation(message.conversationId, now);
+      if (input.selected) {
+        this.invalidateConversationSummary(message.conversationId, now);
+      }
       return this.getSwipe(id);
+    });
+  }
+
+  persistAssistantGeneration(
+    input: PersistAssistantGenerationInput,
+  ): PersistAssistantGenerationResult {
+    return this.database.transaction(() => {
+      const conversation = this.getConversation(input.conversationId);
+      const alternatives = (input.alternatives ?? []).filter(
+        (content) => content.length > 0,
+      );
+      const choices = [input.content, ...alternatives];
+      if (input.content.length === 0) {
+        throw new StorageError(
+          "generation_content_empty",
+          "Generated assistant content cannot be empty.",
+          400,
+        );
+      }
+      const now = timestamp();
+
+      if (input.targetMessageId !== undefined) {
+        if (input.expectedMessageRevision === undefined) {
+          throw new StorageError(
+            "generation_revision_required",
+            "Regeneration requires the expected message revision.",
+            400,
+          );
+        }
+        const target = this.getMessage(input.targetMessageId);
+        if (
+          target.conversationId !== conversation.id ||
+          target.role !== "assistant"
+        ) {
+          throw new NotFoundError("assistant message", input.targetMessageId);
+        }
+        this.assertRevision(
+          "message",
+          target.id,
+          target.revision,
+          input.expectedMessageRevision,
+        );
+        const next = this.database.get<{ position: number }>(
+          "SELECT COALESCE(MAX(position), -1) + 1 AS position FROM swipes WHERE message_id = ?",
+          target.id,
+        );
+        const startPosition = next?.position ?? 0;
+        this.database.run(
+          "UPDATE swipes SET selected = 0 WHERE message_id = ?",
+          target.id,
+        );
+        choices.forEach((content, index) => {
+          this.insertSwipe({
+            messageId: target.id,
+            content,
+            position: startPosition + index,
+            selected: index === 0,
+            now,
+          });
+        });
+        this.database.run(
+          `UPDATE messages
+           SET content = ?, generation_status = ?, finish_reason = ?,
+               provider_error_code = ?, revision = revision + 1, updated_at = ?
+           WHERE id = ? AND revision = ?`,
+          input.content,
+          input.status,
+          input.finishReason,
+          input.providerErrorCode ?? null,
+          now,
+          target.id,
+          input.expectedMessageRevision,
+        );
+        const changed = this.database.get<{ count: number }>(
+          "SELECT changes() AS count",
+        );
+        if ((changed?.count ?? 0) !== 1) {
+          throw new ConflictError(
+            `Message '${target.id}' changed concurrently.`,
+          );
+        }
+        this.touchConversation(conversation.id, now);
+        this.invalidateConversationSummary(conversation.id, now);
+        return {
+          message: this.getMessage(target.id),
+          swipes: this.listSwipes(target.id),
+        };
+      }
+
+      const messageId = identifier();
+      this.database.run(
+        `INSERT INTO messages(
+           id, conversation_id, parent_message_id, role, participant_id,
+           content, generation_status, finish_reason, provider_error_code,
+           revision, created_at, updated_at
+         ) VALUES (?, ?, NULL, 'assistant', NULL, ?, ?, ?, ?, 1, ?, ?)`,
+        messageId,
+        conversation.id,
+        input.content,
+        input.status,
+        input.finishReason,
+        input.providerErrorCode ?? null,
+        now,
+        now,
+      );
+      choices.forEach((content, index) => {
+        this.insertSwipe({
+          messageId,
+          content,
+          position: index,
+          selected: index === 0,
+          now,
+        });
+      });
+      this.touchConversation(conversation.id, now);
+      this.invalidateConversationSummary(conversation.id, now);
+      return {
+        message: this.getMessage(messageId),
+        swipes: this.listSwipes(messageId),
+      };
     });
   }
 
@@ -1050,6 +1296,8 @@ export class AppStore {
         message.id,
         input.expectedMessageRevision,
       );
+      this.touchConversation(message.conversationId, now);
+      this.invalidateConversationSummary(message.conversationId, now);
       return {
         message: this.getMessage(message.id),
         swipe: this.getSwipe(swipe.id),
@@ -2108,10 +2356,93 @@ export class AppStore {
       participantId:
         row.participant_id === null ? null : String(row.participant_id),
       content: String(row.content),
+      generationStatus: String(
+        row.generation_status ?? "complete",
+      ) as GenerationStatus,
+      finishReason:
+        row.finish_reason === null || row.finish_reason === undefined
+          ? null
+          : (String(row.finish_reason) as GenerationFinishReason),
+      providerErrorCode:
+        row.provider_error_code === null ||
+        row.provider_error_code === undefined
+          ? null
+          : String(row.provider_error_code),
       revision: Number(row.revision),
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),
     };
+  }
+
+  private attachConversationSwipes(
+    rows: Row[],
+    conversationId: string,
+  ): Array<Message & { swipes: Swipe[] }> {
+    const messages = rows.map((row) => this.mapMessage(row));
+    if (messages.length === 0) return [];
+    const swipesByMessage = new Map<string, Swipe[]>();
+    for (const row of this.database.all<Row>(
+      `SELECT swipes.*
+       FROM swipes
+       JOIN messages ON messages.id = swipes.message_id
+       WHERE messages.conversation_id = ?
+       ORDER BY swipes.message_id, swipes.position, swipes.id`,
+      conversationId,
+    )) {
+      const swipe = this.mapSwipe(row);
+      const current = swipesByMessage.get(swipe.messageId) ?? [];
+      current.push(swipe);
+      swipesByMessage.set(swipe.messageId, current);
+    }
+    return messages.map((message) => ({
+      ...message,
+      swipes: swipesByMessage.get(message.id) ?? [],
+    }));
+  }
+
+  private insertSwipe(input: {
+    messageId: string;
+    content: string;
+    position: number;
+    selected: boolean;
+    now: string;
+  }): void {
+    this.database.run(
+      `INSERT INTO swipes(
+         id, message_id, position, content, selected, revision, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+      identifier(),
+      input.messageId,
+      input.position,
+      input.content,
+      input.selected ? 1 : 0,
+      input.now,
+      input.now,
+    );
+  }
+
+  private touchConversation(conversationId: string, now: string): void {
+    this.database.run(
+      `UPDATE conversations
+       SET revision = revision + 1, updated_at = ?
+       WHERE id = ?`,
+      now,
+      conversationId,
+    );
+  }
+
+  private invalidateConversationSummary(
+    conversationId: string,
+    now: string,
+  ): void {
+    this.database.run(
+      `UPDATE artifacts SET stale = 1, updated_at = ?
+       WHERE kind = 'chat_summary'
+         AND scope_type = 'conversation'
+         AND scope_id = ?`,
+      now,
+      conversationId,
+    );
   }
 
   private assertChatMessage(message: Message): void {

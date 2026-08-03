@@ -1452,6 +1452,19 @@ export class AppStore {
       .map((row) => this.mapWorldbookBinding(row));
   }
 
+  listWorldbookBindingsBatch(
+    worldbookIds: readonly string[],
+  ): WorldbookBinding[] {
+    if (worldbookIds.length === 0) return [];
+    const placeholders = worldbookIds.map(() => "?").join(", ");
+    return this.database
+      .all<Row>(
+        `SELECT * FROM worldbook_bindings WHERE worldbook_id IN (${placeholders}) ORDER BY worldbook_id, created_at, id`,
+        ...worldbookIds,
+      )
+      .map((row) => this.mapWorldbookBinding(row));
+  }
+
   getWorldbookBinding(id: string): WorldbookBinding {
     const row = this.database.get<Row>(
       "SELECT * FROM worldbook_bindings WHERE id = ?",
@@ -1469,6 +1482,17 @@ export class AppStore {
       .all<Row>(
         "SELECT * FROM worldbook_entries WHERE worldbook_id = ? ORDER BY position, id",
         worldbookId,
+      )
+      .map((row) => this.mapWorldbookEntry(row));
+  }
+
+  listWorldbookEntriesBatch(worldbookIds: readonly string[]): WorldbookEntry[] {
+    if (worldbookIds.length === 0) return [];
+    const placeholders = worldbookIds.map(() => "?").join(", ");
+    return this.database
+      .all<Row>(
+        `SELECT * FROM worldbook_entries WHERE worldbook_id IN (${placeholders}) ORDER BY worldbook_id, position, id`,
+        ...worldbookIds,
       )
       .map((row) => this.mapWorldbookEntry(row));
   }

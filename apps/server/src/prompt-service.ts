@@ -97,6 +97,18 @@ const insertionRoleValues = new Set<
   NonNullable<WorldbookEntry["insertionRole"]>
 >(["system", "user", "assistant"]);
 
+function groupByWorldbookId<T extends { worldbookId: string }>(
+  values: readonly T[],
+): Map<string, T[]> {
+  const grouped = new Map<string, T[]>();
+  for (const value of values) {
+    const group = grouped.get(value.worldbookId) ?? [];
+    group.push(value);
+    grouped.set(value.worldbookId, group);
+  }
+  return grouped;
+}
+
 type StoredMessageWithSwipes = StoredMessage & {
   readonly swipes: StoredSwipe[];
 };
@@ -689,8 +701,18 @@ export async function prepareConversationPrompt(
   const participantIds = new Set(
     storedParticipants.map((participant) => participant.id),
   );
-  const boundWorldbooks = store.listWorldbooks().flatMap((worldbook) => {
-    const bindings = store.listWorldbookBindings(worldbook.id);
+  const storedWorldbooks = store.listWorldbooks();
+  const worldbookIdsForBatch = storedWorldbooks.map(
+    (worldbook) => worldbook.id,
+  );
+  const bindingsByWorldbook = groupByWorldbookId(
+    store.listWorldbookBindingsBatch(worldbookIdsForBatch),
+  );
+  const entriesByWorldbook = groupByWorldbookId(
+    store.listWorldbookEntriesBatch(worldbookIdsForBatch),
+  );
+  const boundWorldbooks = storedWorldbooks.flatMap((worldbook) => {
+    const bindings = bindingsByWorldbook.get(worldbook.id) ?? [];
     return bindings.some((binding) =>
       bindingApplies(
         binding,
@@ -703,26 +725,22 @@ export async function prepareConversationPrompt(
       ? [
           worldbookContract(
             worldbook,
-            store.listWorldbookEntries(worldbook.id),
+            entriesByWorldbook.get(worldbook.id) ?? [],
             bindings,
           ),
         ]
       : [];
   });
   const worldbookIds = boundWorldbooks.map((worldbook) => worldbook.id);
-  const cardWorldbookIds = store
-    .listWorldbooks()
-    .flatMap((worldbook) =>
-      store
-        .listWorldbookBindings(worldbook.id)
-        .some(
-          (binding) =>
-            binding.scopeType === "card" &&
-            binding.scopeId === storedConversation.cardId,
-        )
-        ? [worldbook.id]
-        : [],
-    );
+  const cardWorldbookIds = storedWorldbooks.flatMap((worldbook) =>
+    (bindingsByWorldbook.get(worldbook.id) ?? []).some(
+      (binding) =>
+        binding.scopeType === "card" &&
+        binding.scopeId === storedConversation.cardId,
+    )
+      ? [worldbook.id]
+      : [],
+  );
   const card = cardContract(
     store.getCard(storedConversation.cardId),
     store.listCardParticipants(storedConversation.cardId),

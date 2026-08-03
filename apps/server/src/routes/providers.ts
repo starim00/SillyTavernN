@@ -137,6 +137,23 @@ function assertGenerationInputBudget(
   }
 }
 
+function assertPreparedInputBudget(
+  messages: readonly ProviderMessage[],
+  textPrompt: string,
+  maxInputBytes: number,
+): void {
+  if (
+    Buffer.byteLength(JSON.stringify({ messages, textPrompt }), "utf8") >
+    maxInputBytes
+  ) {
+    throw new StorageError(
+      "GENERATION_INPUT_LIMIT",
+      "Prepared generation input exceeds its byte budget.",
+      413,
+    );
+  }
+}
+
 function generationObjective(messages: readonly ProviderMessage[]): string {
   const latestUserMessage = messages.findLast(
     (message) => message.role === "user",
@@ -455,6 +472,19 @@ export async function registerProviderRoutes(
       toolRun === undefined
         ? compatibilityMessages
         : [toolContextMessage(toolRun.worldbooks), ...compatibilityMessages];
+    try {
+      assertPreparedInputBudget(
+        requestMessages,
+        prompt.textPrompt,
+        budget.maxInputBytes,
+      );
+    } catch (error) {
+      if (toolRun !== undefined) {
+        context.agents.cancelRun(toolRun.run.id, toolRun.run.requestedBy);
+      }
+      context.generations.delete(generationId);
+      throw error;
+    }
     const accessibleWorldbookIds = new Set(
       toolRun?.worldbooks.map((worldbook) => worldbook.id) ?? [],
     );
@@ -470,14 +500,22 @@ export async function registerProviderRoutes(
       }
     };
     reply.raw.once("close", onClose);
-    await writeEvent(
-      reply,
-      {
-        type: "generation-id",
-        generationId,
-      },
-      budget.maxSseFrameBytes,
-    );
+    try {
+      await writeEvent(
+        reply,
+        {
+          type: "generation-id",
+          generationId,
+        },
+        budget.maxSseFrameBytes,
+      );
+    } catch (error) {
+      controller.abort(error);
+      context.generations.delete(generationId);
+      reply.raw.removeListener("close", onClose);
+      if (!reply.raw.writableEnded) reply.raw.end();
+      throw error;
+    }
 
     let content = "";
     const alternativeContent = new Map<number, string>();

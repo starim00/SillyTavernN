@@ -1,5 +1,6 @@
-import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import * as fileSystem from "node:fs";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -12,20 +13,46 @@ import {
 import { CardSchema, type JsonObject, type JsonValue } from "@stn/contracts";
 import type { AppStore } from "@stn/storage";
 
+import { parseImportFile } from "./import-worker.js";
+
 function jsonObject(value: unknown): JsonObject {
   return JSON.parse(JSON.stringify(value)) as JsonObject;
 }
+
+type ImportFileSystem = Pick<
+  typeof fileSystem,
+  "existsSync" | "mkdirSync" | "renameSync" | "unlinkSync" | "writeFileSync"
+>;
+
+type ImportedPngAsset = {
+  id: string;
+  path: string;
+  mediaType: "image/png";
+  size: number;
+  kind: "avatar";
+  title: string;
+  hash: string;
+};
+
+type StagedPngAsset = {
+  asset: ImportedPngAsset;
+  finalPath: string;
+  temporaryPath: string | null;
+  finalExisted: boolean;
+  publishedByImport: boolean;
+};
 
 export class ImportService {
   constructor(
     private readonly store: AppStore,
     private readonly assetDirectory?: string,
+    private readonly files: ImportFileSystem = fileSystem,
   ) {}
 
-  private importedPngAsset(
+  private stageImportedPngAsset(
     source: string | Uint8Array,
     filename: string | undefined,
-  ) {
+  ): StagedPngAsset | undefined {
     if (
       typeof source === "string" ||
       this.assetDirectory === undefined ||
@@ -40,27 +67,91 @@ export class ImportService {
     const hash = createHash("sha256").update(source).digest("hex");
     const directory = path.join(this.assetDirectory, "cards");
     const storedName = `${hash}.png`;
-    mkdirSync(directory, { recursive: true });
-    try {
-      writeFileSync(path.join(directory, storedName), source, { flag: "wx" });
-    } catch (error) {
-      if (
-        !(error instanceof Error) ||
-        !("code" in error) ||
-        error.code !== "EEXIST"
-      ) {
+    const finalPath = path.join(directory, storedName);
+    this.files.mkdirSync(directory, { recursive: true });
+    const finalExisted = this.files.existsSync(finalPath);
+    let temporaryPath: string | null = null;
+    if (!finalExisted) {
+      temporaryPath = `${finalPath}.${process.pid.toString()}.${randomUUID()}.tmp`;
+      try {
+        this.files.writeFileSync(temporaryPath, source, {
+          flag: "wx",
+          mode: 0o600,
+        });
+      } catch (error) {
+        try {
+          this.files.unlinkSync(temporaryPath);
+        } catch {
+          // Preserve the staging error if the partial file cannot be removed.
+        }
         throw error;
       }
     }
     return {
-      id: `asset-${hash.slice(0, 24)}`,
-      path: `/api/assets/cards/${storedName}`,
-      mediaType: "image/png",
-      size: source.byteLength,
-      kind: "avatar" as const,
-      title: filename?.slice(0, 512) || "Imported character card",
-      hash: `sha256:${hash}`,
+      asset: {
+        id: `asset-${hash.slice(0, 24)}`,
+        path: `/api/assets/cards/${storedName}`,
+        mediaType: "image/png",
+        size: source.byteLength,
+        kind: "avatar" as const,
+        title: filename?.slice(0, 512) || "Imported character card",
+        hash: `sha256:${hash}`,
+      },
+      finalPath,
+      temporaryPath,
+      finalExisted,
+      publishedByImport: false,
     };
+  }
+
+  private cleanupStagedPngAsset(staged: StagedPngAsset | undefined): void {
+    if (!staged) return;
+    if (staged.temporaryPath) {
+      try {
+        this.files.unlinkSync(staged.temporaryPath);
+      } catch (error) {
+        if (
+          !(error instanceof Error) ||
+          !("code" in error) ||
+          error.code !== "ENOENT"
+        ) {
+          // Preserve the original import/rename error when best-effort cleanup
+          // cannot remove a temporary file.
+        }
+      }
+      staged.temporaryPath = null;
+    }
+    if (staged.publishedByImport && !staged.finalExisted) {
+      try {
+        this.files.unlinkSync(staged.finalPath);
+      } catch (error) {
+        if (
+          !(error instanceof Error) ||
+          !("code" in error) ||
+          error.code !== "ENOENT"
+        ) {
+          // The database compensation below remains the source of truth.
+        }
+      }
+      staged.publishedByImport = false;
+    }
+  }
+
+  private publishStagedPngAsset(staged: StagedPngAsset | undefined): void {
+    if (!staged?.temporaryPath) return;
+    if (this.files.existsSync(staged.finalPath)) {
+      this.cleanupStagedPngAsset(staged);
+      return;
+    }
+    const temporaryPath = staged.temporaryPath;
+    try {
+      this.files.renameSync(temporaryPath, staged.finalPath);
+      staged.temporaryPath = null;
+      staged.publishedByImport = true;
+    } catch (error) {
+      this.cleanupStagedPngAsset(staged);
+      throw error;
+    }
   }
 
   importCard(
@@ -77,7 +168,32 @@ export class ImportService {
     sourceFormat: string;
   } {
     const imported = importPortableCard(source, options);
-    const sourceAsset = this.importedPngAsset(source, options.filename);
+    return this.persistCardImport(imported, source, options);
+  }
+
+  async importCardFile(
+    filePath: string,
+    options: ImportOptions = {},
+  ): Promise<ReturnType<ImportService["importCard"]>> {
+    const [source, imported] = await Promise.all([
+      readFile(filePath),
+      parseImportFile(filePath, "card", options),
+    ]);
+    return this.persistCardImport(
+      imported as ReturnType<typeof importPortableCard>,
+      source,
+      options,
+    );
+  }
+
+  private persistCardImport(
+    imported: ReturnType<typeof importPortableCard>,
+    source: string | Uint8Array,
+    options: ImportOptions,
+  ): ReturnType<ImportService["importCard"]> {
+    const parsedCard = CardSchema.parse(imported.value);
+    const stagedPngAsset = this.stageImportedPngAsset(source, options.filename);
+    const sourceAsset = stagedPngAsset?.asset;
     const participants = imported.value.participants.map(
       (participant, index) =>
         sourceAsset !== undefined &&
@@ -86,90 +202,134 @@ export class ImportService {
           ? { ...participant, avatarAssetId: sourceAsset.id }
           : participant,
     );
-    const normalizedCard = CardSchema.parse({
-      ...imported.value,
-      participants,
-      assets:
-        sourceAsset === undefined
-          ? imported.value.assets
-          : [
-              ...imported.value.assets.filter(
-                (asset) => asset.id !== sourceAsset.id,
-              ),
-              sourceAsset,
-            ],
-    });
-    const regexScriptCount = Array.isArray(
-      normalizedCard.extensions.regex_scripts,
-    )
-      ? normalizedCard.extensions.regex_scripts.length
-      : 0;
-    const tavernHelper = inspectTavernHelperScripts(normalizedCard);
-    return this.store.database.transaction(() => {
-      const created = this.store.createCard({
-        id: normalizedCard.id,
-        kind: normalizedCard.kind,
-        name: normalizedCard.name,
-        description: normalizedCard.description,
-        legacyPayload: jsonObject({
-          normalized: normalizedCard,
-          compatibility: normalizedCard.compatibility ?? {},
-        }),
-        participants: [
-          ...normalizedCard.participants,
-          ...(normalizedCard.narrator ? [normalizedCard.narrator] : []),
-        ].map((participant) => ({
-          id: participant.id,
-          name: participant.name,
-          role: participant.kind,
-          profile: jsonObject(participant),
-          legacyPayload: jsonObject(
-            participant.compatibility?.unknownFields ?? {},
-          ),
-        })),
+    let normalizedCard: ReturnType<typeof CardSchema.parse>;
+    try {
+      normalizedCard = CardSchema.parse({
+        ...parsedCard,
+        participants,
+        assets:
+          sourceAsset === undefined
+            ? imported.value.assets
+            : [
+                ...imported.value.assets.filter(
+                  (asset) => asset.id !== sourceAsset.id,
+                ),
+                sourceAsset,
+              ],
       });
-      const worldbookIds = imported.embeddedWorldbooks.map((worldbook) => {
-        const persisted = this.persistWorldbook(worldbook);
-        this.store.bindWorldbook({
-          worldbookId: persisted.id,
-          scopeType: "card",
-          scopeId: created.card.id,
+    } catch (error) {
+      this.cleanupStagedPngAsset(stagedPngAsset);
+      throw error;
+    }
+    let regexScriptCount = 0;
+    let tavernHelper: ReturnType<typeof inspectTavernHelperScripts>;
+    try {
+      regexScriptCount = Array.isArray(normalizedCard.extensions.regex_scripts)
+        ? normalizedCard.extensions.regex_scripts.length
+        : 0;
+      tavernHelper = inspectTavernHelperScripts(normalizedCard);
+    } catch (error) {
+      this.cleanupStagedPngAsset(stagedPngAsset);
+      throw error;
+    }
+    let result: ReturnType<ImportService["importCard"]>;
+    try {
+      result = this.store.database.transaction(() => {
+        const created = this.store.createCard({
+          id: normalizedCard.id,
+          kind: normalizedCard.kind,
+          name: normalizedCard.name,
+          description: normalizedCard.description,
+          legacyPayload: jsonObject({
+            normalized: normalizedCard,
+            compatibility: normalizedCard.compatibility ?? {},
+          }),
+          participants: [
+            ...normalizedCard.participants,
+            ...(normalizedCard.narrator ? [normalizedCard.narrator] : []),
+          ].map((participant) => ({
+            id: participant.id,
+            name: participant.name,
+            role: participant.kind,
+            profile: jsonObject(participant),
+            legacyPayload: jsonObject(
+              participant.compatibility?.unknownFields ?? {},
+            ),
+          })),
         });
-        return persisted.id;
+        const worldbookIds = imported.embeddedWorldbooks.map((worldbook) => {
+          const persisted = this.persistWorldbook(worldbook);
+          this.store.bindWorldbook({
+            worldbookId: persisted.id,
+            scopeType: "card",
+            scopeId: created.card.id,
+          });
+          return persisted.id;
+        });
+        if (regexScriptCount > 0) {
+          this.store.setExtensionSetting(
+            "stn.regex",
+            `card:${created.card.id}`,
+            false,
+          );
+        }
+        if (tavernHelper.scriptCount > 0) {
+          this.store.setExtensionSetting(
+            "stn.tavern-helper",
+            `card:${created.card.id}`,
+            false,
+          );
+        }
+        return {
+          card: created.card,
+          participantIds: created.participants.map(
+            (participant) => participant.id,
+          ),
+          worldbookIds,
+          regexScriptCount,
+          tavernHelperScriptCount: tavernHelper.scriptCount,
+          enabledTavernHelperScriptCount: tavernHelper.enabledScriptCount,
+          diagnostics: imported.diagnostics.map((diagnostic) =>
+            jsonObject(diagnostic),
+          ),
+          sourceFormat: imported.sourceFormat,
+        };
       });
-      if (regexScriptCount > 0) {
-        this.store.setExtensionSetting(
-          "stn.regex",
-          `card:${created.card.id}`,
-          false,
-        );
+    } catch (error) {
+      this.cleanupStagedPngAsset(stagedPngAsset);
+      throw error;
+    }
+
+    try {
+      this.publishStagedPngAsset(stagedPngAsset);
+    } catch (error) {
+      this.cleanupStagedPngAsset(stagedPngAsset);
+      try {
+        this.store.deleteCardCascade(result.card.id, result.card.revision);
+      } catch {
+        // Keep the rename error visible to the route; the compensation is
+        // retried by the next import/reconciliation pass if storage is busy.
       }
-      if (tavernHelper.scriptCount > 0) {
-        this.store.setExtensionSetting(
-          "stn.tavern-helper",
-          `card:${created.card.id}`,
-          false,
-        );
-      }
-      return {
-        card: created.card,
-        participantIds: created.participants.map(
-          (participant) => participant.id,
-        ),
-        worldbookIds,
-        regexScriptCount,
-        tavernHelperScriptCount: tavernHelper.scriptCount,
-        enabledTavernHelperScriptCount: tavernHelper.enabledScriptCount,
-        diagnostics: imported.diagnostics.map((diagnostic) =>
-          jsonObject(diagnostic),
-        ),
-        sourceFormat: imported.sourceFormat,
-      };
-    });
+      throw error;
+    }
+    return result;
   }
 
   importWorldbook(source: string | Uint8Array, options: ImportOptions = {}) {
     const imported = importWorldbookJson(source, options);
+    return this.persistWorldbookImport(imported);
+  }
+
+  async importWorldbookFile(filePath: string, options: ImportOptions = {}) {
+    const imported = await parseImportFile(filePath, "worldbook", options);
+    return this.persistWorldbookImport(
+      imported as ReturnType<typeof importWorldbookJson>,
+    );
+  }
+
+  private persistWorldbookImport(
+    imported: ReturnType<typeof importWorldbookJson>,
+  ) {
     return {
       worldbook: this.persistWorldbook(imported.value),
       diagnostics: imported.diagnostics,
@@ -183,6 +343,25 @@ export class ImportService {
     options: ImportOptions = {},
   ) {
     const imported = importConversation(source, options);
+    return this.persistChatImport(imported, cardId);
+  }
+
+  async importChatFile(
+    filePath: string,
+    cardId: string,
+    options: ImportOptions = {},
+  ) {
+    const imported = await parseImportFile(filePath, "conversation", options);
+    return this.persistChatImport(
+      imported as ReturnType<typeof importConversation>,
+      cardId,
+    );
+  }
+
+  private persistChatImport(
+    imported: ReturnType<typeof importConversation>,
+    cardId: string,
+  ) {
     return this.store.database.transaction(() => {
       const cardParticipantIds = new Set(
         this.store

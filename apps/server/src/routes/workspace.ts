@@ -1,11 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 
-import { applyRegexScriptsWithDiagnostics } from "@stn/core";
 import { CardSchema, type JsonObject, type JsonValue } from "@stn/contracts";
+import { StorageError } from "@stn/storage";
 
 import { envelope, type ServerContext } from "../context.js";
+import { receiveImportUpload } from "../upload.js";
 import { collectAuthorizedConversationRegex } from "../regex-service.js";
+import { regexWorkerPool } from "../regex-worker-pool.js";
 
 const entityId = z.string().trim().min(1).max(256);
 
@@ -26,6 +28,8 @@ const cardConversationCreateSchema = z
 const conversationListQuerySchema = z
   .object({
     cardId: entityId.optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+    cursor: z.string().max(2_048).optional(),
   })
   .strict();
 
@@ -42,8 +46,49 @@ const tavernHelperMessageCreateSchema = messageCreateSchema;
 const messageListQuerySchema = z
   .object({
     presetId: entityId.optional(),
+    limit: z.coerce.number().int().min(1).max(200).default(100),
+    cursor: z.string().max(2_048).optional(),
   })
   .strict();
+
+const pageCursorSchema = z
+  .object({
+    v: z.literal(1),
+    kind: z.enum(["conversations", "messages"]),
+    scope: z.string(),
+    timestamp: z.string(),
+    id: z.string(),
+    seen: z.number().int().nonnegative().default(0),
+  })
+  .strict();
+
+type PageCursor = z.infer<typeof pageCursorSchema>;
+
+function encodePageCursor(cursor: PageCursor): string {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+function decodePageCursor(
+  value: string | undefined,
+  expected: Pick<PageCursor, "kind" | "scope">,
+): PageCursor | undefined {
+  if (value === undefined) return undefined;
+  try {
+    const parsed = pageCursorSchema.parse(
+      JSON.parse(Buffer.from(value, "base64url").toString("utf8")),
+    );
+    if (parsed.kind !== expected.kind || parsed.scope !== expected.scope) {
+      throw new Error("Cursor scope mismatch.");
+    }
+    return parsed;
+  } catch {
+    throw new StorageError(
+      "INVALID_PAGE_CURSOR",
+      "The page cursor is invalid for this request.",
+      400,
+    );
+  }
+}
 
 const worldbookInsertionPositions = [
   "before-card",
@@ -182,8 +227,10 @@ function personaDto(context: ServerContext, id: string) {
 
 function messageDto(context: ServerContext, id: string) {
   const message = context.store.getMessage(id);
+  const { generationStatus, ...rest } = message;
   return {
-    ...message,
+    ...rest,
+    state: generationStatus,
     swipes: context.store.listSwipes(message.id),
   };
 }
@@ -363,36 +410,6 @@ function createCardConversation(
   });
 }
 
-function extractMultipartFile(
-  body: Buffer,
-  contentType: string,
-): { bytes: Uint8Array; filename?: string } {
-  const boundaryMatch = /boundary=(?:"([^"]+)"|([^;]+))/iu.exec(contentType);
-  const boundary = boundaryMatch?.[1] ?? boundaryMatch?.[2]?.trim();
-  if (!boundary) throw new Error("Multipart upload has no boundary.");
-  const marker = Buffer.from(`--${boundary}`);
-  let cursor = body.indexOf(marker);
-  while (cursor >= 0) {
-    const headersEnd = body.indexOf(Buffer.from("\r\n\r\n"), cursor);
-    if (headersEnd < 0) break;
-    const headerText = body
-      .subarray(cursor + marker.length + 2, headersEnd)
-      .toString("utf8");
-    const nextBoundary = body.indexOf(marker, headersEnd + 4);
-    if (nextBoundary < 0) break;
-    if (/name="file"/iu.test(headerText)) {
-      const filename = /filename="([^"]*)"/iu.exec(headerText)?.[1];
-      const end = Math.max(headersEnd + 4, nextBoundary - 2);
-      return {
-        bytes: body.subarray(headersEnd + 4, end),
-        ...(filename ? { filename } : {}),
-      };
-    }
-    cursor = nextBoundary;
-  }
-  throw new Error("Multipart upload has no file field.");
-}
-
 export async function registerWorkspaceRoutes(
   app: FastifyInstance,
   context: ServerContext,
@@ -550,54 +567,95 @@ export async function registerWorkspaceRoutes(
   });
 
   app.post("/api/cards/import", async (request, reply) => {
-    const contentType = request.headers["content-type"] ?? "";
-    const body = request.body;
-    let bytes: Uint8Array;
-    let filename: string | undefined;
-    if (
-      Buffer.isBuffer(body) &&
-      contentType.startsWith("multipart/form-data")
-    ) {
-      const extracted = extractMultipartFile(body, contentType);
-      bytes = extracted.bytes;
-      filename = extracted.filename;
-    } else if (Buffer.isBuffer(body)) {
-      bytes = body;
-      const headerName = request.headers["x-file-name"];
-      filename = Array.isArray(headerName) ? headerName[0] : headerName;
-    } else {
-      throw new Error("Card import requires a binary or multipart body.");
+    const file = await receiveImportUpload(request);
+    try {
+      const imported = await context.imports.importCardFile(file.path, {
+        ...(file.filename === undefined ? {} : { filename: file.filename }),
+      });
+      return reply.code(201).send(envelope(imported));
+    } finally {
+      await file.cleanup();
     }
-    const imported = context.imports.importCard(bytes, {
-      ...(filename === undefined ? {} : { filename }),
-    });
-    return reply.code(201).send(envelope(imported));
   });
 
-  app.get<{ Querystring: { cardId?: string } }>(
-    "/api/conversations",
-    async (request) => {
-      const query = conversationListQuerySchema.parse(request.query);
-      const conversations =
-        query.cardId === undefined
-          ? context.store.listConversations()
-          : context.store.listCardConversations(query.cardId);
-      return envelope(
-        conversations.map((conversation) =>
-          conversationDto(context, conversation.id),
-        ),
-      );
-    },
-  );
-
-  app.get<{ Params: { cardId: string } }>(
-    "/api/cards/:cardId/conversations",
-    async (request) =>
-      envelope(
-        context.store
-          .listCardConversations(entityId.parse(request.params.cardId))
-          .map((conversation) => conversationDto(context, conversation.id)),
+  app.get<{
+    Querystring: { cardId?: string; limit?: string; cursor?: string };
+  }>("/api/conversations", async (request) => {
+    const query = conversationListQuerySchema.parse(request.query);
+    const scope = query.cardId ?? "all";
+    const cursor = decodePageCursor(query.cursor, {
+      kind: "conversations",
+      scope,
+    });
+    const page = context.store.listConversationsPage({
+      ...(query.cardId === undefined ? {} : { cardId: query.cardId }),
+      limit: query.limit,
+      ...(cursor === undefined
+        ? {}
+        : { before: { updatedAt: cursor.timestamp, id: cursor.id } }),
+    });
+    const last = page.items.at(-1);
+    return envelope({
+      items: page.items.map((conversation) =>
+        conversationDto(context, conversation.id),
       ),
+      nextCursor:
+        page.hasMore && last !== undefined
+          ? encodePageCursor({
+              v: 1,
+              kind: "conversations",
+              scope,
+              timestamp: last.updatedAt,
+              id: last.id,
+              seen: (cursor?.seen ?? 0) + page.items.length,
+            })
+          : null,
+    });
+  });
+
+  app.get<{
+    Params: { cardId: string };
+    Querystring: { limit?: string; cursor?: string };
+  }>("/api/cards/:cardId/conversations", async (request) => {
+    const cardId = entityId.parse(request.params.cardId);
+    const query = conversationListQuerySchema.parse({
+      ...request.query,
+      cardId,
+    });
+    const cursor = decodePageCursor(query.cursor, {
+      kind: "conversations",
+      scope: cardId,
+    });
+    const page = context.store.listConversationsPage({
+      cardId,
+      limit: query.limit,
+      ...(cursor === undefined
+        ? {}
+        : { before: { updatedAt: cursor.timestamp, id: cursor.id } }),
+    });
+    const last = page.items.at(-1);
+    return envelope({
+      items: page.items.map((conversation) =>
+        conversationDto(context, conversation.id),
+      ),
+      nextCursor:
+        page.hasMore && last !== undefined
+          ? encodePageCursor({
+              v: 1,
+              kind: "conversations",
+              scope: cardId,
+              timestamp: last.updatedAt,
+              id: last.id,
+              seen: (cursor?.seen ?? 0) + page.items.length,
+            })
+          : null,
+    });
+  });
+
+  app.get<{ Params: { id: string } }>(
+    "/api/conversations/:id",
+    async (request) =>
+      envelope(conversationDto(context, entityId.parse(request.params.id))),
   );
 
   app.post("/api/conversations", async (request, reply) => {
@@ -683,38 +741,65 @@ export async function registerWorkspaceRoutes(
     },
   );
 
-  app.get<{ Params: { id: string }; Querystring: { presetId?: string } }>(
-    "/api/conversations/:id/messages",
-    async (request) => {
-      const query = messageListQuerySchema.parse(request.query);
-      const messages = context.store.listChatMessages(request.params.id);
-      const regex = collectAuthorizedConversationRegex(context.store, {
-        conversationId: request.params.id,
-        ...(query.presetId === undefined ? {} : { presetId: query.presetId }),
-      });
-      return envelope(
-        messages.map((message, index) => {
-          const selectedSwipe = message.swipes.find((swipe) => swipe.selected);
-          const rawDisplayContent = selectedSwipe?.content ?? message.content;
-          const display = applyRegexScriptsWithDiagnostics(
-            rawDisplayContent,
-            regex.scripts,
-            {
-              placement: message.role === "user" ? 1 : 2,
-              target: "markdown",
-              depth: messages.length - index - 1,
-              substitutions: regex.substitutions,
-            },
-          );
-          return {
-            ...messageDto(context, message.id),
-            displayContent: display.text,
-            appliedRegexScriptIds: display.appliedScriptIds,
-          };
-        }),
-      );
-    },
-  );
+  app.get<{
+    Params: { id: string };
+    Querystring: { presetId?: string; limit?: string; cursor?: string };
+  }>("/api/conversations/:id/messages", async (request) => {
+    const query = messageListQuerySchema.parse(request.query);
+    const scope = `${request.params.id}:${query.presetId ?? ""}`;
+    const cursor = decodePageCursor(query.cursor, {
+      kind: "messages",
+      scope,
+    });
+    const page = context.store.listChatMessagesPage({
+      conversationId: request.params.id,
+      limit: query.limit,
+      ...(cursor === undefined
+        ? {}
+        : { before: { createdAt: cursor.timestamp, id: cursor.id } }),
+    });
+    const messages = page.items;
+    const regex = collectAuthorizedConversationRegex(context.store, {
+      conversationId: request.params.id,
+      ...(query.presetId === undefined ? {} : { presetId: query.presetId }),
+    });
+    const items = await Promise.all(
+      messages.map(async (message, index) => {
+        const selectedSwipe = message.swipes.find((swipe) => swipe.selected);
+        const rawDisplayContent = selectedSwipe?.content ?? message.content;
+        const display = await regexWorkerPool.apply(
+          rawDisplayContent,
+          regex.scripts,
+          {
+            placement: message.role === "user" ? 1 : 2,
+            target: "markdown",
+            depth: (cursor?.seen ?? 0) + messages.length - index - 1,
+            substitutions: regex.substitutions,
+          },
+        );
+        return {
+          ...messageDto(context, message.id),
+          displayContent: display.text,
+          appliedRegexScriptIds: display.appliedScriptIds,
+        };
+      }),
+    );
+    const oldest = messages[0];
+    return envelope({
+      items,
+      nextCursor:
+        page.hasMore && oldest !== undefined
+          ? encodePageCursor({
+              v: 1,
+              kind: "messages",
+              scope,
+              timestamp: oldest.createdAt,
+              id: oldest.id,
+              seen: (cursor?.seen ?? 0) + messages.length,
+            })
+          : null,
+    });
+  });
 
   app.post<{ Params: { id: string } }>(
     "/api/conversations/:id/messages",

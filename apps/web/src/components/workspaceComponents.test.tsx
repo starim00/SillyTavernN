@@ -23,8 +23,8 @@ import {
   MessageStream,
   sandboxedDisplayDocument,
 } from "./MessageStream";
+import { LegacyManagementModal } from "./LegacyManagementModal";
 import { ParticipantChips } from "./WorkspacePrimitives";
-import { WorkspaceModals } from "./WorkspaceModals";
 
 const workspaceStyles = readFileSync(
   new URL("../styles.css", import.meta.url),
@@ -45,10 +45,9 @@ describe("workspace components", () => {
       (candidate) => candidate.id === "plugin-js-slash-runner",
     )!;
     const html = renderToStaticMarkup(
-      <WorkspaceModals
-        modal={{ kind: "plugins" }}
-        apiOnline
-        cards={[]}
+      <LegacyManagementModal
+        kind="plugins"
+        online
         plugins={[plugin]}
         legacyHostPlugins={{
           "js-slash-runner": {
@@ -62,19 +61,9 @@ describe("workspace components", () => {
             enabled: false,
           },
         }}
-        worldbooks={[]}
-        providerConnections={[]}
-        selectedProviderId="fake"
         onClose={vi.fn()}
-        onSelectCard={vi.fn()}
-        onDeleteCard={vi.fn()}
-        onCreateConversation={vi.fn()}
-        onImport={vi.fn()}
-        onInstallPlugin={vi.fn()}
-        onTogglePlugin={vi.fn()}
-        onPermission={vi.fn()}
-        onSelectProvider={vi.fn()}
-        onSaveProvider={vi.fn()}
+        onInstall={vi.fn()}
+        onToggle={vi.fn()}
       />,
     );
 
@@ -573,10 +562,8 @@ describe("workspace components", () => {
     );
 
     expect(segments).toHaveLength(1);
-    expect(segments[0]).toMatchObject({
-      kind: "mixed",
-      content: expect.stringContaining("这里是模型正文。"),
-    });
+    expect(segments[0]).toMatchObject({ kind: "mixed" });
+    expect(segments[0]?.content).toContain("这里是模型正文。");
     const mixedHtml = mixedDisplayContent(segments[0]!.content);
     expect(mixedHtml).toContain(">正文标题</h2>");
     expect(mixedHtml).toContain('<div class="calendar-container">状态栏</div>');

@@ -1,10 +1,12 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readdir } from "node:fs/promises";
+import * as fileSystem from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createServer, type ServerApplication } from "../app.js";
+import { ImportService } from "../import-service.js";
 
 const applications: ServerApplication[] = [];
 const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -20,7 +22,10 @@ function pngChunk(type: string, data: Buffer): Buffer {
   ]);
 }
 
-function portablePngCard(): Buffer {
+function portablePngCard(
+  description = "A newly authored import fixture.",
+  dataPatch: Record<string, unknown> = {},
+): Buffer {
   const metadata = Buffer.from(
     JSON.stringify({
       spec: "chara_card_v3",
@@ -28,8 +33,9 @@ function portablePngCard(): Buffer {
       data: {
         id: "card-with-avatar",
         name: "Clean-room PNG character",
-        description: "A newly authored import fixture.",
+        description,
         first_mes: "Welcome.",
+        ...dataPatch,
       },
     }),
   ).toString("base64");
@@ -117,7 +123,7 @@ async function application() {
     seedDevelopmentData: false,
   });
   applications.push(created);
-  return created;
+  return { ...created, dataDirectory };
 }
 
 afterEach(async () => {
@@ -171,6 +177,116 @@ describe("portable import routes", () => {
     expect(asset.statusCode).toBe(200);
     expect(asset.headers["content-type"]).toContain("image/png");
     expect(asset.rawPayload).toEqual(source);
+  });
+
+  it("cleans a staged PNG when the card transaction fails", async () => {
+    const { app, context, dataDirectory } = await application();
+    const first = await app.inject({
+      method: "POST",
+      url: "/api/cards/import",
+      headers: {
+        "content-type": "image/png",
+        "x-file-name": "first-card.png",
+      },
+      payload: portablePngCard(),
+    });
+    const duplicate = await app.inject({
+      method: "POST",
+      url: "/api/cards/import",
+      headers: {
+        "content-type": "image/png",
+        "x-file-name": "duplicate-card.png",
+      },
+      payload: portablePngCard("A different PNG with the same card id."),
+    });
+
+    expect(first.statusCode).toBe(201);
+    expect(duplicate.statusCode).not.toBe(201);
+    expect(context.store.listCards()).toHaveLength(1);
+    const assets = await readdir(path.join(dataDirectory, "assets", "cards"));
+    expect(assets).toHaveLength(1);
+    expect(assets[0]).toMatch(/^[a-f0-9]{64}\.png$/u);
+  });
+
+  it("keeps an existing same-hash PNG when a later card transaction fails", async () => {
+    const { app, context, dataDirectory } = await application();
+    const source = portablePngCard();
+    const first = await app.inject({
+      method: "POST",
+      url: "/api/cards/import",
+      headers: {
+        "content-type": "image/png",
+        "x-file-name": "same-hash-first.png",
+      },
+      payload: source,
+    });
+    const duplicate = await app.inject({
+      method: "POST",
+      url: "/api/cards/import",
+      headers: {
+        "content-type": "image/png",
+        "x-file-name": "same-hash-duplicate.png",
+      },
+      payload: source,
+    });
+
+    expect(first.statusCode).toBe(201);
+    expect(duplicate.statusCode).not.toBe(201);
+    expect(context.store.listCards()).toHaveLength(1);
+    const assets = await readdir(path.join(dataDirectory, "assets", "cards"));
+    expect(assets).toHaveLength(1);
+    const storedAsset = await app.inject({
+      method: "GET",
+      url: `/api/assets/cards/${assets[0]}`,
+    });
+    expect(storedAsset.statusCode).toBe(200);
+    expect(storedAsset.rawPayload).toEqual(source);
+  });
+
+  it("compensates database rows and staged files when publishing the PNG fails", async () => {
+    const { context, dataDirectory } = await application();
+    const service = new ImportService(
+      context.store,
+      path.join(dataDirectory, "assets"),
+      {
+        ...fileSystem,
+        renameSync: () => {
+          throw new Error("injected asset rename failure");
+        },
+      },
+    );
+
+    expect(() =>
+      service.importCard(
+        portablePngCard("rename failure fixture.", {
+          character_book: {
+            name: "Rename failure book",
+            entries: [
+              {
+                id: 0,
+                comment: "Only exists during the failed import",
+                keys: ["rename-failure"],
+                content: "This worldbook must be compensated.",
+                enabled: true,
+              },
+            ],
+          },
+          extensions: { tavern_helper: inertTavernHelper },
+        }),
+        { filename: "rename-failure.png" },
+      ),
+    ).toThrow("injected asset rename failure");
+    expect(context.store.listCards()).toEqual([]);
+    expect(context.store.listWorldbooks()).toEqual([]);
+    expect(
+      context.store.database.get<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM extension_settings WHERE key = ?",
+        "card:card-with-avatar",
+      )?.count,
+    ).toBe(0);
+    expect(await readdir(path.join(dataDirectory, "assets", "cards"))).toEqual(
+      [],
+    );
   });
 
   it("generates globally unique storage ids for repeated embedded entry ids", async () => {

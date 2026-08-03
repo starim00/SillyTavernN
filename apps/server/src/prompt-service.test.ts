@@ -274,7 +274,7 @@ describe("server prompt integration", () => {
       scopeId: persona.id,
     });
 
-    const prompt = prepareConversationPrompt(context.store, {
+    const prompt = await prepareConversationPrompt(context.store, {
       conversationId: conversation.id,
     });
 
@@ -293,7 +293,7 @@ describe("server prompt integration", () => {
   it("adapts an ensemble, narrator, all binding scopes, preset and generation overrides", async () => {
     const created = await application();
     const fixture = await richWorkspace(created);
-    const prompt = prepareConversationPrompt(created.context.store, {
+    const prompt = await prepareConversationPrompt(created.context.store, {
       conversationId: fixture.conversation.id,
       presetId: fixture.preset.id,
       settings: { temperature: 0.25, topP: 0.7 },
@@ -415,7 +415,7 @@ describe("server prompt integration", () => {
       content: "Describe the horizon.",
     });
 
-    const prompt = prepareConversationPrompt(created.context.store, {
+    const prompt = await prepareConversationPrompt(created.context.store, {
       conversationId: conversation.id,
     });
 
@@ -474,7 +474,7 @@ describe("server prompt integration", () => {
       content: "MODEL_RAW_TOKEN",
     });
 
-    const denied = prepareConversationPrompt(created.context.store, {
+    const denied = await prepareConversationPrompt(created.context.store, {
       conversationId: conversation.id,
     });
     expect(denied.textPrompt).toContain("MODEL_RAW_TOKEN");
@@ -485,7 +485,7 @@ describe("server prompt integration", () => {
       `card:${imported.card.id}`,
       true,
     );
-    const granted = prepareConversationPrompt(created.context.store, {
+    const granted = await prepareConversationPrompt(created.context.store, {
       conversationId: conversation.id,
     });
     expect(granted.textPrompt).toContain("MODEL_FILTERED_TOKEN");
@@ -510,17 +510,23 @@ describe("server prompt integration", () => {
       },
     });
 
-    const presetLimited = prepareConversationPrompt(created.context.store, {
-      conversationId: fixture.conversation.id,
-      presetId: fixture.preset.id,
-    });
+    const presetLimited = await prepareConversationPrompt(
+      created.context.store,
+      {
+        conversationId: fixture.conversation.id,
+        presetId: fixture.preset.id,
+      },
+    );
     expect(presetLimited.trace.availableTokens).toBe(2_000_000 - 333);
 
-    const providerLimited = prepareConversationPrompt(created.context.store, {
-      conversationId: fixture.conversation.id,
-      presetId: fixture.preset.id,
-      maxContextTokens: 4_096,
-    });
+    const providerLimited = await prepareConversationPrompt(
+      created.context.store,
+      {
+        conversationId: fixture.conversation.id,
+        presetId: fixture.preset.id,
+        maxContextTokens: 4_096,
+      },
+    );
     expect(providerLimited.trace.availableTokens).toBe(4_096 - 333);
   });
 });

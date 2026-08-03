@@ -155,13 +155,15 @@ describe("regex scope routes", () => {
       url: messagesUrl,
     });
     expect(initial.json()).toMatchObject({
-      data: [
-        {
-          content: "seed",
-          displayContent: "seed",
-          appliedRegexScriptIds: [],
-        },
-      ],
+      data: {
+        items: [
+          {
+            content: "seed",
+            displayContent: "seed",
+            appliedRegexScriptIds: [],
+          },
+        ],
+      },
     });
 
     const globalPatch = await created.app.inject({
@@ -189,13 +191,15 @@ describe("regex scope routes", () => {
       url: messagesUrl,
     });
     expect(globalOnly.json()).toMatchObject({
-      data: [
-        {
-          content: "seed",
-          displayContent: "global",
-          appliedRegexScriptIds: ["global-chain"],
-        },
-      ],
+      data: {
+        items: [
+          {
+            content: "seed",
+            displayContent: "global",
+            appliedRegexScriptIds: ["global-chain"],
+          },
+        ],
+      },
     });
 
     const presetPatch = await created.app.inject({
@@ -219,13 +223,15 @@ describe("regex scope routes", () => {
       url: messagesUrl,
     });
     expect(globalAndPreset.json()).toMatchObject({
-      data: [
-        {
-          content: "seed",
-          displayContent: "preset",
-          appliedRegexScriptIds: ["global-chain", "preset-chain"],
-        },
-      ],
+      data: {
+        items: [
+          {
+            content: "seed",
+            displayContent: "preset",
+            appliedRegexScriptIds: ["global-chain", "preset-chain"],
+          },
+        ],
+      },
     });
 
     const cardPatch = await created.app.inject({
@@ -249,20 +255,22 @@ describe("regex scope routes", () => {
       url: messagesUrl,
     });
     const allSourcesBody = allSources.json() as {
-      data: Array<{
-        id: string;
-        content: string;
-        displayContent: string;
-        appliedRegexScriptIds: string[];
-      }>;
+      data: {
+        items: Array<{
+          id: string;
+          content: string;
+          displayContent: string;
+          appliedRegexScriptIds: string[];
+        }>;
+      };
     };
-    expect(allSourcesBody.data[0]).toMatchObject({
+    expect(allSourcesBody.data.items[0]).toMatchObject({
       content: "seed",
       displayContent: "card",
       appliedRegexScriptIds: ["global-chain", "preset-chain", "card-chain"],
     });
     expect(
-      created.context.store.getMessage(allSourcesBody.data[0]?.id ?? ""),
+      created.context.store.getMessage(allSourcesBody.data.items[0]?.id ?? ""),
     ).toMatchObject({ content: "seed" });
   });
 

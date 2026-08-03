@@ -546,6 +546,13 @@ describe("AppStore", () => {
           agent_write_mode TEXT NOT NULL DEFAULT 'confirm'
             CHECK (agent_write_mode IN ('confirm','auto-create-update'))
         );
+        CREATE TABLE worldbook_bindings (
+          id TEXT PRIMARY KEY,
+          worldbook_id TEXT NOT NULL REFERENCES worldbooks(id) ON DELETE CASCADE,
+          scope_type TEXT NOT NULL,
+          scope_id TEXT,
+          created_at TEXT NOT NULL
+        );
         CREATE TABLE worldbook_entries (
           id TEXT PRIMARY KEY,
           worldbook_id TEXT NOT NULL
@@ -693,6 +700,116 @@ describe("AppStore", () => {
           revision: 1,
         }),
       ]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("persists generated content and all swipe choices atomically", () => {
+    const store = new AppStore();
+    try {
+      const { conversation } = createConversationFixture(store);
+      const before = store.getConversation(conversation.id);
+      const persisted = store.persistAssistantGeneration({
+        conversationId: conversation.id,
+        content: "Primary generated reply.",
+        alternatives: ["Alternative reply."],
+        status: "partial",
+        finishReason: "length",
+      });
+
+      expect(persisted.message).toMatchObject({
+        content: "Primary generated reply.",
+        generationStatus: "partial",
+        finishReason: "length",
+      });
+      expect(persisted.swipes).toEqual([
+        expect.objectContaining({
+          content: "Primary generated reply.",
+          selected: true,
+        }),
+        expect.objectContaining({
+          content: "Alternative reply.",
+          selected: false,
+        }),
+      ]);
+      expect(store.getConversation(conversation.id).revision).toBe(
+        before.revision + 1,
+      );
+    } finally {
+      store.close();
+    }
+  });
+
+  it("rolls back a generated message when a later swipe insert fails", () => {
+    const store = new AppStore();
+    try {
+      const { conversation } = createConversationFixture(store);
+      const beforeMessages = store.listMessages(conversation.id);
+      const beforeConversation = store.getConversation(conversation.id);
+      store.database.raw.exec(`
+        CREATE TRIGGER fail_generation_second_swipe
+        BEFORE INSERT ON swipes
+        WHEN NEW.position = 1
+        BEGIN
+          SELECT RAISE(ABORT, 'injected swipe failure');
+        END;
+      `);
+
+      expect(() =>
+        store.persistAssistantGeneration({
+          conversationId: conversation.id,
+          content: "Primary generated reply.",
+          alternatives: ["This insert fails."],
+          status: "complete",
+          finishReason: "stop",
+        }),
+      ).toThrow("injected swipe failure");
+      expect(store.listMessages(conversation.id)).toEqual(beforeMessages);
+      expect(store.getConversation(conversation.id)).toEqual(
+        beforeConversation,
+      );
+    } finally {
+      store.close();
+    }
+  });
+
+  it("regenerates an existing assistant message without a temporary message", () => {
+    const store = new AppStore();
+    try {
+      const { conversation, second } = createConversationFixture(store);
+      const beforeCount = store.listMessages(conversation.id).length;
+      const persisted = store.persistAssistantGeneration({
+        conversationId: conversation.id,
+        targetMessageId: second.id,
+        expectedMessageRevision: second.revision,
+        content: "Regenerated reply.",
+        alternatives: ["Second regenerated choice."],
+        status: "complete",
+        finishReason: "stop",
+      });
+
+      expect(store.listMessages(conversation.id)).toHaveLength(beforeCount);
+      expect(persisted.message).toMatchObject({
+        id: second.id,
+        content: "Regenerated reply.",
+      });
+      expect(persisted.swipes.at(-2)).toEqual(
+        expect.objectContaining({
+          content: "Regenerated reply.",
+          selected: true,
+        }),
+      );
+      expect(() =>
+        store.persistAssistantGeneration({
+          conversationId: conversation.id,
+          targetMessageId: second.id,
+          expectedMessageRevision: second.revision,
+          content: "Stale retry.",
+          status: "complete",
+          finishReason: "stop",
+        }),
+      ).toThrowError(expect.objectContaining({ code: "revision_conflict" }));
     } finally {
       store.close();
     }
@@ -878,6 +995,34 @@ describe("AppStore", () => {
           permission_updated_at TEXT,
           agent_write_mode TEXT NOT NULL DEFAULT 'confirm'
             CHECK (agent_write_mode IN ('confirm','auto-create-update'))
+        );
+        CREATE TABLE messages (
+          id TEXT PRIMARY KEY,
+          conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+          parent_message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
+          role TEXT NOT NULL,
+          participant_id TEXT,
+          content TEXT NOT NULL,
+          revision INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE swipes (
+          id TEXT PRIMARY KEY,
+          message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+          position INTEGER NOT NULL,
+          content TEXT NOT NULL,
+          selected INTEGER NOT NULL DEFAULT 0,
+          revision INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE worldbook_bindings (
+          id TEXT PRIMARY KEY,
+          worldbook_id TEXT NOT NULL REFERENCES worldbooks(id) ON DELETE CASCADE,
+          scope_type TEXT NOT NULL,
+          scope_id TEXT,
+          created_at TEXT NOT NULL
         );
         CREATE TABLE worldbook_entries (
           id TEXT PRIMARY KEY,

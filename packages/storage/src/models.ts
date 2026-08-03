@@ -7,6 +7,9 @@ export type CardKind = "character" | "ensemble" | "scenario" | "world";
 export type ChatMessageRole = "user" | "assistant";
 export type InternalMessageRole = "system" | "tool";
 export type MessageRole = ChatMessageRole | InternalMessageRole;
+export type GenerationStatus = "complete" | "partial" | "cancelled" | "error";
+export type GenerationFinishReason =
+  "stop" | "length" | "tool-calls" | "cancelled" | "limit" | "provider-error";
 export type BindingScope =
   "global" | "card" | "conversation" | "participant" | "persona";
 export type AgentRunStatus =
@@ -90,6 +93,9 @@ export interface Message {
   role: MessageRole;
   participantId: string | null;
   content: string;
+  generationStatus: GenerationStatus;
+  finishReason: GenerationFinishReason | null;
+  providerErrorCode: string | null;
   revision: number;
   createdAt: string;
   updatedAt: string;

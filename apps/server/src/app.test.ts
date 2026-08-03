@@ -365,9 +365,9 @@ describe("SillyTavern N server", () => {
     expect(
       (
         cardHistory.json() as {
-          data: Array<{ id: string; cardId: string }>;
+          data: { items: Array<{ id: string; cardId: string }> };
         }
-      ).data,
+      ).data.items,
     ).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -416,10 +416,9 @@ describe("SillyTavern N server", () => {
         content: "User-created assistant message",
       },
     });
-    const ordinaryAssistantData = ordinaryAssistant.json().data as {
-      id: string;
-      revision: number;
-    };
+    const ordinaryAssistantData = (
+      ordinaryAssistant.json() as { data: { id: string; revision: number } }
+    ).data;
     await app.inject({
       method: "DELETE",
       url: `/api/messages/${ordinaryAssistantData.id}`,
@@ -463,10 +462,9 @@ describe("SillyTavern N server", () => {
         content: "Trusted helper-created assistant floor.",
       },
     });
-    const helperAssistantData = helperAssistant.json().data as {
-      id: string;
-      revision: number;
-    };
+    const helperAssistantData = (
+      helperAssistant.json() as { data: { id: string; revision: number } }
+    ).data;
     const helperAssistantDeletion = await app.inject({
       method: "DELETE",
       url: `/api/messages/${helperAssistantData.id}`,
@@ -485,12 +483,14 @@ describe("SillyTavern N server", () => {
       url: `/api/conversations/${conversationId}/messages`,
     });
     expect(visibleMessages.json()).toMatchObject({
-      data: [
-        {
-          role: "user",
-          content: "Continue this card-bound conversation.",
-        },
-      ],
+      data: {
+        items: [
+          expect.objectContaining({
+            role: "user",
+            content: "Continue this card-bound conversation.",
+          }),
+        ],
+      },
     });
     expect(visibleMessages.body).not.toContain("Internal only");
   });
@@ -583,18 +583,17 @@ describe("SillyTavern N server", () => {
       url: `/api/conversations/${conversationId}/messages`,
     });
     expect(messages.statusCode).toBe(200);
-    expect(messages.json()).toMatchObject({
-      data: [
-        {
-          role: "assistant",
-          participantId: null,
-          content: "Primary model greeting",
-          swipes: [
-            { content: "Primary model greeting", selected: true },
-            { content: "Alternate model greeting A", selected: false },
-            { content: "Alternate model greeting B", selected: false },
-          ],
-        },
+    const messageItems = (messages.json() as { data: { items: unknown[] } })
+      .data.items;
+    expect(messageItems).toHaveLength(1);
+    expect(messageItems[0]).toMatchObject({
+      role: "assistant",
+      participantId: null,
+      content: "Primary model greeting",
+      swipes: [
+        { content: "Primary model greeting", selected: true },
+        { content: "Alternate model greeting A", selected: false },
+        { content: "Alternate model greeting B", selected: false },
       ],
     });
   });
@@ -738,7 +737,7 @@ describe("SillyTavern N server", () => {
       conversationId: conversation.id,
       content: "I inspect the moon.",
     });
-    const prompt = prepareConversationPrompt(context.store, {
+    const prompt = await prepareConversationPrompt(context.store, {
       conversationId: conversation.id,
     });
     const loreSegments = prompt.segments.filter(
@@ -986,22 +985,30 @@ describe("SillyTavern N server", () => {
       method: "GET",
       url: `/api/conversations/${conversationId}/messages?presetId=preset-display-regex`,
     });
-    expect(denied.json()).toMatchObject({
-      data: [
-        {
-          role: "assistant",
-          content: "Hello raw",
-          displayContent: "Hello raw",
-          appliedRegexScriptIds: [],
-        },
-        {
-          role: "user",
-          content: "secret raw user input",
-          displayContent: "secret raw user input",
-          appliedRegexScriptIds: [],
-        },
-      ],
+    const deniedItems = (
+      denied.json() as {
+        data: {
+          items: Array<{
+            role: string;
+            content: string;
+            displayContent: string;
+            appliedRegexScriptIds: string[];
+          }>;
+        };
+      }
+    ).data.items;
+    expect(deniedItems.find((item) => item.role === "user")).toMatchObject({
+      content: "secret raw user input",
+      displayContent: "secret raw user input",
+      appliedRegexScriptIds: [],
     });
+    expect(deniedItems.find((item) => item.role === "assistant")).toMatchObject(
+      {
+        content: "Hello raw",
+        displayContent: "Hello raw",
+        appliedRegexScriptIds: [],
+      },
+    );
 
     await app.inject({
       method: "PUT",
@@ -1012,19 +1019,28 @@ describe("SillyTavern N server", () => {
       method: "GET",
       url: `/api/conversations/${conversationId}/messages?presetId=preset-display-regex`,
     });
-    expect(cardOnly.json()).toMatchObject({
-      data: [
-        {
-          content: "Hello raw",
-          displayContent: "<strong>CARD</strong> raw",
-          appliedRegexScriptIds: ["card-assistant"],
-        },
-        {
-          content: "secret raw user input",
-          displayContent: "visible raw user input",
-          appliedRegexScriptIds: ["card-user"],
-        },
-      ],
+    const cardOnlyItems = (
+      cardOnly.json() as {
+        data: {
+          items: Array<{
+            content: string;
+            displayContent: string;
+            appliedRegexScriptIds: string[];
+          }>;
+        };
+      }
+    ).data.items;
+    expect(
+      cardOnlyItems.find((item) => item.content === "secret raw user input"),
+    ).toMatchObject({
+      displayContent: "visible raw user input",
+      appliedRegexScriptIds: ["card-user"],
+    });
+    expect(
+      cardOnlyItems.find((item) => item.content === "Hello raw"),
+    ).toMatchObject({
+      displayContent: "<strong>CARD</strong> raw",
+      appliedRegexScriptIds: ["card-assistant"],
     });
 
     await app.inject({
@@ -1041,21 +1057,26 @@ describe("SillyTavern N server", () => {
       url: `/api/conversations/${conversationId}/messages?presetId=preset-display-regex`,
     });
     const combinedBody = combined.json() as {
-      data: Array<{
-        id: string;
-        content: string;
-        displayContent: string;
-        appliedRegexScriptIds: string[];
-      }>;
+      data: {
+        items: Array<{
+          id: string;
+          content: string;
+          displayContent: string;
+          appliedRegexScriptIds: string[];
+        }>;
+      };
     };
-    expect(combinedBody.data[0]).toMatchObject({
+    const combinedAssistant = combinedBody.data.items.find(
+      (message) => message.content === "Hello raw",
+    );
+    expect(combinedAssistant).toMatchObject({
       content: "Hello raw",
       displayContent: "<strong>CARD</strong> raw",
       appliedRegexScriptIds: ["preset-assistant", "card-assistant"],
     });
-    expect(
-      context.store.getMessage(combinedBody.data[0]?.id ?? "").content,
-    ).toBe("Hello raw");
+    expect(context.store.getMessage(combinedAssistant?.id ?? "").content).toBe(
+      "Hello raw",
+    );
   });
 
   it("streams with the fake provider and persists only the completed assistant message", async () => {

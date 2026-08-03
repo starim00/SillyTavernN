@@ -1,4 +1,5 @@
 import { Books, UploadSimple } from "@phosphor-icons/react";
+import type { ReactNode } from "react";
 
 import type { RoleCard } from "../domain/workspace";
 
@@ -6,15 +7,18 @@ type CardConversationEntryProps = {
   cards: RoleCard[];
   onSelectCard: (id: string) => void;
   onImport: () => void;
+  notice?: ReactNode;
 };
 
 export function CardConversationEntry({
   cards,
   onSelectCard,
   onImport,
+  notice,
 }: CardConversationEntryProps) {
   return (
     <main className="card-entry" aria-labelledby="card-entry-title">
+      {notice}
       <div className="card-entry__intro">
         <span className="card-entry__icon" aria-hidden="true">
           <Books size={28} />

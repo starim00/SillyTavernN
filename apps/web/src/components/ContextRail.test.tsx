@@ -7,7 +7,8 @@ import type {
   PromptPreset,
   RegexScope,
 } from "../domain/workspace";
-import { ExtensionsPanel, RegexRail, WorldbookRail } from "./ContextRail";
+import { RegexRail, WorldbookRail } from "./ContextRail";
+import { LegacyManagementModal } from "./LegacyManagementModal";
 import { PresetSettingsRail } from "./PresetSettingsRail";
 import { WorkspaceModals } from "./WorkspaceModals";
 
@@ -114,10 +115,12 @@ describe("ContextRail", () => {
     const noop = vi.fn();
     const supportHtml = renderRail(null);
     const extensionsHtml = renderToStaticMarkup(
-      <ExtensionsPanel
+      <LegacyManagementModal
+        kind="extensions"
         plugins={state.plugins}
         pluginRealms={<iframe title="插件运行菜单" />}
         onOpenPlugins={noop}
+        onClose={noop}
       />,
     );
 

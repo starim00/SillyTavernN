@@ -1,18 +1,21 @@
 import { useCallback, useEffect, useRef, type RefCallback } from "react";
 
+import {
+  LEGACY_UI_TO_CANONICAL_PLUGIN_ID,
+  canonicalLegacyPluginId,
+  type CanonicalLegacyPluginId,
+  type LegacyUiPluginId,
+} from "../compat/legacyPluginIds";
 import { currentWebOrigin, LEGACY_REALM_ORIGIN } from "../legacy/origin";
 
 export const LEGACY_REALM_PROTOCOL = "stn.legacy.v1" as const;
 export { LEGACY_REALM_ORIGIN };
-
-export const LEGACY_UI_TO_CANONICAL_PLUGIN_ID = {
-  "plugin-js-slash-runner": "js-slash-runner",
-  "plugin-st-prompt-template": "st-prompt-template",
-} as const;
-
-export type LegacyUiPluginId = keyof typeof LEGACY_UI_TO_CANONICAL_PLUGIN_ID;
-export type CanonicalLegacyPluginId =
-  (typeof LEGACY_UI_TO_CANONICAL_PLUGIN_ID)[LegacyUiPluginId];
+export {
+  LEGACY_UI_TO_CANONICAL_PLUGIN_ID,
+  canonicalLegacyPluginId,
+  type CanonicalLegacyPluginId,
+  type LegacyUiPluginId,
+} from "../compat/legacyPluginIds";
 
 export interface LegacyRealmBridgePlugin {
   readonly id: string;
@@ -310,17 +313,6 @@ function parseStatus(
     };
   }
   return null;
-}
-
-export function canonicalLegacyPluginId(
-  uiPluginId: string,
-): CanonicalLegacyPluginId | null {
-  return Object.prototype.hasOwnProperty.call(
-    LEGACY_UI_TO_CANONICAL_PLUGIN_ID,
-    uiPluginId,
-  )
-    ? LEGACY_UI_TO_CANONICAL_PLUGIN_ID[uiPluginId as LegacyUiPluginId]
-    : null;
 }
 
 export function createLegacyRealmRegistry(): LegacyRealmRegistry {

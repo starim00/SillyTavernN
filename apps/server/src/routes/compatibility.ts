@@ -739,7 +739,7 @@ export async function registerCompatibilityRoutes(
     const input = tavernHelperGenerateSchema.parse(request.body);
     const provider = await context.providers.get(input.connectionId);
     const capabilities = provider.capabilities();
-    const prompt = prepareConversationPrompt(context.store, {
+    const prompt = await prepareConversationPrompt(context.store, {
       conversationId: input.conversationId,
       ...(input.presetId === undefined ? {} : { presetId: input.presetId }),
       ...(input.settings === undefined ? {} : { settings: input.settings }),
@@ -781,7 +781,7 @@ export async function registerCompatibilityRoutes(
     const conversation = context.store.getConversation(input.conversationId);
     const provider = await context.providers.get(input.connectionId);
     const capabilities = provider.capabilities();
-    const prompt = prepareConversationPrompt(context.store, {
+    const prompt = await prepareConversationPrompt(context.store, {
       conversationId: conversation.id,
       ...(input.presetId === undefined ? {} : { presetId: input.presetId }),
       ...(capabilities.maxContextTokens === undefined

@@ -5,6 +5,7 @@ import type {
   PromptTemplateDirective,
 } from "../api/workspaceApi";
 import type { TavernHelperContext } from "./tavernHelperTypes";
+import { browserRegexWorker } from "./browserRegexWorker";
 
 export type PromptTemplateDiagnostic = {
   messageIndex: number;
@@ -199,7 +200,6 @@ export async function renderPromptTemplateMessages(
 ): Promise<PromptTemplateResult> {
   const diagnostics: PromptTemplateDiagnostic[] = [];
   let renderedCount = 0;
-  let sourceTemplateCount = 0;
   const variables = _.merge(
     {},
     input.context?.variables.global ?? {},
@@ -299,17 +299,23 @@ export async function renderPromptTemplateMessages(
     });
     return "";
   };
-  const applyTemporaryRegexes = (content: string): string =>
-    temporaryRegexes
-      .filter((regex) => regex.generate)
-      .reduce((current, regex) => {
-        const replacement = regex.replacement;
-        return typeof replacement === "string"
-          ? current.replace(regex.find, replacement)
-          : current.replace(regex.find, (...values) =>
-              replacement(...values.map(String)),
-            );
-      }, content);
+  const applyTemporaryRegexes = async (content: string): Promise<string> => {
+    const enabled = temporaryRegexes.filter((regex) => regex.generate);
+    const workerReplacements = enabled.flatMap((regex) =>
+      typeof regex.replacement === "string"
+        ? [{ find: regex.find, replacement: regex.replacement }]
+        : [],
+    );
+    let output = await browserRegexWorker.replace(content, workerReplacements);
+    for (const regex of enabled) {
+      const replacement = regex.replacement;
+      if (typeof replacement === "string") continue;
+      output = output.replace(regex.find, (...values) =>
+        replacement(...values.map(String)),
+      );
+    }
+    return output;
+  };
   const renderContent = async (
     content: string,
     message: PreparedPromptMessage,
@@ -323,7 +329,7 @@ export async function renderPromptTemplateMessages(
         : ((window as unknown as { TavernHelper?: Record<string, unknown> })
             .TavernHelper ?? {});
     return ejs.render(
-      applyTemporaryRegexes(content),
+      await applyTemporaryRegexes(content),
       {
         ...browserGlobals,
         variables,
@@ -404,7 +410,7 @@ export async function renderPromptTemplateMessages(
       left.worldbookName.localeCompare(right.worldbookName) ||
       left.id.localeCompare(right.id),
   );
-  sourceTemplateCount = allEntries.filter((entry) =>
+  const sourceTemplateCount = allEntries.filter((entry) =>
     hasTemplate(entry.cleanContent),
   ).length;
 
@@ -506,7 +512,7 @@ export async function renderPromptTemplateMessages(
       )
         continue;
       if (position) {
-        let renderedDirective = "";
+        let renderedDirective: string;
         try {
           renderedDirective = await renderContent(
             entry.cleanContent,
@@ -541,9 +547,9 @@ export async function renderPromptTemplateMessages(
       }
       if (regex) {
         try {
-          const pattern = new RegExp(regex[1]!, "iu");
-          const index = working.findIndex((message) =>
-            pattern.test(message.content),
+          const index = await browserRegexWorker.findIndex(
+            working.map((message) => message.content),
+            regex[1]!,
           );
           const target = working[index];
           if (target) {
@@ -592,9 +598,9 @@ export async function renderPromptTemplateMessages(
               : Math.max(0, Math.min(working.length, requested - 1));
         } else if (parameters.regex !== undefined) {
           try {
-            const pattern = new RegExp(parameters.regex, "iu");
-            const found = working.findIndex((message) =>
-              pattern.test(message.content),
+            const found = await browserRegexWorker.findIndex(
+              working.map((message) => message.content),
+              parameters.regex,
             );
             index =
               found < 0

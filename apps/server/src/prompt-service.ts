@@ -1,5 +1,4 @@
 import {
-  assemblePrompt,
   isJsonObject,
   renderChatPrompt,
   renderTextPrompt,
@@ -36,6 +35,7 @@ import type {
 } from "@stn/storage";
 
 import { collectAuthorizedConversationRegex } from "./regex-service.js";
+import { regexWorkerPool } from "./regex-worker-pool.js";
 
 export const DEFAULT_MAX_CONTEXT_TOKENS = 32_768;
 export const DEFAULT_RESERVED_OUTPUT_TOKENS = 1_024;
@@ -311,8 +311,15 @@ function messageContract(
     },
     swipes,
     activeSwipeId,
-    state: "complete",
-    metadata: {},
+    state: value.generationStatus,
+    metadata: {
+      ...(value.finishReason === null
+        ? {}
+        : { finishReason: value.finishReason }),
+      ...(value.providerErrorCode === null
+        ? {}
+        : { providerErrorCode: value.providerErrorCode }),
+    },
     revision: value.revision,
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
@@ -666,10 +673,10 @@ function presetContextLimit(
     : undefined;
 }
 
-export function prepareConversationPrompt(
+export async function prepareConversationPrompt(
   store: AppStore,
   input: PrepareConversationPromptInput,
-): PreparedConversationPrompt {
+): Promise<PreparedConversationPrompt> {
   const storedConversation = store.getConversation(input.conversationId);
   const storedParticipants = store.listConversationParticipants(
     storedConversation.id,
@@ -754,7 +761,7 @@ export function prepareConversationPrompt(
         : Math.min(input.maxContextTokens, presetMaximum);
   const reservedOutputTokens =
     generation.maxOutputTokens ?? DEFAULT_RESERVED_OUTPUT_TOKENS;
-  const assembled = assemblePrompt({
+  const assembled = await regexWorkerPool.assemble({
     conversation,
     ...(card === undefined ? {} : { card }),
     participants: participants.filter(

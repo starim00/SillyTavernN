@@ -57,6 +57,7 @@ describe("ExtensionKernel", () => {
   it("terminates and quarantines a timed-out worker while continuing later extensions", async () => {
     const kernel = new ExtensionKernel();
     const terminate = vi.fn();
+    const reset = vi.fn();
     kernel.register({
       manifest: extensionManifestSchema.parse({
         id: "a-hangs",
@@ -73,6 +74,7 @@ describe("ExtensionKernel", () => {
         invokeHook: async () => new Promise(() => undefined),
         deactivate: async () => undefined,
         terminate,
+        reset,
       },
     });
     kernel.register({
@@ -103,5 +105,8 @@ describe("ExtensionKernel", () => {
     });
     expect(terminate).toHaveBeenCalledOnce();
     expect(kernel.isQuarantined("a-hangs")).toBe(true);
+    kernel.reenable("a-hangs");
+    expect(reset).toHaveBeenCalledOnce();
+    expect(kernel.isQuarantined("a-hangs")).toBe(false);
   });
 });

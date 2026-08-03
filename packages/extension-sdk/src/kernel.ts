@@ -27,6 +27,7 @@ export interface ExtensionRuntimeTransport {
   ): Promise<TPayload | void>;
   deactivate(signal: AbortSignal): Promise<void>;
   terminate(): Promise<void> | void;
+  reset?(): void;
 }
 
 export interface ExtensionRuntime {
@@ -134,9 +135,11 @@ export class ExtensionKernel {
   }
 
   reenable(extensionId: string): void {
-    if (!this.#runtimes.has(extensionId)) {
+    const runtime = this.#runtimes.get(extensionId);
+    if (runtime === undefined) {
       throw new Error(`Extension ${extensionId} is not registered.`);
     }
+    runtime.transport?.reset?.();
     this.#quarantined.delete(extensionId);
   }
 

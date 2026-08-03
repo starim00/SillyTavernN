@@ -189,6 +189,15 @@ export class WorkerExtensionRuntime implements ExtensionRuntimeTransport {
     for (const pending of this.#pending.values()) pending.reject(error);
     this.#pending.clear();
   }
+
+  reset(): void {
+    if (this.#pending.size > 0) {
+      throw new Error(
+        "Cannot reset an extension worker with pending requests.",
+      );
+    }
+    this.#terminated = false;
+  }
 }
 
 export interface ExtensionWorkerImplementation {

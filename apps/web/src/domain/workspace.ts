@@ -55,6 +55,10 @@ export type WorkspaceMessage = {
   appliedRegexScriptIds?: string[];
   createdLabel: string;
   revision: number;
+  state?: "complete" | "partial" | "cancelled" | "error";
+  finishReason?:
+    "stop" | "length" | "tool-calls" | "cancelled" | "limit" | "provider-error";
+  providerErrorCode?: string;
   swipes?: MessageSwipe[];
   activeSwipeIndex?: number;
 };
@@ -335,15 +339,19 @@ export type ToastState = {
   message: string;
 } | null;
 
+export type WorkspaceAvailability = "loading" | "api" | "error" | "demo";
+
 export type WorkspaceState = {
-  source: "demo" | "api";
-  apiOnline: boolean;
-  loading: boolean;
+  availability: WorkspaceAvailability;
+  bootstrapError: string | null;
   conversations: ConversationSpace[];
   cards: RoleCard[];
   personas: Persona[];
   participants: Participant[];
   messagesByConversation: Record<string, WorkspaceMessage[]>;
+  conversationNextCursor: string | null;
+  messageNextCursorByConversation: Record<string, string | null>;
+  messageHistoryLoading: Record<string, boolean>;
   worldbooks: Worldbook[];
   presets: PromptPreset[];
   regexScopes: RegexScope[];
@@ -365,19 +373,11 @@ export type WorkspaceState = {
 
 export type PersistedWorkspaceState = Pick<
   WorkspaceState,
-  | "conversations"
-  | "cards"
-  | "personas"
-  | "participants"
-  | "messagesByConversation"
-  | "worldbooks"
   | "selectedCardId"
   | "selectedConversationId"
   | "selectedPresetId"
   | "selectedProviderId"
   | "draftByConversation"
-  | "plugins"
-  | "agentProposal"
 >;
 
 export type ApiEnvelope<T> = {

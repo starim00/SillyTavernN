@@ -1283,7 +1283,11 @@ export class AppStore {
       }
       const now = timestamp();
       this.database.run(
-        "UPDATE swipes SET selected = CASE WHEN id = ? THEN 1 ELSE 0 END WHERE message_id = ?",
+        "UPDATE swipes SET selected = 0 WHERE message_id = ? AND selected = 1",
+        message.id,
+      );
+      this.database.run(
+        "UPDATE swipes SET selected = 1 WHERE id = ? AND message_id = ?",
         swipe.id,
         message.id,
       );

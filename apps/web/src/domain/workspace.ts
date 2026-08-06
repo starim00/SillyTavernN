@@ -276,16 +276,28 @@ export type LegacyPlugin = {
 export type AgentProposalStatus =
   "blocked" | "awaiting_confirmation" | "applied" | "undone";
 
+export type AgentProposalTargetKind = "worldbook" | "artifact";
+export type AgentProposalArtifactKind = "chat_summary" | "character_profile";
+
 export type AgentProposal = {
   id: string;
   idempotencyKey: string;
   runId: string;
-  worldbookId: string;
-  worldbookName: string;
+  targetKind: AgentProposalTargetKind;
+  worldbookId?: string;
+  worldbookName?: string;
+  artifactKind?: AgentProposalArtifactKind;
+  artifactId?: string;
+  participantId?: string;
+  targetLabel?: string;
   toolName:
     | "worldbook.entry.create"
     | "worldbook.entry.update"
-    | "worldbook.entry.delete";
+    | "worldbook.entry.delete"
+    | "chat.summary.create"
+    | "chat.summary.update"
+    | "character.profile.create"
+    | "character.profile.update";
   toolArguments: Record<string, unknown>;
   title: string;
   rationale: string;
@@ -377,7 +389,6 @@ export type PersistedWorkspaceState = Pick<
   | "selectedProviderId"
   | "draftByConversation"
   | "plugins"
-  | "agentProposal"
 >;
 
 export type ApiEnvelope<T> = {

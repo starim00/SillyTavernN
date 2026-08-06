@@ -16,9 +16,8 @@ import {
   loadConversationMessages,
   loadLegacyGrants,
   loadLegacyHostHealth,
-  loadPendingAgentWorldbookProposal,
+  loadPendingAgentToolProposal,
   loadWorkspaceFromApi,
-  planAgentWorldbookChange,
   proposalFromGenerationToolEvent,
   reorderPresetPrompts,
   saveProviderConnection,
@@ -724,29 +723,40 @@ describe("workspace API client", () => {
     expect(saved).not.toHaveProperty("apiKey");
   });
 
-  it("creates a real Agent run before confirming a nested tool call", async () => {
+  it("confirms a server-backed conversation tool proposal without creating a run", async () => {
     const state = createDemoWorkspace();
     state.apiOnline = true;
     state.selectedProviderId = "fake";
-    const proposal = state.agentProposal;
-    expect(proposal).not.toBeNull();
+    const worldbook = state.worldbooks[0]!;
     const run = {
       id: "run-live",
       conversationId: state.selectedConversationId,
-      status: "running",
-      objective: proposal!.rationale,
+      status: "running" as const,
+      objective: "确认普通对话工具提案",
       updatedAt: "2026-07-29T00:00:00.000Z",
     };
+    const proposal = proposalFromGenerationToolEvent(state, {
+      run,
+      text: run.objective,
+      toolCall: {
+        id: "call-1",
+        runId: run.id,
+        idempotencyKey: "proposal-key",
+        toolName: "worldbook.entry.create",
+        status: "awaiting_confirmation",
+        arguments: {
+          worldbookId: worldbook.id,
+          expectedRevision: worldbook.revision,
+          entry: { title: "New lore", content: "New lore content" },
+        },
+      },
+    });
+    expect(proposal).not.toBeNull();
+    if (!proposal) throw new Error("Expected a worldbook proposal.");
+    state.agentProposal = proposal;
     const fetchMock = vi.fn((url: string, init?: RequestInit) => {
-      if (url === "/api/agent/runs" && init?.method === "POST") {
-        return Promise.resolve(
-          jsonResponse(
-            { data: { run: { ...run, status: "queued" }, replayed: false } },
-            201,
-          ),
-        );
-      }
       if (url === "/api/agent/runs/run-live/tools") {
+        expect(init).toMatchObject({ method: "POST" });
         return Promise.resolve(
           jsonResponse({
             data: {
@@ -762,8 +772,8 @@ describe("workspace API client", () => {
           jsonResponse({
             data: [
               {
-                id: proposal!.worldbookId,
-                name: proposal!.worldbookName,
+                id: worldbook.id,
+                name: worldbook.name,
                 agentEditable: true,
                 revision: 14,
                 entries: [],
@@ -789,9 +799,7 @@ describe("workspace API client", () => {
       run: { id: "run-live" },
     });
     const urls = fetchMock.mock.calls.map(([url]) => url);
-    expect(urls.indexOf("/api/agent/runs")).toBeLessThan(
-      urls.indexOf("/api/agent/runs/run-live/tools"),
-    );
+    expect(urls).not.toContain("/api/agent/runs");
     const toolCall = fetchMock.mock.calls.find(
       ([url]) => url === "/api/agent/runs/run-live/tools",
     );
@@ -803,84 +811,6 @@ describe("workspace API client", () => {
         confirmed: true,
       },
     );
-  });
-
-  it("turns a fake structured tool call into a reviewable live proposal", async () => {
-    const state = createDemoWorkspace();
-    state.apiOnline = true;
-    state.selectedProviderId = "fake";
-    const worldbook = state.worldbooks.find(
-      (candidate) => candidate.id === "worldbook-harbor",
-    )!;
-    const run = {
-      id: "run-planned",
-      conversationId: state.selectedConversationId,
-      status: "waiting_confirmation",
-      objective: "记录潮汐钟楼的新事实",
-      updatedAt: "2026-07-29T10:00:00.000Z",
-    };
-    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
-      if (url === "/api/agent/runs" && init?.method === "POST") {
-        return Promise.resolve(
-          jsonResponse(
-            {
-              data: {
-                run: { ...run, status: "queued" },
-                replayed: false,
-              },
-            },
-            201,
-          ),
-        );
-      }
-      if (url === "/api/agent/runs/run-planned/plan") {
-        expect(init).toMatchObject({ method: "POST" });
-        expect(new Headers(init?.headers).has("Content-Type")).toBe(false);
-        return Promise.resolve(
-          jsonResponse({
-            data: {
-              run,
-              text: "",
-              toolCalls: [
-                {
-                  id: "call-planned",
-                  runId: run.id,
-                  idempotencyKey: "run-planned:step:1:provider:fake-1",
-                  toolName: "worldbook.entry.create",
-                  arguments: {
-                    worldbookId: worldbook.id,
-                    expectedRevision: worldbook.revision,
-                    entry: {
-                      title: "Agent proposal",
-                      keys: ["agent-proposal"],
-                      content: run.objective,
-                    },
-                  },
-                  status: "awaiting_confirmation",
-                },
-              ],
-            },
-          }),
-        );
-      }
-      throw new Error(`Unexpected request: ${url}`);
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    const planned = await planAgentWorldbookChange(state, run.objective);
-
-    expect(planned).toMatchObject({
-      run: { id: run.id, status: "waiting_confirmation" },
-      proposal: {
-        id: "call-planned",
-        idempotencyKey: "run-planned:step:1:provider:fake-1",
-        runId: run.id,
-        worldbookId: worldbook.id,
-        beforeRevision: worldbook.revision,
-        status: "awaiting_confirmation",
-      },
-    });
-    expect(planned.proposal?.diffLines).toContain(`+ 内容：${run.objective}`);
   });
 
   it("recovers an awaiting worldbook proposal after a workspace refresh", async () => {
@@ -934,7 +864,7 @@ describe("workspace API client", () => {
       }),
     );
 
-    const pending = await loadPendingAgentWorldbookProposal(state);
+    const pending = await loadPendingAgentToolProposal(state);
 
     expect(pending).toMatchObject({
       run: { id: run.id },
@@ -949,9 +879,113 @@ describe("workspace API client", () => {
     });
   });
 
+  it.each([
+    {
+      toolName: "chat.summary.create",
+      artifactKind: "chat_summary",
+      arguments: {
+        content: "A compact summary of the current exchange.",
+        sourceFromMessageId: "message-harbor-1",
+        sourceToMessageId: "message-harbor-1",
+      },
+      targetLabel: "当前对话摘要",
+    },
+    {
+      toolName: "character.profile.create",
+      artifactKind: "character_profile",
+      arguments: {
+        participantId: "participant-harbor",
+        content: "Keeps careful notes about the harbor.",
+      },
+      targetLabel: "港务员",
+    },
+  ])(
+    "recovers an awaiting $artifactKind proposal after a workspace refresh",
+    async ({
+      toolName,
+      artifactKind,
+      arguments: toolArguments,
+      targetLabel,
+    }) => {
+      const state = createDemoWorkspace();
+      state.apiOnline = true;
+      state.agentProposal = null;
+      const run = {
+        id: `run-pending-${artifactKind}`,
+        conversationId: state.selectedConversationId,
+        status: "waiting_confirmation",
+        objective: "恢复派生内容提案",
+        updatedAt: "2026-07-29T10:00:00.000Z",
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn((url: string) => {
+          if (url.startsWith("/api/agent/runs?conversationId=")) {
+            return Promise.resolve(jsonResponse({ data: [run] }));
+          }
+          if (url === `/api/agent/runs/${run.id}`) {
+            return Promise.resolve(
+              jsonResponse({
+                data: {
+                  run,
+                  toolCalls: [
+                    {
+                      id: `call-${artifactKind}`,
+                      runId: run.id,
+                      idempotencyKey: `pending-${artifactKind}`,
+                      toolName,
+                      arguments: toolArguments,
+                      status: "awaiting_confirmation",
+                    },
+                  ],
+                  audit: [],
+                },
+              }),
+            );
+          }
+          throw new Error(`Unexpected request: ${url}`);
+        }),
+      );
+
+      const pending = await loadPendingAgentToolProposal(state);
+
+      expect(pending).toMatchObject({
+        run: { id: run.id },
+        proposal: {
+          artifactKind,
+          targetLabel,
+          toolName,
+          status: "awaiting_confirmation",
+        },
+      });
+    },
+  );
+
   it("undoes through agent.change.undo and refreshes live state", async () => {
     const state = createDemoWorkspace();
-    const proposal = state.agentProposal;
+    const worldbook = state.worldbooks[0]!;
+    const proposal = proposalFromGenerationToolEvent(state, {
+      run: {
+        id: "run-live",
+        conversationId: state.selectedConversationId,
+        status: "waiting_confirmation",
+        objective: "普通对话写入",
+        updatedAt: "2026-07-29T00:00:00.000Z",
+      },
+      text: "普通对话写入",
+      toolCall: {
+        id: "call-original",
+        runId: "run-live",
+        idempotencyKey: "original-key",
+        toolName: "worldbook.entry.create",
+        status: "awaiting_confirmation",
+        arguments: {
+          worldbookId: worldbook.id,
+          expectedRevision: worldbook.revision,
+          entry: { content: "新增内容" },
+        },
+      },
+    });
     expect(proposal).not.toBeNull();
     state.apiOnline = true;
     state.agentProposal = {

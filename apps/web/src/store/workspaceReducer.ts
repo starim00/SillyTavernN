@@ -115,6 +115,8 @@ const withProposalPermissionState = (
 ): AgentProposal | null => {
   if (
     !proposal ||
+    proposal.targetKind !== "worldbook" ||
+    !proposal.worldbookId ||
     !["blocked", "awaiting_confirmation"].includes(proposal.status)
   ) {
     return proposal;
@@ -223,15 +225,22 @@ export function workspaceReducer(
         selectedPresetId,
         selectedCardId,
         selectedConversationId,
-        // Server currently has no pending-proposal list route. Never surface the
-        // clean-room demo proposal as if it were a live Agent run.
+        // Pending proposals are recovered from waiting server runs by App.
+        // Never surface a stale local proposal during bootstrap.
         agentProposal: null,
         agentRun: null,
         generation: idleGeneration(),
       };
     }
     case "bootstrap/demo":
-      return { ...state, source: "demo", apiOnline: false, loading: false };
+      return {
+        ...state,
+        source: "demo",
+        apiOnline: false,
+        loading: false,
+        agentProposal: null,
+        agentRun: null,
+      };
     case "card/select": {
       const selectedConversationId =
         state.conversations.find(
@@ -625,52 +634,66 @@ export function workspaceReducer(
       return { ...state, agentRun: action.run };
     case "agent/applied": {
       if (!state.agentProposal) return state;
-      const target = state.worldbooks.find(
-        (worldbook) => worldbook.id === state.agentProposal?.worldbookId,
-      );
+      const proposal = state.agentProposal;
+      const target =
+        proposal.targetKind === "worldbook"
+          ? state.worldbooks.find(
+              (worldbook) => worldbook.id === proposal.worldbookId,
+            )
+          : undefined;
       const resolvedRevision =
-        action.payload.revision ?? (target ? target.revision + 1 : null);
+        action.payload.revision ??
+        (target ? target.revision + 1 : proposal.beforeRevision);
       return {
         ...state,
         agentProposal: {
-          ...state.agentProposal,
+          ...proposal,
           status: "applied",
-          auditId: action.payload.auditId ?? `audit-demo-${Date.now()}`,
+          auditId: action.payload.auditId ?? proposal.auditId,
           afterRevision: resolvedRevision,
           ...(action.payload.run ? { runId: action.payload.run.id } : {}),
         },
         agentRun: action.payload.run ?? state.agentRun,
-        worldbooks:
-          action.payload.worldbooks ??
-          state.worldbooks.map((worldbook) =>
-            worldbook.id === state.agentProposal?.worldbookId
-              ? {
-                  ...worldbook,
-                  revision: resolvedRevision ?? worldbook.revision,
-                  hitCount: worldbook.hitCount + 1,
-                }
-              : worldbook,
-          ),
+        worldbooks: action.payload.worldbooks
+          ? action.payload.worldbooks
+          : proposal.targetKind === "worldbook"
+            ? state.worldbooks.map((worldbook) =>
+                worldbook.id === proposal.worldbookId
+                  ? {
+                      ...worldbook,
+                      revision: resolvedRevision,
+                      hitCount: worldbook.hitCount + 1,
+                    }
+                  : worldbook,
+              )
+            : state.worldbooks,
       };
     }
     case "agent/undone":
       if (!state.agentProposal) return state;
-      return {
-        ...state,
-        agentProposal: { ...state.agentProposal, status: "undone" },
-        agentRun: action.payload?.run ?? state.agentRun,
-        worldbooks:
-          action.payload?.worldbooks ??
-          state.worldbooks.map((worldbook) =>
-            worldbook.id === state.agentProposal?.worldbookId
-              ? {
-                  ...worldbook,
-                  revision: worldbook.revision + 1,
-                  hitCount: Math.max(0, worldbook.hitCount - 1),
-                }
-              : worldbook,
-          ),
-      };
+      {
+        const proposal = state.agentProposal;
+        const worldbooks = action.payload?.worldbooks;
+        const nextWorldbooks =
+          worldbooks ??
+          (proposal.targetKind === "worldbook"
+            ? state.worldbooks.map((worldbook) =>
+                worldbook.id === proposal.worldbookId
+                  ? {
+                      ...worldbook,
+                      revision: worldbook.revision + 1,
+                      hitCount: Math.max(0, worldbook.hitCount - 1),
+                    }
+                  : worldbook,
+              )
+            : state.worldbooks);
+        return {
+          ...state,
+          agentProposal: { ...proposal, status: "undone" },
+          agentRun: action.payload?.run ?? state.agentRun,
+          worldbooks: nextWorldbooks,
+        };
+      }
     case "toast/show":
       return {
         ...state,
@@ -775,7 +798,8 @@ export function loadWorkspaceState(): WorkspaceState {
       draftByConversation:
         persisted.draftByConversation ?? base.draftByConversation,
       plugins: persisted.plugins ?? base.plugins,
-      agentProposal: persisted.agentProposal ?? base.agentProposal,
+      // A legacy localStorage agentProposal is intentionally ignored. The
+      // server-side waiting run is the only source of truth.
     };
   } catch {
     return {
@@ -802,7 +826,6 @@ export function persistWorkspaceState(state: WorkspaceState): void {
     selectedProviderId: state.selectedProviderId,
     draftByConversation: state.draftByConversation,
     plugins: state.plugins,
-    agentProposal: state.agentProposal,
   };
 
   window.localStorage.setItem(

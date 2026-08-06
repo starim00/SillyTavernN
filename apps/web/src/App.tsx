@@ -45,7 +45,7 @@ import {
   loadConversationMessages,
   loadLegacyGrants,
   loadLegacyHostHealth,
-  loadPendingAgentWorldbookProposal,
+  loadPendingAgentToolProposal,
   loadTavernHelperContext,
   loadWorkspaceFromApi,
   preparePromptTemplate,
@@ -249,7 +249,7 @@ export default function App() {
       return;
     }
     let active = true;
-    void loadPendingAgentWorldbookProposal(workspaceStateRef.current)
+    void loadPendingAgentToolProposal(workspaceStateRef.current)
       .then((pending) => {
         if (active && pending?.proposal) {
           dispatch({
@@ -2035,16 +2035,13 @@ export default function App() {
 
   const confirmToolProposal = useCallback(async () => {
     if (!state.agentProposal) return;
+    if (!state.apiOnline) {
+      showToast("模型工具提案需要连接服务器后才能确认。", "warning");
+      return;
+    }
     try {
-      if (state.apiOnline) {
-        const result = await confirmAgentProposal(state);
-        dispatch({ type: "agent/applied", payload: result });
-      } else {
-        dispatch({
-          type: "agent/applied",
-          payload: { auditId: identifier("audit"), revision: null },
-        });
-      }
+      const result = await confirmAgentProposal(state);
+      dispatch({ type: "agent/applied", payload: result });
       showToast("模型工具写入已应用并记录审计。", "success");
     } catch {
       showToast("模型工具写入未应用；请刷新修订状态后重试。", "warning");
@@ -2053,17 +2050,15 @@ export default function App() {
 
   const rejectToolProposal = useCallback(async () => {
     if (!state.agentProposal) return;
-    if (state.apiOnline) {
-      if (!state.agentRun) {
-        showToast("无法确认提案来源，尚未发送拒绝操作。", "warning");
-        return;
-      }
-      try {
-        await cancelAgentRun(state.agentRun.id);
-      } catch {
-        showToast("拒绝提案失败；服务器状态没有改变。", "warning");
-        return;
-      }
+    if (!state.apiOnline || !state.agentRun) {
+      showToast("模型工具提案需要连接服务器后才能拒绝。", "warning");
+      return;
+    }
+    try {
+      await cancelAgentRun(state.agentRun.id);
+    } catch {
+      showToast("拒绝提案失败；服务器状态没有改变。", "warning");
+      return;
     }
     dispatch({ type: "agent/rejected" });
     showToast("已拒绝这次模型工具提案。", "success");
@@ -2071,19 +2066,19 @@ export default function App() {
 
   const undoAppliedToolProposal = useCallback(async () => {
     if (!state.agentProposal) return;
-    if (state.apiOnline) {
-      try {
-        const result = await undoAgentProposal(state);
-        dispatch({ type: "agent/undone", payload: result });
-        showToast("模型工具写入已在服务器撤销并记录审计。", "success");
-        return;
-      } catch {
-        showToast("撤销失败；服务器内容没有改变。", "warning");
-        return;
-      }
+    if (!state.apiOnline) {
+      showToast("模型工具写入需要连接服务器后才能撤销。", "warning");
+      return;
     }
-    dispatch({ type: "agent/undone" });
-    showToast("已撤销离线演示中的模型工具写入。", "success");
+    try {
+      const result = await undoAgentProposal(state);
+      dispatch({ type: "agent/undone", payload: result });
+      showToast("模型工具写入已在服务器撤销并记录审计。", "success");
+      return;
+    } catch {
+      showToast("撤销失败；服务器内容没有改变。", "warning");
+      return;
+    }
   }, [showToast, state]);
 
   const saveProvider = useCallback(

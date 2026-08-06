@@ -5,7 +5,11 @@ import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-import type { Participant, WorkspaceMessage } from "../domain/workspace";
+import type {
+  Participant,
+  ProviderConnection,
+  WorkspaceMessage,
+} from "../domain/workspace";
 import { createDemoWorkspace } from "../data/demoWorkspace";
 import { CardConversationEntry } from "./CardConversationEntry";
 import {
@@ -40,6 +44,65 @@ function cssBlocks(selector: string): string[] {
 }
 
 describe("workspace components", () => {
+  it("keeps the Provider editor aligned with the selected connection", () => {
+    const first: ProviderConnection = {
+      id: "provider-first",
+      name: "第一个连接",
+      protocol: "openai-compatible",
+      baseUrl: "http://first.example/v1",
+      model: "first-model",
+      headers: {},
+      hasApiKey: false,
+      nativeToolCalling: false,
+      revision: 1,
+    };
+    const second: ProviderConnection = {
+      id: "provider-second",
+      name: "第二个连接",
+      protocol: "text-completion",
+      baseUrl: "http://second.example/v1",
+      model: "second-model",
+      headers: {},
+      hasApiKey: true,
+      nativeToolCalling: true,
+      revision: 2,
+    };
+    const renderProviderModal = (selectedProviderId: string) =>
+      renderToStaticMarkup(
+        <WorkspaceModals
+          modal={{ kind: "providers" }}
+          apiOnline
+          cards={[]}
+          plugins={[]}
+          legacyHostPlugins={{}}
+          worldbooks={[]}
+          providerConnections={[first, second]}
+          selectedProviderId={selectedProviderId}
+          onClose={vi.fn()}
+          onSelectCard={vi.fn()}
+          onDeleteCard={vi.fn()}
+          onCreateConversation={vi.fn()}
+          onImport={vi.fn()}
+          onInstallPlugin={vi.fn()}
+          onTogglePlugin={vi.fn()}
+          onPermission={vi.fn()}
+          onSelectProvider={vi.fn()}
+          onSaveProvider={vi.fn()}
+        />,
+      );
+
+    const selectedHtml = renderProviderModal(second.id);
+    expect(selectedHtml).toContain('value="第二个连接"');
+    expect(selectedHtml).toContain('value="http://second.example/v1"');
+    expect(selectedHtml).toContain('value="second-model"');
+    expect(selectedHtml).not.toContain('value="第一个连接"');
+
+    const builtInHtml = renderProviderModal("fake");
+    expect(builtInHtml).toContain("本地确定性 Provider 信息");
+    expect(builtInHtml).toContain('value="本地服务内置"');
+    expect(builtInHtml).not.toContain('value="second-model"');
+  });
+
   it("offers trust and enablement for a verified installed legacy plugin", () => {
     const plugin = createDemoWorkspace().plugins.find(
       (candidate) => candidate.id === "plugin-js-slash-runner",

@@ -1,7 +1,30 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDemoWorkspace } from "../data/demoWorkspace";
-import type { RegexScope } from "../domain/workspace";
+import type { AgentProposal, RegexScope } from "../domain/workspace";
 import { loadWorkspaceState, workspaceReducer } from "./workspaceReducer";
+
+function worldbookProposalFixture(
+  state: ReturnType<typeof createDemoWorkspace>,
+): AgentProposal {
+  const worldbook = state.worldbooks[0]!;
+  return {
+    id: "proposal-fixture",
+    idempotencyKey: "proposal-fixture",
+    runId: "run-fixture",
+    targetKind: "worldbook",
+    worldbookId: worldbook.id,
+    worldbookName: worldbook.name,
+    toolName: "worldbook.entry.create",
+    toolArguments: {},
+    title: "世界书提案",
+    rationale: "普通对话工具",
+    beforeRevision: worldbook.revision,
+    afterRevision: null,
+    diffLines: [],
+    status: "awaiting_confirmation",
+    auditId: null,
+  };
+}
 
 describe("workspaceReducer", () => {
   afterEach(() => {
@@ -50,6 +73,29 @@ describe("workspaceReducer", () => {
     expect(hydrated.selectedCardId).toBe("");
     expect(hydrated.selectedConversationId).toBe("");
     expect(hydrated.worldbooks).toEqual(state.worldbooks);
+  });
+
+  it("ignores a legacy persisted agent proposal", () => {
+    const state = createDemoWorkspace();
+    vi.stubGlobal("window", {
+      localStorage: {
+        getItem: vi.fn(() =>
+          JSON.stringify({
+            version: 3,
+            data: {
+              selectedCardId: state.selectedCardId,
+              selectedConversationId: state.selectedConversationId,
+              agentProposal: {
+                id: "legacy-proposal",
+                status: "awaiting_confirmation",
+              },
+            },
+          }),
+        ),
+      },
+    });
+
+    expect(loadWorkspaceState().agentProposal).toBeNull();
   });
 
   it("hydrates v3 worldbook entries saved before recall fields were added", () => {
@@ -298,7 +344,7 @@ describe("workspaceReducer", () => {
     const unrelatedEntry = worldbook.entries[0]!;
     const targetEntry = worldbook.entries[1]!;
     state.agentProposal = {
-      ...state.agentProposal!,
+      ...worldbookProposalFixture(state),
       worldbookId: worldbook.id,
       worldbookName: worldbook.name,
       toolName: "worldbook.entry.update",
@@ -358,7 +404,7 @@ describe("workspaceReducer", () => {
     const next = workspaceReducer(state, {
       type: "agent/proposed",
       proposal: {
-        ...state.agentProposal!,
+        ...worldbookProposalFixture(state),
         id: "call-live",
         runId: "run-live",
       },

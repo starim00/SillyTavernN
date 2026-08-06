@@ -108,6 +108,33 @@ function renderRail(
   return renderRailFixture(proposal, presetOverride, regexScopesOverride);
 }
 
+function proposalFixture(
+  state: ReturnType<typeof createDemoWorkspace>,
+): AgentProposal {
+  const worldbook = state.worldbooks[0]!;
+  return {
+    id: "proposal-fixture",
+    idempotencyKey: "proposal-fixture",
+    runId: "run-fixture",
+    targetKind: "worldbook",
+    worldbookId: worldbook.id,
+    worldbookName: worldbook.name,
+    toolName: "worldbook.entry.create",
+    toolArguments: {
+      worldbookId: worldbook.id,
+      expectedRevision: worldbook.revision,
+      entry: { content: "内容" },
+    },
+    title: "新增世界书条目",
+    rationale: "普通对话模型工具提案",
+    beforeRevision: worldbook.revision,
+    afterRevision: null,
+    diffLines: ["+ 内容：内容"],
+    status: "awaiting_confirmation",
+    auditId: null,
+  };
+}
+
 describe("ContextRail", () => {
   it("renders support panels without a context drawer", () => {
     const state = createDemoWorkspace();
@@ -166,12 +193,13 @@ describe("ContextRail", () => {
 
   it("keeps chat tool decisions in a dedicated modal", () => {
     const state = createDemoWorkspace();
-    const awaiting = renderRail(state.agentProposal);
+    const proposal = proposalFixture(state);
+    const awaiting = renderRail(proposal);
     const applied = renderRail({
-      ...state.agentProposal!,
+      ...proposal,
       status: "applied",
       auditId: "audit-demo",
-      afterRevision: state.agentProposal!.beforeRevision + 1,
+      afterRevision: proposal.beforeRevision + 1,
     });
     const empty = renderRail(null);
 
@@ -355,7 +383,10 @@ describe("ContextRail", () => {
     const worldbook = state.worldbooks[0]!;
     const entry = worldbook.entries[1]!;
     const proposal: AgentProposal = {
-      ...state.agentProposal!,
+      id: "proposal-update",
+      idempotencyKey: "proposal-update",
+      runId: "run-update",
+      targetKind: "worldbook",
       worldbookId: worldbook.id,
       worldbookName: worldbook.name,
       toolName: "worldbook.entry.update",
@@ -367,19 +398,24 @@ describe("ContextRail", () => {
         patch: { content: "更新后的正文" },
       },
       title: `更新条目：${entry.title}`,
+      rationale: "更新普通对话中的世界书条目",
       beforeRevision: worldbook.revision,
       targetEntryId: entry.id,
       targetEntryTitle: entry.title,
       beforeEntryRevision: entry.revision,
       diffLines: ["~ 内容：更新后的正文"],
       status: "awaiting_confirmation",
+      afterRevision: null,
+      auditId: null,
     };
 
     const html = renderRail(proposal);
 
     expect(html).toContain(`更新条目：${entry.title}`);
     expect(html).toContain(entry.id);
-    expect(html).toContain(`世界书修订 ${worldbook.revision}`);
+    expect(html).toContain(
+      `世界书：${worldbook.name} · 修订 ${worldbook.revision}`,
+    );
     expect(html).toContain(`条目修订 ${entry.revision}`);
     expect(html).toContain("~ 内容：更新后的正文");
   });

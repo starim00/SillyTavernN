@@ -251,12 +251,6 @@ export type ApiAgentToolCall = {
     | "failed";
 };
 
-type ApiAgentPlan = {
-  run: ApiAgentRun;
-  text: string;
-  toolCalls: ApiAgentToolCall[];
-};
-
 export type ApiBootstrap = {
   conversations: ConversationSpace[];
   cards: RoleCard[];
@@ -906,14 +900,6 @@ const normalizeAgentRun = (value: unknown): AgentRun => {
   };
 };
 
-function clientRequestId(prefix: string): string {
-  const suffix =
-    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-      ? crypto.randomUUID()
-      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-  return `${prefix}-${suffix}`;
-}
-
 export async function loadConversationMessages(
   conversationId: string,
   presetId?: string,
@@ -1379,7 +1365,7 @@ export async function generateConversation(
     if (event.type === "tool-proposal") {
       const payload = isRecord(event.payload) ? event.payload : event;
       const run = normalizeAgentRun(payload.run);
-      const toolCall = normalizePlannedToolCall(payload.toolCall);
+      const toolCall = normalizeConversationToolCall(payload.toolCall);
       toolProposalReceived = true;
       callbacks.onToolProposal?.({
         run,
@@ -1633,13 +1619,13 @@ async function loadAgentRun(runId: string): Promise<AgentRun> {
   return normalizeAgentRun(result.data.run);
 }
 
-export type AgentPlanningResult = {
+export type AgentToolRecoveryResult = {
   run: AgentRun;
   proposal: AgentProposal | null;
   text: string;
 };
 
-function normalizePlannedToolCall(value: unknown): ApiAgentToolCall {
+function normalizeConversationToolCall(value: unknown): ApiAgentToolCall {
   if (
     !isRecord(value) ||
     typeof value.id !== "string" ||
@@ -1650,7 +1636,7 @@ function normalizePlannedToolCall(value: unknown): ApiAgentToolCall {
     typeof value.status !== "string"
   ) {
     throw new WorkspaceApiError(
-      "Agent planner returned an invalid tool call.",
+      "Conversation model tool returned an invalid tool call.",
       502,
     );
   }
@@ -1665,7 +1651,7 @@ function normalizePlannedToolCall(value: unknown): ApiAgentToolCall {
   ];
   if (!statuses.includes(value.status as ApiAgentToolCall["status"])) {
     throw new WorkspaceApiError(
-      "Agent planner returned an unknown tool-call status.",
+      "Conversation model tool returned an unknown tool-call status.",
       502,
     );
   }
@@ -1710,6 +1696,7 @@ function worldbookProposalFromCall(
     id: call.id,
     idempotencyKey: call.idempotencyKey,
     runId: run.id,
+    targetKind: "worldbook" as const,
     worldbookId,
     worldbookName: worldbook.name,
     toolArguments: call.arguments,
@@ -1837,6 +1824,165 @@ function worldbookProposalFromCall(
   };
 }
 
+function artifactProposalFromCall(
+  state: WorkspaceState,
+  run: AgentRun,
+  call: ApiAgentToolCall,
+  objective: string,
+): AgentProposal {
+  const currentCardId = state.conversations.find(
+    (conversation) => conversation.id === state.selectedConversationId,
+  )?.cardId;
+  const participantName = (participantId: unknown): string | undefined => {
+    if (typeof participantId !== "string") return undefined;
+    return state.participants.find(
+      (participant) =>
+        participant.id === participantId &&
+        (participant.sourceCardId === undefined ||
+          participant.sourceCardId === currentCardId),
+    )?.name;
+  };
+  const shared = {
+    id: call.id,
+    idempotencyKey: call.idempotencyKey,
+    runId: run.id,
+    targetKind: "artifact" as const,
+    toolArguments: call.arguments,
+    rationale: objective,
+    afterRevision: null,
+    auditId: null,
+    status: "awaiting_confirmation" as const,
+  };
+
+  if (
+    call.toolName === "chat.summary.create" ||
+    call.toolName === "chat.summary.update"
+  ) {
+    const content = call.arguments.content;
+    if (
+      call.toolName === "chat.summary.create" &&
+      (typeof content !== "string" || content.trim().length === 0)
+    ) {
+      throw new WorkspaceApiError(
+        "Model tool returned an invalid chat summary proposal.",
+        502,
+      );
+    }
+    const title =
+      typeof call.arguments.title === "string" && call.arguments.title.trim()
+        ? call.arguments.title.trim()
+        : "聊天摘要";
+    const artifactId = call.arguments.artifactId;
+    const expectedRevision = call.arguments.expectedRevision;
+    if (
+      call.toolName === "chat.summary.update" &&
+      (typeof artifactId !== "string" ||
+        typeof expectedRevision !== "number" ||
+        !Number.isInteger(expectedRevision))
+    ) {
+      throw new WorkspaceApiError(
+        "Model tool returned an invalid summary revision.",
+        502,
+      );
+    }
+    const from = call.arguments.sourceFromMessageId;
+    const to = call.arguments.sourceToMessageId;
+    return {
+      ...shared,
+      artifactKind: "chat_summary",
+      ...(typeof artifactId === "string" ? { artifactId } : {}),
+      targetLabel: "当前对话摘要",
+      toolName: call.toolName,
+      title,
+      beforeRevision:
+        typeof expectedRevision === "number" &&
+        Number.isInteger(expectedRevision)
+          ? expectedRevision
+          : 0,
+      diffLines: [
+        `${call.toolName.endsWith("create") ? "+" : "~"} 标题：${title}`,
+        ...(typeof from === "string" && typeof to === "string"
+          ? [`~ 来源消息：${from} → ${to}`]
+          : []),
+        ...(typeof content === "string"
+          ? [`${call.toolName.endsWith("create") ? "+" : "~"} 内容：${content}`]
+          : []),
+      ],
+    };
+  }
+
+  if (
+    call.toolName === "character.profile.create" ||
+    call.toolName === "character.profile.update"
+  ) {
+    const participantId = call.arguments.participantId;
+    const name = participantName(participantId);
+    if (!name || typeof participantId !== "string") {
+      throw new WorkspaceApiError(
+        "Model tool proposal targets a participant outside the current card.",
+        409,
+      );
+    }
+    const content = call.arguments.content;
+    if (
+      call.toolName === "character.profile.create" &&
+      (typeof content !== "string" || content.trim().length === 0)
+    ) {
+      throw new WorkspaceApiError(
+        "Model tool returned an invalid participant profile proposal.",
+        502,
+      );
+    }
+    const artifactId = call.arguments.artifactId;
+    const expectedRevision = call.arguments.expectedRevision;
+    if (
+      call.toolName === "character.profile.update" &&
+      (typeof artifactId !== "string" ||
+        typeof expectedRevision !== "number" ||
+        !Number.isInteger(expectedRevision))
+    ) {
+      throw new WorkspaceApiError(
+        "Model tool returned an invalid profile revision.",
+        502,
+      );
+    }
+    const title =
+      typeof call.arguments.title === "string" && call.arguments.title.trim()
+        ? call.arguments.title.trim()
+        : `${name}的参与者档案`;
+    const diffLines = [
+      `${call.toolName.endsWith("create") ? "+" : "~"} 参与者：${name}`,
+      `${call.toolName.endsWith("create") ? "+" : "~"} 标题：${title}`,
+      ...(typeof content === "string" ? [`~ 内容：${content}`] : []),
+      ...(Array.isArray(call.arguments.traits)
+        ? [
+            `~ 特征：${call.arguments.traits.filter((item): item is string => typeof item === "string").join("、") || "无"}`,
+          ]
+        : []),
+    ];
+    return {
+      ...shared,
+      artifactKind: "character_profile",
+      ...(typeof artifactId === "string" ? { artifactId } : {}),
+      participantId,
+      targetLabel: name,
+      toolName: call.toolName,
+      title,
+      beforeRevision:
+        typeof expectedRevision === "number" &&
+        Number.isInteger(expectedRevision)
+          ? expectedRevision
+          : 0,
+      diffLines,
+    };
+  }
+
+  throw new WorkspaceApiError(
+    "Conversation model tool proposal is not supported by this workspace.",
+    422,
+  );
+}
+
 export function proposalFromGenerationToolEvent(
   state: WorkspaceState,
   event: GenerationToolProposal,
@@ -1846,72 +1992,33 @@ export function proposalFromGenerationToolEvent(
       "worldbook.entry.create",
       "worldbook.entry.update",
       "worldbook.entry.delete",
+      "chat.summary.create",
+      "chat.summary.update",
+      "character.profile.create",
+      "character.profile.update",
     ].includes(event.toolCall.toolName) ||
     !["proposed", "awaiting_confirmation"].includes(event.toolCall.status)
   ) {
     return null;
   }
-  return worldbookProposalFromCall(
-    state,
-    event.run,
-    event.toolCall,
-    event.text || event.run.objective,
-  );
+  return event.toolCall.toolName.startsWith("worldbook.")
+    ? worldbookProposalFromCall(
+        state,
+        event.run,
+        event.toolCall,
+        event.text || event.run.objective,
+      )
+    : artifactProposalFromCall(
+        state,
+        event.run,
+        event.toolCall,
+        event.text || event.run.objective,
+      );
 }
 
-export async function planAgentWorldbookChange(
+export async function loadPendingAgentToolProposal(
   state: WorkspaceState,
-  objective: string,
-): Promise<AgentPlanningResult> {
-  const normalizedObjective = objective.trim();
-  if (!normalizedObjective) {
-    throw new WorkspaceApiError("Agent objective cannot be empty.", 400);
-  }
-  const requestId = clientRequestId("agent");
-  const created = await request<
-    ApiEnvelope<{ run: ApiAgentRun; replayed: boolean }>
-  >("/agent/runs", {
-    method: "POST",
-    body: JSON.stringify({
-      conversationId: state.selectedConversationId,
-      connectionId: state.selectedProviderId,
-      objective: normalizedObjective,
-      idempotencyKey: `${requestId}:run`,
-      maxSteps: 8,
-    }),
-  });
-  const planned = await request<ApiEnvelope<ApiAgentPlan>>(
-    `/agent/runs/${encodeURIComponent(created.data.run.id)}/plan`,
-    { method: "POST", timeoutMs: 30_000 },
-  );
-  const run = normalizeAgentRun(planned.data.run);
-  if (!Array.isArray(planned.data.toolCalls)) {
-    throw new WorkspaceApiError(
-      "Agent planner returned an invalid tool-call list.",
-      502,
-    );
-  }
-  const toolCalls = planned.data.toolCalls.map(normalizePlannedToolCall);
-  const call = toolCalls.find(
-    (candidate) =>
-      candidate.toolName === "worldbook.entry.create" &&
-      candidate.status === "awaiting_confirmation",
-  );
-  if (!call) {
-    return { run, proposal: null, text: planned.data.text };
-  }
-  const proposal = worldbookProposalFromCall(
-    state,
-    run,
-    call,
-    normalizedObjective,
-  );
-  return { run, proposal, text: planned.data.text };
-}
-
-export async function loadPendingAgentWorldbookProposal(
-  state: WorkspaceState,
-): Promise<AgentPlanningResult | null> {
+): Promise<AgentToolRecoveryResult | null> {
   const listed = await request<ApiEnvelope<ApiAgentRun[]>>(
     `/agent/runs?conversationId=${encodeURIComponent(
       state.selectedConversationId,
@@ -1938,65 +2045,31 @@ export async function loadPendingAgentWorldbookProposal(
     if (!Array.isArray(snapshot.data.toolCalls)) continue;
     const run = normalizeAgentRun(snapshot.data.run);
     const call = snapshot.data.toolCalls
-      .map(normalizePlannedToolCall)
+      .map(normalizeConversationToolCall)
       .find(
         (candidate) =>
           [
             "worldbook.entry.create",
             "worldbook.entry.update",
             "worldbook.entry.delete",
+            "chat.summary.create",
+            "chat.summary.update",
+            "character.profile.create",
+            "character.profile.update",
           ].includes(candidate.toolName) &&
           candidate.status === "awaiting_confirmation",
       );
     if (call) {
       return {
         run,
-        proposal: worldbookProposalFromCall(state, run, call, run.objective),
+        proposal: call.toolName.startsWith("worldbook.")
+          ? worldbookProposalFromCall(state, run, call, run.objective)
+          : artifactProposalFromCall(state, run, call, run.objective),
         text: "",
       };
     }
   }
   return null;
-}
-
-async function createAgentRun(state: WorkspaceState): Promise<AgentRun> {
-  const proposal = state.agentProposal;
-  if (!proposal) {
-    throw new WorkspaceApiError(
-      "No Agent proposal is awaiting confirmation.",
-      409,
-    );
-  }
-  const result = await request<
-    ApiEnvelope<{ run: ApiAgentRun; replayed: boolean }>
-  >("/agent/runs", {
-    method: "POST",
-    body: JSON.stringify({
-      conversationId: state.selectedConversationId,
-      connectionId: state.selectedProviderId,
-      objective: proposal.rationale,
-      idempotencyKey: `${proposal.id}:run`,
-      maxSteps: 8,
-    }),
-  });
-  return normalizeAgentRun(result.data.run);
-}
-
-async function activeAgentRun(state: WorkspaceState): Promise<AgentRun> {
-  if (
-    state.agentRun &&
-    state.agentRun.conversationId === state.selectedConversationId &&
-    !["cancelled", "failed"].includes(state.agentRun.status)
-  ) {
-    try {
-      return await loadAgentRun(state.agentRun.id);
-    } catch (error) {
-      if (!(error instanceof WorkspaceApiError) || error.status !== 404) {
-        throw error;
-      }
-    }
-  }
-  return createAgentRun(state);
 }
 
 async function executeAgentTool(
@@ -2023,7 +2096,7 @@ export async function confirmAgentProposal(
 ): Promise<{
   auditId: string | null;
   revision: number | null;
-  worldbooks: Worldbook[];
+  worldbooks?: Worldbook[];
   run: AgentRun;
 }> {
   const proposal = state.agentProposal;
@@ -2033,7 +2106,13 @@ export async function confirmAgentProposal(
       409,
     );
   }
-  const run = await activeAgentRun(state);
+  const run = await loadAgentRun(proposal.runId);
+  if (run.conversationId !== state.selectedConversationId) {
+    throw new WorkspaceApiError(
+      "The model tool proposal belongs to a different conversation.",
+      409,
+    );
+  }
   callbacks.onRun?.(run);
   const result = await executeAgentTool(run.id, {
     idempotencyKey: proposal.idempotencyKey,
@@ -2041,38 +2120,47 @@ export async function confirmAgentProposal(
     arguments: proposal.toolArguments,
   });
   const [worldbooks, refreshedRun] = await Promise.all([
-    loadWorldbooksFromApi(),
+    proposal.targetKind === "worldbook" ? loadWorldbooksFromApi() : [],
     loadAgentRun(run.id),
   ]);
+  const artifactRevision =
+    result.result &&
+    isRecord(result.result.artifact) &&
+    typeof result.result.artifact.revision === "number"
+      ? result.result.artifact.revision
+      : null;
   return {
     auditId: result.result?.auditId ?? null,
-    revision: result.result?.revision ?? null,
-    worldbooks,
+    revision: result.result?.revision ?? artifactRevision,
+    ...(proposal.targetKind === "worldbook" ? { worldbooks } : {}),
     run: refreshedRun,
   };
 }
 
 export async function undoAgentProposal(
   state: WorkspaceState,
-): Promise<{ worldbooks: Worldbook[]; run: AgentRun }> {
+): Promise<{ worldbooks?: Worldbook[]; run: AgentRun }> {
   const proposal = state.agentProposal;
   if (!proposal) {
     throw new WorkspaceApiError("No applied Agent change can be undone.", 409);
   }
   const { auditId } = proposal;
-  if (!auditId || !state.agentRun) {
+  if (!auditId) {
     throw new WorkspaceApiError("No applied Agent change can be undone.", 409);
   }
-  await executeAgentTool(state.agentRun.id, {
+  await executeAgentTool(proposal.runId, {
     idempotencyKey: `${proposal.id}:undo:${auditId}`,
     toolName: "agent.change.undo",
     arguments: { auditId },
   });
   const [worldbooks, run] = await Promise.all([
-    loadWorldbooksFromApi(),
-    loadAgentRun(state.agentRun.id),
+    proposal.targetKind === "worldbook" ? loadWorldbooksFromApi() : [],
+    loadAgentRun(proposal.runId),
   ]);
-  return { worldbooks, run };
+  return {
+    ...(proposal.targetKind === "worldbook" ? { worldbooks } : {}),
+    run,
+  };
 }
 
 export async function cancelAgentRun(runId: string): Promise<AgentRun> {

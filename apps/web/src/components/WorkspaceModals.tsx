@@ -459,6 +459,50 @@ function ProviderEditor({
   );
 }
 
+function BuiltInProviderDetails() {
+  return (
+    <div
+      className="provider-editor modal-form"
+      aria-label="本地确定性 Provider 信息"
+    >
+      <div className="provider-editor__grid">
+        <label className="field">
+          <span>连接名称</span>
+          <input defaultValue="本地确定性 Provider" readOnly disabled />
+        </label>
+        <label className="field">
+          <span>协议</span>
+          <select defaultValue="fake" disabled>
+            <option value="fake">Deterministic Fake</option>
+          </select>
+        </label>
+        <label className="field provider-editor__wide">
+          <span>运行位置</span>
+          <input defaultValue="本地服务内置" readOnly disabled />
+        </label>
+        <label className="field">
+          <span>模型</span>
+          <input defaultValue="deterministic" readOnly disabled />
+        </label>
+        <label className="field">
+          <span>API Key</span>
+          <input defaultValue="无需密钥" readOnly disabled />
+        </label>
+      </div>
+      <div className="provider-editor__options">
+        <label className="check-row">
+          <input type="checkbox" defaultChecked disabled />
+          <span>支持流式传输与原生结构化工具调用</span>
+        </label>
+      </div>
+      <div className="modal-note">
+        <Lock size={17} />
+        <span>本地确定性 Provider 由本地服务直接提供，无需单独保存连接。</span>
+      </div>
+    </div>
+  );
+}
+
 function ProvidersModal({
   online,
   connections,
@@ -477,10 +521,25 @@ function ProvidersModal({
     current?: ProviderConnection,
   ) => Promise<ProviderConnection>;
 }) {
-  const [editingId, setEditingId] = useState<string>(
-    connections[0]?.id ?? "new",
+  const [editingId, setEditingId] = useState<string>(() =>
+    selectedProviderId === "fake" ||
+    connections.some((connection) => connection.id === selectedProviderId)
+      ? selectedProviderId
+      : (connections[0]?.id ?? "new"),
   );
   const current = connections.find((connection) => connection.id === editingId);
+  const selectProvider = (providerId: string) => {
+    onSelect(providerId);
+    setEditingId(providerId);
+  };
+  const saveProvider = async (
+    input: ProviderConnectionInput,
+    provider?: ProviderConnection,
+  ) => {
+    const saved = await onSave(input, provider);
+    setEditingId(saved.id);
+    return saved;
+  };
 
   return (
     <ModalFrame
@@ -497,7 +556,7 @@ function ProvidersModal({
               selectedProviderId === "fake" ? " is-selected" : ""
             }`}
             type="button"
-            onClick={() => onSelect("fake")}
+            onClick={() => selectProvider("fake")}
           >
             <span>
               <strong>本地确定性 Provider</strong>
@@ -516,10 +575,7 @@ function ProvidersModal({
               }${editingId === connection.id ? " is-editing" : ""}`}
               type="button"
               key={connection.id}
-              onClick={() => {
-                onSelect(connection.id);
-                setEditingId(connection.id);
-              }}
+              onClick={() => selectProvider(connection.id)}
             >
               <span>
                 <strong>{connection.name}</strong>
@@ -544,12 +600,16 @@ function ProvidersModal({
             新增连接
           </button>
         </div>
-        <ProviderEditor
-          key={editingId}
-          {...(current ? { current } : {})}
-          online={online}
-          onSave={onSave}
-        />
+        {editingId === "fake" ? (
+          <BuiltInProviderDetails />
+        ) : (
+          <ProviderEditor
+            key={editingId}
+            {...(current ? { current } : {})}
+            online={online}
+            onSave={saveProvider}
+          />
+        )}
       </div>
       {!online ? (
         <p className="offline-note">
@@ -1146,11 +1206,21 @@ function AgentProposalModal({
         : proposal.status === "applied"
           ? "已应用"
           : "已撤销";
+  const artifactLabel =
+    proposal.artifactKind === "chat_summary" ? "聊天摘要" : "参与者档案";
+  const revisionSummary =
+    proposal.afterRevision === null
+      ? `修订 ${proposal.beforeRevision}`
+      : `修订 ${proposal.beforeRevision} → ${proposal.afterRevision}`;
+  const targetSummary =
+    proposal.targetKind === "worldbook"
+      ? `世界书：${proposal.worldbookName ?? proposal.worldbookId ?? "未知"} · ${revisionSummary}`
+      : `${artifactLabel}：${proposal.targetLabel ?? "当前对话"} · ${revisionSummary}`;
 
   return (
     <ModalFrame
       title="模型工具提案"
-      description="模型请求修改世界书时，需要在此处单独确认。"
+      description="模型请求修改世界书、聊天摘要或参与者档案时，需要在此处单独确认。"
       icon={<Wrench size={22} />}
       onClose={onClose}
       size="large"
@@ -1219,8 +1289,7 @@ function AgentProposalModal({
             </button>
           ) : null}
           <small>
-            目标：{proposal.worldbookName} · 世界书修订{" "}
-            {proposal.beforeRevision}
+            目标：{targetSummary}
             {proposal.targetEntryId ? (
               <>
                 {" "}

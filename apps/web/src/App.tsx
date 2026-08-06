@@ -47,6 +47,7 @@ import {
   loadLegacyGrants,
   loadLegacyHostHealth,
   loadPendingAgentToolProposal,
+  loadProviderModels,
   loadTavernHelperContext,
   loadWorkspaceFromApi,
   preparePromptTemplate,
@@ -2384,6 +2385,7 @@ export default function App() {
         onUndoToolProposal={() => void undoAppliedToolProposal()}
         onSelectProvider={(id) => dispatch({ type: "provider/select", id })}
         onSaveProvider={saveProvider}
+        onLoadProviderModels={loadProviderModels}
       />
       {state.toast ? (
         <div

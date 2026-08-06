@@ -87,6 +87,11 @@ export type ProviderConnection = {
   revision: number;
 };
 
+export type ProviderModel = {
+  id: string;
+  name: string;
+};
+
 export type ProviderConnectionInput = {
   name: string;
   protocol: ProviderProtocol;

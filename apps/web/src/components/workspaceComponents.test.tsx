@@ -89,6 +89,7 @@ describe("workspace components", () => {
           onPermission={vi.fn()}
           onSelectProvider={vi.fn()}
           onSaveProvider={vi.fn()}
+          onLoadProviderModels={vi.fn()}
         />,
       );
 
@@ -96,6 +97,8 @@ describe("workspace components", () => {
     expect(selectedHtml).toContain('value="第二个连接"');
     expect(selectedHtml).toContain('value="http://second.example/v1"');
     expect(selectedHtml).toContain('value="second-model"');
+    expect(selectedHtml).toContain("获取模型列表");
+    expect(selectedHtml).toContain("可从已保存连接的接口获取模型列表。");
     expect(selectedHtml).not.toContain('value="第一个连接"');
 
     const builtInHtml = renderProviderModal("fake");

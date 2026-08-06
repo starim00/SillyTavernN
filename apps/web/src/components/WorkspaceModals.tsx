@@ -1,4 +1,5 @@
 import {
+  ArrowClockwise,
   BookOpenText,
   BracketsCurly,
   Books,
@@ -36,6 +37,7 @@ import type {
   PromptPreset,
   ProviderConnection,
   ProviderConnectionInput,
+  ProviderModel,
   RegexScope,
   RegexScriptDefinition,
   RoleCard,
@@ -178,6 +180,7 @@ function ProviderEditor({
   current,
   online,
   onSave,
+  onLoadModels,
 }: {
   current?: ProviderConnection;
   online: boolean;
@@ -185,6 +188,7 @@ function ProviderEditor({
     input: ProviderConnectionInput,
     current?: ProviderConnection,
   ) => Promise<ProviderConnection>;
+  onLoadModels: (connectionId: string) => Promise<ProviderModel[]>;
 }) {
   const [name, setName] = useState(current?.name ?? "");
   const [protocol, setProtocol] = useState<ProviderConnection["protocol"]>(
@@ -199,6 +203,37 @@ function ProviderEditor({
   );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [models, setModels] = useState<ProviderModel[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [modelError, setModelError] = useState<string | null>(null);
+  const modelInputId = `provider-model-${current?.id ?? "new"}`;
+  const modelListId = `${modelInputId}-list`;
+  const modelLookupNeedsSave =
+    current !== undefined &&
+    (protocol !== current.protocol ||
+      baseUrl.trim() !== current.baseUrl ||
+      apiKey.length > 0 ||
+      removeApiKey);
+
+  const loadModels = async () => {
+    if (!current || !online || loadingModels || modelLookupNeedsSave) return;
+    setLoadingModels(true);
+    setModelError(null);
+    try {
+      const availableModels = await onLoadModels(current.id);
+      setModels(availableModels);
+      if (availableModels.length === 0) {
+        setModelError("接口未返回可用模型，请检查 Base URL 与凭据。");
+      }
+    } catch (reason) {
+      setModels([]);
+      setModelError(
+        reason instanceof Error ? reason.message : "获取模型列表失败。",
+      );
+    } finally {
+      setLoadingModels(false);
+    }
+  };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -220,6 +255,8 @@ function ProviderEditor({
       );
       setApiKey("");
       setRemoveApiKey(false);
+      setModels([]);
+      setModelError(null);
     } catch (reason) {
       setError(
         reason instanceof Error ? reason.message : "Provider 连接保存失败。",
@@ -278,14 +315,53 @@ function ProviderEditor({
             </small>
           ) : null}
         </label>
-        <label className="field">
-          <span>模型</span>
+        <div className="field provider-model-field">
+          <div className="field__heading">
+            <label className="field__label" htmlFor={modelInputId}>
+              模型
+            </label>
+            {current ? (
+              <button
+                className="button button--quiet provider-model-fetch"
+                type="button"
+                disabled={
+                  !online || submitting || loadingModels || modelLookupNeedsSave
+                }
+                onClick={() => void loadModels()}
+              >
+                <ArrowClockwise size={14} />
+                {loadingModels ? "正在获取" : "获取模型列表"}
+              </button>
+            ) : null}
+          </div>
           <input
+            id={modelInputId}
+            list={models.length > 0 ? modelListId : undefined}
             value={model}
             placeholder="model-name"
             onChange={(event) => setModel(event.target.value)}
           />
-        </label>
+          {models.length > 0 ? (
+            <datalist id={modelListId}>
+              {models.map((availableModel) => (
+                <option
+                  key={availableModel.id}
+                  value={availableModel.id}
+                  label={availableModel.name}
+                />
+              ))}
+            </datalist>
+          ) : null}
+          <small className="field-hint">
+            {!current
+              ? "先保存连接，再从接口读取可用模型。"
+              : modelLookupNeedsSave
+                ? "请先保存 Base URL、协议或 API Key 的修改，再获取模型列表。"
+                : models.length > 0
+                  ? `已获取 ${models.length} 个模型，可在输入框中选择或手动填写。`
+                  : "可从已保存连接的接口获取模型列表。"}
+          </small>
+        </div>
         <label className="field">
           <span>API Key</span>
           <input
@@ -333,6 +409,11 @@ function ProviderEditor({
       {error ? (
         <p className="form-error" role="alert">
           {error}
+        </p>
+      ) : null}
+      {modelError ? (
+        <p className="form-error" role="alert">
+          {modelError}
         </p>
       ) : null}
       <footer className="modal-actions">
@@ -400,6 +481,7 @@ function ProvidersModal({
   onClose,
   onSelect,
   onSave,
+  onLoadModels,
 }: {
   online: boolean;
   connections: ProviderConnection[];
@@ -410,6 +492,7 @@ function ProvidersModal({
     input: ProviderConnectionInput,
     current?: ProviderConnection,
   ) => Promise<ProviderConnection>;
+  onLoadModels: (connectionId: string) => Promise<ProviderModel[]>;
 }) {
   const [editingId, setEditingId] = useState<string>(() =>
     selectedProviderId === "fake" ||
@@ -498,6 +581,7 @@ function ProvidersModal({
             {...(current ? { current } : {})}
             online={online}
             onSave={saveProvider}
+            onLoadModels={onLoadModels}
           />
         )}
       </div>
@@ -1221,6 +1305,7 @@ type WorkspaceModalsProps = {
     input: ProviderConnectionInput,
     current?: ProviderConnection,
   ) => Promise<ProviderConnection>;
+  onLoadProviderModels: (connectionId: string) => Promise<ProviderModel[]>;
 };
 
 export function WorkspaceModals({
@@ -1262,6 +1347,7 @@ export function WorkspaceModals({
   onUndoToolProposal = () => undefined,
   onSelectProvider,
   onSaveProvider,
+  onLoadProviderModels,
 }: WorkspaceModalsProps) {
   if (modal.kind === "closed") return null;
   if (modal.kind === "import") {
@@ -1342,6 +1428,7 @@ export function WorkspaceModals({
         onClose={onClose}
         onSelect={onSelectProvider}
         onSave={onSaveProvider}
+        onLoadModels={onLoadProviderModels}
       />
     );
   }

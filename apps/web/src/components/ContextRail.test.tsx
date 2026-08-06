@@ -93,6 +93,7 @@ function renderRailFixture(
         onPermission={async () => undefined}
         onSelectProvider={noop}
         onSaveProvider={async () => state.providerConnections[0]!}
+        onLoadProviderModels={async () => []}
         onConfirmToolProposal={noop}
         onRejectToolProposal={noop}
         onUndoToolProposal={noop}

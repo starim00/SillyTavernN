@@ -14,6 +14,7 @@ import type {
   PromptPresetEntry,
   ProviderConnection,
   ProviderConnectionInput,
+  ProviderModel,
   RegexDiagnostic,
   RegexPlacement,
   RegexScope,
@@ -173,6 +174,11 @@ type ApiPresetPrompt = {
 };
 
 type ApiProviderConnection = ProviderConnection;
+
+type ApiProviderModel = {
+  id: string;
+  name?: string;
+};
 
 type ApiRegexScript = {
   id: string;
@@ -1614,6 +1620,24 @@ export async function saveProviderConnection(
     },
   );
   return result.data;
+}
+
+export async function loadProviderModels(
+  connectionId: string,
+): Promise<ProviderModel[]> {
+  const result = await request<ApiEnvelope<ApiProviderModel[]>>(
+    `/providers/connections/${encodeURIComponent(connectionId)}/models`,
+    { timeoutMs: 20_000 },
+  );
+  const seen = new Set<string>();
+  const models: ProviderModel[] = [];
+  for (const item of result.data) {
+    const id = item.id.trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    models.push({ id, name: item.name?.trim() || id });
+  }
+  return models;
 }
 
 export async function updateWorldbookEntryPermission(

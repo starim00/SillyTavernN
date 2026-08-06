@@ -17,6 +17,7 @@ import {
   loadLegacyGrants,
   loadLegacyHostHealth,
   loadPendingAgentToolProposal,
+  loadProviderModels,
   loadWorkspaceFromApi,
   proposalFromGenerationToolEvent,
   reorderPresetPrompts,
@@ -734,6 +735,28 @@ describe("workspace API client", () => {
     expect(body.apiKey).toBe("server-only-secret");
     expect(saved.hasApiKey).toBe(true);
     expect(saved).not.toHaveProperty("apiKey");
+  });
+
+  it("loads and normalizes models for a saved Provider connection", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        data: [
+          { id: " model-a ", name: "Model A" },
+          { id: "model-a", name: "Duplicate" },
+          { id: "model-b" },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(loadProviderModels("provider/1")).resolves.toEqual([
+      { id: "model-a", name: "Model A" },
+      { id: "model-b", name: "model-b" },
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "/api/providers/connections/provider%2F1/models",
+    );
   });
 
   it("confirms a server-backed conversation tool proposal without creating a run", async () => {

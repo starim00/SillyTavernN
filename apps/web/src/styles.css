@@ -3967,11 +3967,32 @@ select:focus-visible {
   gap: 6px;
 }
 
+.field__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.field__label,
 .field > span,
 .participant-picker legend {
   color: var(--text-soft);
   font-size: 10px;
   font-weight: 710;
+}
+
+.field-hint {
+  color: var(--text-faint);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.provider-model-fetch {
+  min-height: 28px;
+  gap: 4px;
+  padding: 0 8px;
+  font-size: 10px;
 }
 
 .field input,

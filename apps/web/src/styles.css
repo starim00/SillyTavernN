@@ -637,6 +637,78 @@ select:focus-visible {
   background: var(--surface);
 }
 
+.conversation-workspace:has(> .workspace-connection-banner) {
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+
+.workspace-connection-banner {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 42px;
+  padding: 8px 14px;
+  color: var(--text-soft);
+  background: var(--slate-soft);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+
+.workspace-connection-banner > svg {
+  flex: none;
+}
+
+.workspace-connection-banner--loading {
+  color: #557487;
+  background: var(--pale-blue);
+}
+
+.workspace-connection-banner--demo {
+  color: #63727a;
+  background: #f2f4f4;
+}
+
+.workspace-connection-banner--error {
+  color: #8b514b;
+  background: var(--coral-soft);
+  border-color: #efc8bf;
+}
+
+.workspace-connection-banner--error > div:first-of-type {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.workspace-connection-banner--error strong {
+  color: #7f423b;
+}
+
+.workspace-connection-banner--error span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-connection-banner__actions {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.workspace-connection-banner .button {
+  min-height: 28px;
+  padding: 5px 9px;
+  font-size: 10px;
+}
+
+.card-entry > .workspace-connection-banner {
+  width: min(980px, 100%);
+  margin: 0 auto 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
 .preset-settings-rail {
   display: flex;
   flex: 0 0 320px;
@@ -935,11 +1007,26 @@ select:focus-visible {
 }
 
 .message-item {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 160px;
   position: relative;
   padding: 17px 8px 13px 25px;
   border-bottom: 1px solid #dce6eb;
   content-visibility: auto;
   contain-intrinsic-size: auto 164px;
+}
+
+.message-history-loading {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin: 0 auto 0.75rem;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: var(--surface-color, #fff);
+  color: var(--text-muted, #607080);
+  font-size: 0.8rem;
 }
 
 .message-item::before {

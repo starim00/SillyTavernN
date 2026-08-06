@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, URL } from "node:url";
 
 const ejsBrowserBundle = fileURLToPath(
   new URL("../../node_modules/ejs/ejs.min.js", import.meta.url),

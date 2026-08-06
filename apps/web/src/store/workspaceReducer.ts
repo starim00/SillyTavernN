@@ -20,12 +20,15 @@ import type {
   WorldbookEntry,
 } from "../domain/workspace";
 
-// The v3 entry flow always selects a card before opening one of its chats.
-// Older navigation state is intentionally not migrated.
-const STORAGE_KEY = "sillytavern-n.workspace.v3";
+const STORAGE_KEY = "sillytavern-n.workspace.v4";
+const LEGACY_STORAGE_KEY = "sillytavern-n.workspace.v3";
+const MAX_DRAFT_BYTES = 32 * 1024;
+const MAX_PERSISTED_DRAFTS = 50;
 
 type WorkspaceAction =
+  | { type: "bootstrap/loading" }
   | { type: "bootstrap/api"; payload: ApiBootstrap }
+  | { type: "bootstrap/error"; error: string }
   | { type: "bootstrap/demo" }
   | { type: "card/select"; id: string }
   | { type: "conversation/create"; conversation: ConversationSpace }
@@ -41,6 +44,18 @@ type WorkspaceAction =
       type: "messages/replace";
       conversationId: string;
       messages: WorkspaceMessage[];
+      nextCursor?: string | null;
+    }
+  | {
+      type: "messages/prepend";
+      conversationId: string;
+      messages: WorkspaceMessage[];
+      nextCursor: string | null;
+    }
+  | {
+      type: "messages/history-loading";
+      conversationId: string;
+      loading: boolean;
     }
   | { type: "message/replace"; message: WorkspaceMessage }
   | { type: "message/update"; messageId: string; content: string }
@@ -209,14 +224,17 @@ export function workspaceReducer(
           : "fake";
       return {
         ...state,
-        source: "api",
-        apiOnline: true,
-        loading: false,
+        availability: "api",
+        bootstrapError: null,
         conversations,
         cards,
         personas,
         participants,
         messagesByConversation,
+        conversationNextCursor: action.payload.conversationNextCursor ?? null,
+        messageNextCursorByConversation:
+          action.payload.messageNextCursorByConversation ?? {},
+        messageHistoryLoading: {},
         worldbooks,
         presets,
         regexScopes: action.payload.regexScopes,
@@ -232,15 +250,14 @@ export function workspaceReducer(
         generation: idleGeneration(),
       };
     }
-    case "bootstrap/demo":
-      return {
-        ...state,
-        source: "demo",
-        apiOnline: false,
-        loading: false,
-        agentProposal: null,
-        agentRun: null,
-      };
+    case "bootstrap/loading":
+      return { ...state, availability: "loading", bootstrapError: null };
+    case "bootstrap/error":
+      return { ...state, availability: "error", bootstrapError: action.error };
+    case "bootstrap/demo": {
+      const demo = createDemoWorkspace();
+      return { ...demo, availability: "demo", bootstrapError: null };
+    }
     case "card/select": {
       const selectedConversationId =
         state.conversations.find(
@@ -423,7 +440,46 @@ export function workspaceReducer(
           ...state.messagesByConversation,
           [action.conversationId]: action.messages,
         },
+        messageNextCursorByConversation:
+          action.nextCursor === undefined
+            ? state.messageNextCursorByConversation
+            : {
+                ...state.messageNextCursorByConversation,
+                [action.conversationId]: action.nextCursor,
+              },
       };
+    case "messages/history-loading":
+      return {
+        ...state,
+        messageHistoryLoading: {
+          ...state.messageHistoryLoading,
+          [action.conversationId]: action.loading,
+        },
+      };
+    case "messages/prepend": {
+      const current = state.messagesByConversation[action.conversationId] ?? [];
+      const merged = new Map(
+        [...action.messages, ...current].map((message) => [
+          message.id,
+          message,
+        ]),
+      );
+      return {
+        ...state,
+        messagesByConversation: {
+          ...state.messagesByConversation,
+          [action.conversationId]: [...merged.values()],
+        },
+        messageNextCursorByConversation: {
+          ...state.messageNextCursorByConversation,
+          [action.conversationId]: action.nextCursor,
+        },
+        messageHistoryLoading: {
+          ...state.messageHistoryLoading,
+          [action.conversationId]: false,
+        },
+      };
+    }
     case "message/replace":
       return {
         ...state,
@@ -713,53 +769,57 @@ export function workspaceReducer(
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
-const withPersistedWorldbookEntry = (entry: WorldbookEntry): WorldbookEntry => {
-  const persisted = entry as Partial<WorldbookEntry>;
-  const primaryKeys = persisted.primaryKeys ?? persisted.keys ?? [];
-  const secondaryKeys = persisted.secondaryKeys ?? [];
-  return {
-    ...entry,
-    keys: [...primaryKeys, ...secondaryKeys],
-    primaryKeys,
-    secondaryKeys,
-    secondaryLogic: persisted.secondaryLogic ?? "any",
-    selective: persisted.selective ?? secondaryKeys.length > 0,
-    enabled: persisted.enabled ?? true,
-    constant: persisted.constant ?? false,
-    caseSensitive: persisted.caseSensitive ?? false,
-    matchWholeWords: persisted.matchWholeWords ?? false,
-    useRegex: persisted.useRegex ?? true,
-    scanDepth: persisted.scanDepth ?? null,
-    recursion: persisted.recursion ?? true,
-    preventRecursion: persisted.preventRecursion ?? false,
-    excludeRecursion: persisted.excludeRecursion ?? false,
-    delayUntilRecursion: persisted.delayUntilRecursion ?? false,
-    insertionPosition: persisted.insertionPosition ?? null,
-    outletName: persisted.outletName ?? null,
-    insertionDepth: persisted.insertionDepth ?? null,
-    insertionRole: persisted.insertionRole ?? "system",
-    order: persisted.order ?? 0,
-    priority: persisted.priority ?? persisted.order ?? 0,
-    probability: persisted.probability ?? 100,
-  };
+const asPersistedString = (value: unknown, fallback: string): string =>
+  typeof value === "string" ? value : fallback;
+
+const truncateDraft = (value: string): string => {
+  if (new TextEncoder().encode(value).byteLength <= MAX_DRAFT_BYTES) {
+    return value;
+  }
+
+  let low = 0;
+  let high = value.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (
+      new TextEncoder().encode(value.slice(0, middle)).byteLength <=
+      MAX_DRAFT_BYTES
+    ) {
+      low = middle;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return value.slice(0, low);
 };
 
-const withPersistedWorldbookEntries = (worldbooks: Worldbook[]): Worldbook[] =>
-  worldbooks.map((worldbook) => ({
-    ...worldbook,
-    // The v2 workspace was already persisted before concrete entry data was
-    // added. Keep those local workspaces readable instead of crashing the rail.
-    entries: Array.isArray(worldbook.entries)
-      ? worldbook.entries.map(withPersistedWorldbookEntry)
-      : [],
-  }));
+const compactDrafts = (value: unknown): Record<string, string> => {
+  if (!isRecord(value)) return {};
+  const entries = Object.entries(value).filter(
+    ([, draft]) => typeof draft === "string",
+  );
+  return Object.fromEntries(
+    entries
+      .slice(-MAX_PERSISTED_DRAFTS)
+      .map(([conversationId, draft]) => [
+        conversationId,
+        truncateDraft(draft as string),
+      ]),
+  );
+};
 
 export function loadWorkspaceState(): WorkspaceState {
-  const base = createDemoWorkspace();
+  const base: WorkspaceState = {
+    ...createDemoWorkspace(),
+    availability: "loading",
+    bootstrapError: null,
+  };
   if (typeof window === "undefined") return base;
 
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw =
+      window.localStorage.getItem(STORAGE_KEY) ??
+      window.localStorage.getItem(LEGACY_STORAGE_KEY);
     if (!raw) {
       return {
         ...base,
@@ -769,7 +829,11 @@ export function loadWorkspaceState(): WorkspaceState {
       };
     }
     const parsed: unknown = JSON.parse(raw);
-    if (!isRecord(parsed) || parsed.version !== 3 || !isRecord(parsed.data)) {
+    if (
+      !isRecord(parsed) ||
+      ![3, 4].includes(parsed.version as number) ||
+      !isRecord(parsed.data)
+    ) {
       return {
         ...base,
         selectedCardId: "",
@@ -781,25 +845,24 @@ export function loadWorkspaceState(): WorkspaceState {
 
     return {
       ...base,
-      conversations: persisted.conversations ?? base.conversations,
-      cards: persisted.cards ?? base.cards,
-      personas: persisted.personas ?? base.personas,
-      participants: persisted.participants ?? base.participants,
-      messagesByConversation:
-        persisted.messagesByConversation ?? base.messagesByConversation,
-      worldbooks: withPersistedWorldbookEntries(
-        persisted.worldbooks ?? base.worldbooks,
+      // v3 is intentionally a light migration only. Entity caches such as
+      // messages, cards, worldbooks, and plugins are discarded.
+      selectedCardId: asPersistedString(persisted.selectedCardId, ""),
+      selectedConversationId: asPersistedString(
+        persisted.selectedConversationId,
+        "",
       ),
-      selectedCardId: persisted.selectedCardId ?? "",
-      selectedConversationId: persisted.selectedConversationId ?? "",
-      selectedPresetId: persisted.selectedPresetId ?? base.selectedPresetId,
-      selectedProviderId:
-        persisted.selectedProviderId ?? base.selectedProviderId,
-      draftByConversation:
-        persisted.draftByConversation ?? base.draftByConversation,
-      plugins: persisted.plugins ?? base.plugins,
       // A legacy localStorage agentProposal is intentionally ignored. The
       // server-side waiting run is the only source of truth.
+      selectedPresetId: asPersistedString(
+        persisted.selectedPresetId,
+        base.selectedPresetId,
+      ),
+      selectedProviderId: asPersistedString(
+        persisted.selectedProviderId,
+        base.selectedProviderId,
+      ),
+      draftByConversation: compactDrafts(persisted.draftByConversation),
     };
   } catch {
     return {
@@ -811,27 +874,25 @@ export function loadWorkspaceState(): WorkspaceState {
   }
 }
 
-export function persistWorkspaceState(state: WorkspaceState): void {
-  if (typeof window === "undefined") return;
+export function persistWorkspaceState(state: WorkspaceState): boolean {
+  if (typeof window === "undefined") return true;
   const persisted: PersistedWorkspaceState = {
-    conversations: state.conversations,
-    cards: state.cards,
-    personas: state.personas,
-    participants: state.participants,
-    messagesByConversation: state.messagesByConversation,
-    worldbooks: state.worldbooks,
     selectedCardId: state.selectedCardId,
     selectedConversationId: state.selectedConversationId,
     selectedPresetId: state.selectedPresetId,
     selectedProviderId: state.selectedProviderId,
-    draftByConversation: state.draftByConversation,
-    plugins: state.plugins,
+    draftByConversation: compactDrafts(state.draftByConversation),
   };
 
-  window.localStorage.setItem(
-    STORAGE_KEY,
-    JSON.stringify({ version: 3, data: persisted }),
-  );
+  try {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ version: 4, data: persisted }),
+    );
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export type { WorkspaceAction };

@@ -157,6 +157,18 @@ const tavernHelperStateSchema = z
   .strict();
 
 const tavernHelperExtensionId = "stn.tavern-helper";
+
+function groupByWorldbookId<T extends { worldbookId: string }>(
+  values: readonly T[],
+): Map<string, T[]> {
+  const grouped = new Map<string, T[]>();
+  for (const value of values) {
+    const group = grouped.get(value.worldbookId) ?? [];
+    group.push(value);
+    grouped.set(value.worldbookId, group);
+  }
+  return grouped;
+}
 const tavernHelperGenerateSchema = z
   .object({
     conversationId: z.string().trim().min(1).max(256),
@@ -489,8 +501,16 @@ function tavernHelperContext(
         ]
       : []),
   ];
-  const worldbooks = context.store.listWorldbooks().flatMap((worldbook) => {
-    const bindings = context.store.listWorldbookBindings(worldbook.id);
+  const storedWorldbooks = context.store.listWorldbooks();
+  const worldbookIds = storedWorldbooks.map((worldbook) => worldbook.id);
+  const bindingsByWorldbook = groupByWorldbookId(
+    context.store.listWorldbookBindingsBatch(worldbookIds),
+  );
+  const entriesByWorldbook = groupByWorldbookId(
+    context.store.listWorldbookEntriesBatch(worldbookIds),
+  );
+  const worldbooks = storedWorldbooks.flatMap((worldbook) => {
+    const bindings = bindingsByWorldbook.get(worldbook.id) ?? [];
     const applies = bindings.some(
       (binding) =>
         binding.scopeType === "global" ||
@@ -508,17 +528,15 @@ function tavernHelperContext(
           scopeType: binding.scopeType,
           scopeId: binding.scopeId,
         })),
-        entries: context.store
-          .listWorldbookEntries(worldbook.id)
-          .map((entry) => ({
-            id: entry.id,
-            legacyUid: entry.legacyUid,
-            keys: entry.keys,
-            content: entry.content,
-            enabled: entry.enabled,
-            position: entry.position,
-            metadata: entry.metadata,
-          })),
+        entries: (entriesByWorldbook.get(worldbook.id) ?? []).map((entry) => ({
+          id: entry.id,
+          legacyUid: entry.legacyUid,
+          keys: entry.keys,
+          content: entry.content,
+          enabled: entry.enabled,
+          position: entry.position,
+          metadata: entry.metadata,
+        })),
       },
     ];
   });
@@ -605,18 +623,24 @@ function promptTemplateDirectives(
   conversationId: string,
   cardId: string,
 ) {
-  return context.store.listWorldbooks().flatMap((worldbook) => {
-    const applies = context.store
-      .listWorldbookBindings(worldbook.id)
-      .some(
-        (binding) =>
-          binding.scopeType === "global" ||
-          (binding.scopeType === "card" && binding.scopeId === cardId) ||
-          (binding.scopeType === "conversation" &&
-            binding.scopeId === conversationId),
-      );
+  const worldbooks = context.store.listWorldbooks();
+  const worldbookIds = worldbooks.map((worldbook) => worldbook.id);
+  const bindingsByWorldbook = groupByWorldbookId(
+    context.store.listWorldbookBindingsBatch(worldbookIds),
+  );
+  const entriesByWorldbook = groupByWorldbookId(
+    context.store.listWorldbookEntriesBatch(worldbookIds),
+  );
+  return worldbooks.flatMap((worldbook) => {
+    const applies = (bindingsByWorldbook.get(worldbook.id) ?? []).some(
+      (binding) =>
+        binding.scopeType === "global" ||
+        (binding.scopeType === "card" && binding.scopeId === cardId) ||
+        (binding.scopeType === "conversation" &&
+          binding.scopeId === conversationId),
+    );
     if (!applies) return [];
-    return context.store.listWorldbookEntries(worldbook.id).flatMap((entry) => {
+    return (entriesByWorldbook.get(worldbook.id) ?? []).flatMap((entry) => {
       const title =
         typeof entry.metadata.label === "string"
           ? entry.metadata.label.trim()
@@ -739,7 +763,7 @@ export async function registerCompatibilityRoutes(
     const input = tavernHelperGenerateSchema.parse(request.body);
     const provider = await context.providers.get(input.connectionId);
     const capabilities = provider.capabilities();
-    const prompt = prepareConversationPrompt(context.store, {
+    const prompt = await prepareConversationPrompt(context.store, {
       conversationId: input.conversationId,
       ...(input.presetId === undefined ? {} : { presetId: input.presetId }),
       ...(input.settings === undefined ? {} : { settings: input.settings }),
@@ -781,7 +805,7 @@ export async function registerCompatibilityRoutes(
     const conversation = context.store.getConversation(input.conversationId);
     const provider = await context.providers.get(input.connectionId);
     const capabilities = provider.capabilities();
-    const prompt = prepareConversationPrompt(context.store, {
+    const prompt = await prepareConversationPrompt(context.store, {
       conversationId: conversation.id,
       ...(input.presetId === undefined ? {} : { presetId: input.presetId }),
       ...(capabilities.maxContextTokens === undefined

@@ -2,10 +2,36 @@ import type { JsonObject, JsonValue } from "@stn/contracts";
 
 import { ProviderConfigurationError } from "./types.js";
 
+const TOKEN_ESTIMATE_CACHE_LIMIT = 1024;
+const tokenEstimateCache = new Map<string, number>();
+const asciiTokenSegment = /^[A-Za-z0-9_]+$/u;
+
 export function estimateTokens(text: string): number {
+  const cached = tokenEstimateCache.get(text);
+  if (cached !== undefined) {
+    tokenEstimateCache.delete(text);
+    tokenEstimateCache.set(text, cached);
+    return cached;
+  }
   if (!text) return 0;
-  const asciiWords = text.match(/[A-Za-z0-9_]+|[^\sA-Za-z0-9_]/gu) ?? [];
-  return Math.max(1, Math.ceil(asciiWords.length * 0.78));
+
+  const units = text.match(/[A-Za-z0-9_]+|[^\s]/gu) ?? [];
+  let roughTokens = 0;
+  for (const unit of units) {
+    roughTokens += asciiTokenSegment.test(unit)
+      ? Math.max(1, Math.ceil(unit.length / 4))
+      : 1;
+  }
+  const estimate =
+    roughTokens === 0 ? 0 : Math.max(1, Math.ceil(roughTokens * 1.15));
+
+  tokenEstimateCache.set(text, estimate);
+  while (tokenEstimateCache.size > TOKEN_ESTIMATE_CACHE_LIMIT) {
+    const oldest = tokenEstimateCache.keys().next().value;
+    if (oldest === undefined) break;
+    tokenEstimateCache.delete(oldest);
+  }
+  return estimate;
 }
 
 export function joinUrl(baseUrl: string, path: string): string {

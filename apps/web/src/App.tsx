@@ -16,10 +16,12 @@ import {
 import {
   useCallback,
   useEffect,
+  lazy,
   useMemo,
   useReducer,
   useRef,
   useState,
+  Suspense,
 } from "react";
 
 import {
@@ -29,7 +31,6 @@ import {
   confirmAgentProposal,
   createConversationSpace as createConversationSpaceOnServer,
   createPersona,
-  createMessageSwipe,
   createMessage,
   createTavernHelperMessage,
   deleteConversationSpace,
@@ -42,7 +43,7 @@ import {
   GenerationInterruptedError,
   importPortableFile,
   installLegacyPlugin,
-  loadConversationMessages,
+  loadConversationMessagePage,
   loadLegacyGrants,
   loadLegacyHostHealth,
   loadPendingAgentToolProposal,
@@ -73,11 +74,15 @@ import {
   WorkspaceApiError,
   type PersonaInput,
 } from "./api/workspaceApi";
-import { renderPromptTemplateMessages } from "./compat/promptTemplateEngine";
 import {
+  loadTavernHelperRuntime,
+  renderPromptTemplateMessages,
+} from "./compat/loaders";
+import type {
   TavernHelperRuntime,
-  type TavernHelperRuntimeAdapter,
+  TavernHelperRuntimeAdapter,
 } from "./compat/tavernHelperRuntime";
+import { canonicalLegacyPluginId } from "./compat/legacyPluginIds";
 import type {
   TavernHelperContext,
   TavernHelperRuntimeButton,
@@ -86,11 +91,7 @@ import type {
 } from "./compat/tavernHelperTypes";
 import { CardConversationEntry } from "./components/CardConversationEntry";
 import { ConversationComposer } from "./components/ConversationComposer";
-import {
-  canonicalLegacyPluginId,
-  LegacyRealmBridge,
-  type LegacyRealmStatus,
-} from "./components/LegacyRealmBridge";
+import type { LegacyRealmStatus } from "./components/LegacyRealmBridge";
 import {
   clearMessageFrameStorage,
   MessageStream,
@@ -98,10 +99,8 @@ import {
 import { NavigationRail } from "./components/NavigationRail";
 import { PresetSettingsRail } from "./components/PresetSettingsRail";
 import type { PresetGenerationPatch } from "./components/PresetGenerationControls";
-import {
-  TavernHelperWorkbench,
-  type TavernHelperTool,
-} from "./components/TavernHelperWorkbench";
+import type { TavernHelperTool } from "./components/TavernHelperWorkbench";
+import { WorkspaceConnectionBanner } from "./components/WorkspaceConnectionBanner";
 import { IconButton, SurfaceStatus } from "./components/WorkspacePrimitives";
 import { WorkspaceModals } from "./components/WorkspaceModals";
 import type {
@@ -125,6 +124,17 @@ import {
   persistWorkspaceState,
   workspaceReducer,
 } from "./store/workspaceReducer";
+
+const LazyTavernHelperWorkbench = lazy(() =>
+  import("./components/TavernHelperWorkbench").then((module) => ({
+    default: module.TavernHelperWorkbench,
+  })),
+);
+const LazyLegacyRealmBridge = lazy(() =>
+  import("./components/LegacyRealmBridge").then((module) => ({
+    default: module.LegacyRealmBridge,
+  })),
+);
 
 const identifier = (prefix: string): string => {
   const suffix =
@@ -171,11 +181,15 @@ export default function App() {
     undefined,
     loadWorkspaceState,
   );
+  const apiOnline = state.availability === "api";
+  const loading = state.availability === "loading";
   const generationControllerRef = useRef<AbortController | null>(null);
   const swipeSelectionQueueRef = useRef<Promise<void>>(Promise.resolve());
-  const initialPresetIdRef = useRef(state.selectedPresetId);
   const workspaceStateRef = useRef(state);
   workspaceStateRef.current = state;
+  const bootstrapRequestRef = useRef(0);
+  const persistTimerRef = useRef<number | null>(null);
+  const persistWarningShownRef = useRef(false);
   const proposalRefreshKey = (
     state.messagesByConversation[state.selectedConversationId] ?? []
   )
@@ -193,6 +207,10 @@ export default function App() {
     Record<string, LegacyHostPluginStatus>
   >({});
   const tavernHelperRuntimeRef = useRef<TavernHelperRuntime | null>(null);
+  const tavernHelperContextRef = useRef<TavernHelperContext | null>(null);
+  const tavernHelperLoadPromiseRef =
+    useRef<Promise<TavernHelperRuntime | null> | null>(null);
+  const tavernHelperEpochRef = useRef(0);
   const [tavernHelperContext, setTavernHelperContext] =
     useState<TavernHelperContext | null>(null);
   const [tavernHelperButtons, setTavernHelperButtons] = useState<
@@ -205,6 +223,7 @@ export default function App() {
       errors: [],
     });
   const [tavernHelperRevision, setTavernHelperRevision] = useState(0);
+  const legacyManagementLoadRef = useRef<Promise<void> | null>(null);
   const applyLegacyHealth = useCallback(
     (health: Awaited<ReturnType<typeof loadLegacyHostHealth>>) => {
       setLegacyHostPlugins(
@@ -222,60 +241,14 @@ export default function App() {
     [],
   );
 
-  useEffect(() => {
-    let active = true;
-    loadWorkspaceFromApi(initialPresetIdRef.current)
-      .then((payload) => {
-        if (active) dispatch({ type: "bootstrap/api", payload });
-      })
-      .catch(() => {
-        if (active) dispatch({ type: "bootstrap/demo" });
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    const awaitingDecision =
-      state.agentProposal &&
-      ["blocked", "awaiting_confirmation"].includes(state.agentProposal.status);
-    if (
-      !state.apiOnline ||
-      state.loading ||
-      awaitingDecision ||
-      !state.selectedConversationId
-    ) {
+  const loadLegacyManagement = useCallback(async () => {
+    if (!apiOnline) return;
+    if (legacyManagementLoadRef.current) {
+      await legacyManagementLoadRef.current;
       return;
     }
-    let active = true;
-    void loadPendingAgentToolProposal(workspaceStateRef.current)
-      .then((pending) => {
-        if (active && pending?.proposal) {
-          dispatch({
-            type: "agent/proposed",
-            proposal: pending.proposal,
-            run: pending.run,
-          });
-        }
-      })
-      .catch(() => undefined);
-    return () => {
-      active = false;
-    };
-  }, [
-    state.agentProposal,
-    state.apiOnline,
-    state.loading,
-    state.selectedConversationId,
-    proposalRefreshKey,
-  ]);
-
-  useEffect(() => {
-    let active = true;
-    Promise.all([loadLegacyHostHealth(), loadLegacyGrants()])
+    const load = Promise.all([loadLegacyHostHealth(), loadLegacyGrants()])
       .then(([health, grants]) => {
-        if (!active) return;
         applyLegacyHealth(health);
         const trustedPluginIds = new Set(
           health.plugins
@@ -315,31 +288,138 @@ export default function App() {
         }
       })
       .catch(() => {
-        if (active) setLegacyAvailability({});
+        setLegacyAvailability({});
       });
+    legacyManagementLoadRef.current = load;
+    try {
+      await load;
+    } finally {
+      if (legacyManagementLoadRef.current === load) {
+        legacyManagementLoadRef.current = null;
+      }
+    }
+  }, [apiOnline, applyLegacyHealth]);
+
+  useEffect(() => {
+    const awaitingDecision =
+      state.agentProposal &&
+      ["blocked", "awaiting_confirmation"].includes(state.agentProposal.status);
+    if (
+      !apiOnline ||
+      loading ||
+      awaitingDecision ||
+      !state.selectedConversationId
+    ) {
+      return;
+    }
+    let active = true;
+    void loadPendingAgentToolProposal(workspaceStateRef.current)
+      .then((pending) => {
+        if (active && pending?.proposal) {
+          dispatch({
+            type: "agent/proposed",
+            proposal: pending.proposal,
+            run: pending.run,
+          });
+        }
+      })
+      .catch(() => undefined);
     return () => {
       active = false;
     };
-  }, [applyLegacyHealth]);
-
-  useEffect(() => {
-    if (!state.loading) persistWorkspaceState(state);
   }, [
     state.agentProposal,
-    state.conversations,
+    apiOnline,
+    loading,
+    state.selectedConversationId,
+    proposalRefreshKey,
+  ]);
+
+  const bootstrapWorkspace = useCallback(() => {
+    const requestId = ++bootstrapRequestRef.current;
+    dispatch({ type: "bootstrap/loading" });
+    void loadWorkspaceFromApi(
+      workspaceStateRef.current.selectedPresetId,
+      workspaceStateRef.current.selectedConversationId,
+    )
+      .then((payload) => {
+        if (requestId === bootstrapRequestRef.current) {
+          dispatch({ type: "bootstrap/api", payload });
+        }
+      })
+      .catch((error: unknown) => {
+        if (requestId !== bootstrapRequestRef.current) return;
+        dispatch({
+          type: "bootstrap/error",
+          error:
+            error instanceof WorkspaceApiError
+              ? error.message
+              : "无法连接本地服务。",
+        });
+      });
+  }, []);
+
+  const enterDemoWorkspace = useCallback(() => {
+    bootstrapRequestRef.current += 1;
+    dispatch({ type: "bootstrap/demo" });
+  }, []);
+
+  useEffect(() => {
+    bootstrapWorkspace();
+  }, [bootstrapWorkspace]);
+
+  useEffect(() => {
+    if (state.modal.kind !== "plugins" && state.modal.kind !== "extensions") {
+      return;
+    }
+    void loadLegacyManagement();
+  }, [loadLegacyManagement, state.modal.kind]);
+
+  const flushLocalPreferences = useCallback(() => {
+    persistTimerRef.current = null;
+    const saved = persistWorkspaceState(workspaceStateRef.current);
+    if (saved) return;
+    if (persistWarningShownRef.current) return;
+    persistWarningShownRef.current = true;
+    dispatch({
+      type: "toast/show",
+      tone: "warning",
+      message: "本地偏好未保存。当前工作区仍可继续使用。",
+    });
+  }, []);
+
+  useEffect(() => {
+    if (loading) return;
+    if (persistTimerRef.current !== null) {
+      window.clearTimeout(persistTimerRef.current);
+    }
+    persistTimerRef.current = window.setTimeout(flushLocalPreferences, 250);
+    return () => {
+      if (persistTimerRef.current !== null) {
+        window.clearTimeout(persistTimerRef.current);
+        persistTimerRef.current = null;
+      }
+    };
+  }, [
+    flushLocalPreferences,
+    loading,
     state.draftByConversation,
-    state.loading,
-    state.messagesByConversation,
-    state.personas,
-    state.participants,
-    state.plugins,
     state.selectedCardId,
     state.selectedConversationId,
     state.selectedPresetId,
     state.selectedProviderId,
-    state.worldbooks,
-    state.cards,
   ]);
+
+  useEffect(() => {
+    const flushOnPageHide = () => {
+      if (persistTimerRef.current !== null) {
+        window.clearTimeout(persistTimerRef.current);
+      }
+      flushLocalPreferences();
+    };
+    window.addEventListener("pagehide", flushOnPageHide);
+    return () => window.removeEventListener("pagehide", flushOnPageHide);
+  }, [flushLocalPreferences]);
 
   useEffect(
     () => () => {
@@ -434,7 +514,7 @@ export default function App() {
         dispatch({ type: "modal/set", modal: { kind: "closed" } });
         return;
       }
-      if (state.apiOnline) {
+      if (apiOnline) {
         try {
           const updated = await setConversationPersona(
             conversation,
@@ -459,12 +539,12 @@ export default function App() {
       dispatch({ type: "modal/set", modal: { kind: "closed" } });
       showToast(`当前对话已切换为“${persona.name}”。`, "success");
     },
-    [conversation, showToast, state.apiOnline],
+    [conversation, showToast, apiOnline],
   );
 
   const savePersona = useCallback(
     async (input: PersonaInput, current?: Persona) => {
-      if (!state.apiOnline) {
+      if (!apiOnline) {
         showToast("连接本地服务后才能保存用户人设。", "warning");
         throw new Error("Persona storage is offline");
       }
@@ -484,12 +564,12 @@ export default function App() {
         throw error;
       }
     },
-    [showToast, state.apiOnline],
+    [showToast, apiOnline],
   );
 
   const removePersona = useCallback(
     async (persona: Persona) => {
-      if (!state.apiOnline) {
+      if (!apiOnline) {
         showToast("离线工作区不能删除服务器人设。", "warning");
         return;
       }
@@ -505,22 +585,26 @@ export default function App() {
           personaId: persona.id,
           expectedRevision: persona.revision,
         });
-        const payload = await loadWorkspaceFromApi(state.selectedPresetId);
+        const payload = await loadWorkspaceFromApi(
+          state.selectedPresetId,
+          state.selectedConversationId,
+        );
         dispatch({ type: "bootstrap/api", payload });
         showToast(`人设“${persona.name}”已删除。`, "success");
       } catch {
         showToast("人设删除失败；服务器内容没有改变。", "warning");
       }
     },
-    [showToast, state.apiOnline, state.selectedPresetId],
+    [showToast, apiOnline, state.selectedPresetId],
   );
 
   const refreshMessages = useCallback(
     async (conversationId: string) => {
-      const refreshed = await loadConversationMessages(
+      const page = await loadConversationMessagePage(
         conversationId,
         state.selectedPresetId,
       );
+      const refreshed = page.items;
       workspaceStateRef.current = {
         ...workspaceStateRef.current,
         messagesByConversation: {
@@ -532,15 +616,48 @@ export default function App() {
         type: "messages/replace",
         conversationId,
         messages: refreshed,
+        nextCursor: page.nextCursor,
       });
       return refreshed;
     },
     [state.selectedPresetId],
   );
 
+  const renderPreparedPrompt = useCallback(
+    async (
+      prepared: Awaited<ReturnType<typeof preparePromptTemplate>>,
+      context: TavernHelperContext | null,
+    ) => {
+      try {
+        return await renderPromptTemplateMessages(prepared.messages, {
+          enabled: prepared.enabled,
+          context,
+          directives: prepared.directives,
+        });
+      } catch (error) {
+        showToast(
+          `兼容层提示词处理失败，已使用原生提示词路径：${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          "warning",
+        );
+        return {
+          messages: prepared.messages,
+          diagnostics: [],
+          renderedCount: 0,
+          sourceTemplateCount: 0,
+        };
+      }
+    },
+    [showToast],
+  );
+
   useEffect(() => {
+    tavernHelperEpochRef.current += 1;
     tavernHelperRuntimeRef.current?.dispose();
     tavernHelperRuntimeRef.current = null;
+    tavernHelperContextRef.current = null;
+    tavernHelperLoadPromiseRef.current = null;
     setTavernHelperButtons([]);
     setTavernHelperContext(null);
     setTavernHelperStatus({
@@ -548,144 +665,193 @@ export default function App() {
       loadedScriptIds: [],
       errors: [],
     });
-    if (!state.apiOnline || !conversation) return;
-    let active = true;
-    void loadTavernHelperContext({
-      conversationId: conversation.id,
-      presetId: state.selectedPresetId,
-    })
-      .then(async (context) => {
-        if (!active) return;
-        setTavernHelperContext(context);
-        await new Promise<void>((resolve) =>
-          window.requestAnimationFrame(() => resolve()),
-        );
-        if (!active) return;
-        const adapter: TavernHelperRuntimeAdapter = {
-          connectionId: state.selectedProviderId,
-          getMessages: () =>
-            workspaceStateRef.current.messagesByConversation[
-              context.conversation.id
-            ] ?? [],
-          createMessage: async (input) => {
-            const created = await createTavernHelperMessage(
-              context.conversation.id,
-              input,
-            );
-            await refreshMessages(context.conversation.id);
-            return created;
-          },
-          deleteMessage: async (message) => {
-            await deleteWorkspaceMessage(message.id, message.revision);
-            await refreshMessages(context.conversation.id);
-          },
-          updateMessage: async (message, content) => {
-            const updated = await updateWorkspaceMessage(message, content);
-            if (active) dispatch({ type: "message/replace", message: updated });
-            return updated;
-          },
-          refreshMessages: () => refreshMessages(context.conversation.id),
-          generate: async (input) => {
-            const prepared = await preparePromptTemplate({
-              conversationId: context.conversation.id,
-              connectionId: state.selectedProviderId,
-              ...(context.conversation.presetId
-                ? { presetId: context.conversation.presetId }
-                : {}),
-            });
-            const rendered = await renderPromptTemplateMessages(
-              prepared.messages,
-              {
-                enabled: prepared.enabled,
-                context,
-                directives: prepared.directives,
-              },
-            );
-            if (rendered.diagnostics.length > 0) {
-              showToast(
-                `提示词模板有 ${String(rendered.diagnostics.length)} 处执行失败；失败代码已从脚本请求中移除。`,
-                "warning",
-              );
-            }
-            return generateWithTavernHelper({
-              conversationId: context.conversation.id,
-              connectionId: state.selectedProviderId,
-              ...(context.conversation.presetId
-                ? { presetId: context.conversation.presetId }
-                : {}),
-              ...input,
-              messagesOverride: rendered.messages,
-            });
-          },
-          saveState: (input) =>
-            saveTavernHelperState({
-              conversationId: context.conversation.id,
-              ...(context.conversation.presetId
-                ? { presetId: context.conversation.presetId }
-                : {}),
-              ...input,
-            }),
-          onButtonsChanged: (buttons) => {
-            if (active) setTavernHelperButtons(buttons);
-          },
-          onStatusChanged: (status) => {
-            if (active) setTavernHelperStatus(status);
-          },
-          notify: showToast,
-        };
-        const runtime = new TavernHelperRuntime(context, adapter);
-        tavernHelperRuntimeRef.current = runtime;
-        await runtime.start();
-        if (!active) runtime.dispose();
-      })
-      .catch((error) => {
-        if (!active) return;
-        setTavernHelperStatus({
-          loading: false,
-          loadedScriptIds: [],
-          errors: [
-            {
-              sourceScope: "card",
-              sourceId: conversation.cardId,
-              scriptId: "runtime",
-              scriptName: "酒馆助手兼容层",
-              message: error instanceof Error ? error.message : String(error),
-            },
-          ],
-        });
-      });
-    return () => {
-      active = false;
-      tavernHelperRuntimeRef.current?.dispose();
-      tavernHelperRuntimeRef.current = null;
-    };
   }, [
-    conversation,
-    refreshMessages,
-    showToast,
-    state.apiOnline,
+    conversation?.id,
+    apiOnline,
     state.selectedPresetId,
     state.selectedProviderId,
     tavernHelperRevision,
   ]);
 
+  const ensureTavernHelperRuntime = useCallback(
+    async (
+      conversationId = conversation?.id,
+    ): Promise<TavernHelperRuntime | null> => {
+      if (!apiOnline || !conversationId) return null;
+      const existing = tavernHelperRuntimeRef.current;
+      if (
+        existing &&
+        tavernHelperContextRef.current?.conversation.id === conversationId
+      ) {
+        return existing;
+      }
+      if (tavernHelperLoadPromiseRef.current) {
+        return tavernHelperLoadPromiseRef.current;
+      }
+
+      const epoch = tavernHelperEpochRef.current;
+      const selectedPresetId = workspaceStateRef.current.selectedPresetId;
+      const selectedProviderId = workspaceStateRef.current.selectedProviderId;
+      const loadPromise = (async () => {
+        setTavernHelperStatus((current) => ({
+          ...current,
+          loading: true,
+          errors: [],
+        }));
+        try {
+          const [context, runtimeModule] = await Promise.all([
+            loadTavernHelperContext({
+              conversationId,
+              presetId: selectedPresetId,
+            }),
+            loadTavernHelperRuntime(),
+          ]);
+          if (epoch !== tavernHelperEpochRef.current) return null;
+          tavernHelperContextRef.current = context;
+          setTavernHelperContext(context);
+          await new Promise<void>((resolve) =>
+            window.requestAnimationFrame(() => resolve()),
+          );
+          if (epoch !== tavernHelperEpochRef.current) return null;
+          const active = () => epoch === tavernHelperEpochRef.current;
+          const adapter: TavernHelperRuntimeAdapter = {
+            connectionId: selectedProviderId,
+            getMessages: () =>
+              workspaceStateRef.current.messagesByConversation[
+                context.conversation.id
+              ] ?? [],
+            createMessage: async (input) => {
+              const created = await createTavernHelperMessage(
+                context.conversation.id,
+                input,
+              );
+              await refreshMessages(context.conversation.id);
+              return created;
+            },
+            deleteMessage: async (message) => {
+              await deleteWorkspaceMessage(message.id, message.revision);
+              await refreshMessages(context.conversation.id);
+            },
+            updateMessage: async (message, content) => {
+              const updated = await updateWorkspaceMessage(message, content);
+              if (active())
+                dispatch({ type: "message/replace", message: updated });
+              return updated;
+            },
+            refreshMessages: () => refreshMessages(context.conversation.id),
+            generate: async (input) => {
+              const prepared = await preparePromptTemplate({
+                conversationId: context.conversation.id,
+                connectionId: selectedProviderId,
+                ...(context.conversation.presetId
+                  ? { presetId: context.conversation.presetId }
+                  : {}),
+              });
+              const rendered = await renderPreparedPrompt(prepared, context);
+              if (rendered.diagnostics.length > 0) {
+                showToast(
+                  `提示词模板有 ${String(rendered.diagnostics.length)} 处执行失败；失败代码已从脚本请求中移除。`,
+                  "warning",
+                );
+              }
+              return generateWithTavernHelper({
+                conversationId: context.conversation.id,
+                connectionId: selectedProviderId,
+                ...(context.conversation.presetId
+                  ? { presetId: context.conversation.presetId }
+                  : {}),
+                ...input,
+                messagesOverride: rendered.messages,
+              });
+            },
+            saveState: (input) =>
+              saveTavernHelperState({
+                conversationId: context.conversation.id,
+                ...(context.conversation.presetId
+                  ? { presetId: context.conversation.presetId }
+                  : {}),
+                ...input,
+              }),
+            onButtonsChanged: (buttons) => {
+              if (active()) setTavernHelperButtons(buttons);
+            },
+            onStatusChanged: (status) => {
+              if (active()) setTavernHelperStatus(status);
+            },
+            notify: showToast,
+          };
+          const runtime = new runtimeModule.TavernHelperRuntime(
+            context,
+            adapter,
+          );
+          tavernHelperRuntimeRef.current = runtime;
+          await runtime.start();
+          if (!active()) {
+            runtime.dispose();
+            return null;
+          }
+          return runtime;
+        } catch (error) {
+          if (epoch === tavernHelperEpochRef.current) {
+            setTavernHelperStatus({
+              loading: false,
+              loadedScriptIds: [],
+              errors: [
+                {
+                  sourceScope: "card",
+                  sourceId: conversation?.cardId ?? "unknown",
+                  scriptId: "runtime",
+                  scriptName: "酒馆助手兼容层",
+                  message:
+                    error instanceof Error ? error.message : String(error),
+                },
+              ],
+            });
+            showToast(
+              "酒馆助手兼容层加载失败，已保留原生提示词路径。",
+              "warning",
+            );
+          }
+          return null;
+        }
+      })();
+      tavernHelperLoadPromiseRef.current = loadPromise;
+      try {
+        return await loadPromise;
+      } finally {
+        if (tavernHelperLoadPromiseRef.current === loadPromise) {
+          tavernHelperLoadPromiseRef.current = null;
+        }
+      }
+    },
+    [
+      apiOnline,
+      conversation?.cardId,
+      conversation?.id,
+      refreshMessages,
+      renderPreparedPrompt,
+      showToast,
+    ],
+  );
+
   useEffect(() => {
-    if (!state.apiOnline || !conversation) return;
+    if (!apiOnline || !conversation) return;
     let active = true;
-    void loadConversationMessages(conversation.id, state.selectedPresetId)
-      .then((refreshed) => {
+    void loadConversationMessagePage(conversation.id, state.selectedPresetId)
+      .then((page) => {
         if (!active) return;
         dispatch({
           type: "messages/replace",
           conversationId: conversation.id,
-          messages: refreshed,
+          messages: page.items,
+          nextCursor: page.nextCursor,
         });
       })
       .catch(() => undefined);
     return () => {
       active = false;
     };
-  }, [conversation, state.apiOnline, state.selectedPresetId]);
+  }, [conversation, apiOnline, state.selectedPresetId]);
 
   const runGeneration = useCallback(
     async (input: {
@@ -693,7 +859,7 @@ export default function App() {
       mode: GenerationMode;
       targetMessage?: WorkspaceMessage;
     }) => {
-      if (!state.apiOnline || generationControllerRef.current) return;
+      if (!apiOnline || generationControllerRef.current) return;
       const controller = new AbortController();
       generationControllerRef.current = controller;
       dispatch({
@@ -705,7 +871,8 @@ export default function App() {
 
       try {
         let surfacedToolProposal = false;
-        const runtime = tavernHelperRuntimeRef.current;
+        const runtime = await ensureTavernHelperRuntime(input.conversationId);
+        const helperContext = tavernHelperContextRef.current;
         await runtime?.emit("GENERATION_AFTER_COMMANDS");
         await runtime?.emit("generation_started");
         await runtime?.emit("js_generation_started");
@@ -716,13 +883,9 @@ export default function App() {
           connectionId: state.selectedProviderId,
           presetId: state.selectedPresetId,
         });
-        const renderedTemplate = await renderPromptTemplateMessages(
-          preparedTemplate.messages,
-          {
-            enabled: preparedTemplate.enabled,
-            context: tavernHelperContext,
-            directives: preparedTemplate.directives,
-          },
+        const renderedTemplate = await renderPreparedPrompt(
+          preparedTemplate,
+          helperContext,
         );
         if (renderedTemplate.diagnostics.length > 0) {
           showToast(
@@ -737,6 +900,14 @@ export default function App() {
             presetId: state.selectedPresetId,
             messagesOverride: renderedTemplate.messages,
             injects: scriptInjections,
+            ...(input.mode === "regenerate" && input.targetMessage
+              ? {
+                  targetMessage: {
+                    id: input.targetMessage.id,
+                    revision: input.targetMessage.revision,
+                  },
+                }
+              : {}),
             signal: controller.signal,
           },
           {
@@ -781,31 +952,6 @@ export default function App() {
           await runtime?.emit("generation_ended");
           await runtime?.emit("js_generation_ended");
           return;
-        }
-
-        if (input.mode === "regenerate" && input.targetMessage) {
-          try {
-            const alternatives = [
-              receipt.content,
-              ...("alternatives" in receipt
-                ? (receipt.alternatives ?? [])
-                : []),
-            ];
-            for (const [index, alternative] of alternatives.entries()) {
-              await createMessageSwipe(
-                input.targetMessage.id,
-                alternative,
-                index === 0,
-              );
-            }
-          } catch (error) {
-            await deleteWorkspaceMessage(
-              receipt.messageId,
-              receipt.revision,
-            ).catch(() => undefined);
-            throw error;
-          }
-          await deleteWorkspaceMessage(receipt.messageId, receipt.revision);
         }
 
         const refreshedMessages = await refreshMessages(input.conversationId);
@@ -897,10 +1043,11 @@ export default function App() {
     [
       refreshMessages,
       showToast,
-      state.apiOnline,
+      apiOnline,
       state.selectedPresetId,
       state.selectedProviderId,
-      tavernHelperContext,
+      ensureTavernHelperRuntime,
+      renderPreparedPrompt,
     ],
   );
 
@@ -930,7 +1077,7 @@ export default function App() {
         return;
       }
 
-      if (state.apiOnline) {
+      if (apiOnline) {
         try {
           const persisted = await createMessage(conversation.id, { content });
           const currentMessages =
@@ -979,7 +1126,7 @@ export default function App() {
         },
       });
     },
-    [conversation, runGeneration, showToast, state.apiOnline],
+    [conversation, runGeneration, showToast, apiOnline],
   );
 
   const sendMessage = useCallback(async () => {
@@ -1000,7 +1147,7 @@ export default function App() {
 
   const updateMessage = useCallback(
     async (message: WorkspaceMessage, content: string) => {
-      if (state.apiOnline) {
+      if (apiOnline) {
         try {
           const updated = await updateWorkspaceMessage(message, content);
           dispatch({ type: "message/replace", message: updated });
@@ -1014,14 +1161,14 @@ export default function App() {
       }
       dispatch({ type: "message/update", messageId: message.id, content });
     },
-    [refreshMessages, showToast, state.apiOnline],
+    [refreshMessages, showToast, apiOnline],
   );
 
   const deleteMessage = useCallback(
     async (message: WorkspaceMessage) => {
       const actor = message.role === "user" ? "你的这条输入" : "这条模型回复";
       if (!window.confirm(`删除${actor}？`)) return;
-      if (state.apiOnline) {
+      if (apiOnline) {
         try {
           await deleteWorkspaceMessage(message.id, message.revision);
         } catch {
@@ -1032,12 +1179,12 @@ export default function App() {
       dispatch({ type: "message/delete", messageId: message.id });
       showToast("消息已删除。", "success");
     },
-    [showToast, state.apiOnline],
+    [showToast, apiOnline],
   );
 
   const regenerateMessage = useCallback(
     async (message: WorkspaceMessage) => {
-      if (state.apiOnline) {
+      if (apiOnline) {
         await runGeneration({
           conversationId: message.conversationId,
           mode: "regenerate",
@@ -1055,12 +1202,12 @@ export default function App() {
       });
       showToast("已创建离线 Swipe 候选。", "info");
     },
-    [runGeneration, showToast, state.apiOnline],
+    [runGeneration, showToast, apiOnline],
   );
 
   const continueFromMessage = useCallback(
     async (message: WorkspaceMessage) => {
-      if (state.apiOnline) {
+      if (apiOnline) {
         await runGeneration({
           conversationId: message.conversationId,
           mode: "continue",
@@ -1074,7 +1221,7 @@ export default function App() {
       });
       showToast("续写指令已放入输入框。");
     },
-    [runGeneration, showToast, state.apiOnline],
+    [runGeneration, showToast, apiOnline],
   );
 
   const selectSwipe = useCallback(
@@ -1087,7 +1234,7 @@ export default function App() {
       }
 
       const operation = swipeSelectionQueueRef.current.then(async () => {
-        if (state.apiOnline) {
+        if (apiOnline) {
           const currentMessage = (
             workspaceStateRef.current.messagesByConversation[
               message.conversationId
@@ -1130,7 +1277,41 @@ export default function App() {
       swipeSelectionQueueRef.current = operation.catch(() => undefined);
       return operation;
     },
-    [refreshMessages, showToast, state.apiOnline],
+    [refreshMessages, showToast, apiOnline],
+  );
+
+  const loadOlderMessages = useCallback(
+    async (conversationId: string) => {
+      const current = workspaceStateRef.current;
+      const cursor = current.messageNextCursorByConversation[conversationId];
+      if (!cursor || current.messageHistoryLoading[conversationId]) return;
+      dispatch({
+        type: "messages/history-loading",
+        conversationId,
+        loading: true,
+      });
+      try {
+        const page = await loadConversationMessagePage(
+          conversationId,
+          current.selectedPresetId,
+          cursor,
+        );
+        dispatch({
+          type: "messages/prepend",
+          conversationId,
+          messages: page.items,
+          nextCursor: page.nextCursor,
+        });
+      } catch {
+        dispatch({
+          type: "messages/history-loading",
+          conversationId,
+          loading: false,
+        });
+        showToast("更早消息加载失败，请稍后重试。", "warning");
+      }
+    },
+    [showToast],
   );
 
   const createConversationSpace = useCallback(
@@ -1143,7 +1324,7 @@ export default function App() {
         throw new Error("Card selection is required");
       }
       await tavernHelperRuntimeRef.current?.flushPersistence();
-      if (state.apiOnline) {
+      if (apiOnline) {
         let created: ConversationSpace;
         try {
           created = await createConversationSpaceOnServer(input);
@@ -1178,7 +1359,7 @@ export default function App() {
       });
       showToast(`对话已归入“${card.name}”并保存在本地。`, "success");
     },
-    [refreshMessages, showToast, state.apiOnline, state.cards],
+    [refreshMessages, showToast, apiOnline, state.cards],
   );
 
   const removeConversation = useCallback(
@@ -1198,7 +1379,7 @@ export default function App() {
       );
       if (!accepted) return;
 
-      if (state.apiOnline) {
+      if (apiOnline) {
         try {
           await deleteConversationSpace({
             conversationId: target.id,
@@ -1213,9 +1394,12 @@ export default function App() {
       clearMessageFrameStorage(target.id);
       dispatch({ type: "conversation/delete", id: target.id });
 
-      if (state.apiOnline) {
+      if (apiOnline) {
         try {
-          const payload = await loadWorkspaceFromApi(state.selectedPresetId);
+          const payload = await loadWorkspaceFromApi(
+            state.selectedPresetId,
+            state.selectedConversationId,
+          );
           dispatch({ type: "bootstrap/api", payload });
         } catch {
           showToast(
@@ -1229,7 +1413,7 @@ export default function App() {
     },
     [
       showToast,
-      state.apiOnline,
+      apiOnline,
       state.generation.conversationId,
       state.generation.status,
       state.selectedPresetId,
@@ -1258,7 +1442,7 @@ export default function App() {
 
   const removeRoleCard = useCallback(
     async (card: RoleCard) => {
-      if (!state.apiOnline) {
+      if (!apiOnline) {
         showToast("离线工作区不能删除已导入角色卡。", "warning");
         return;
       }
@@ -1271,19 +1455,22 @@ export default function App() {
           cardId: card.id,
           expectedRevision: card.revision,
         });
-        const payload = await loadWorkspaceFromApi(state.selectedPresetId);
+        const payload = await loadWorkspaceFromApi(
+          state.selectedPresetId,
+          state.selectedConversationId,
+        );
         dispatch({ type: "bootstrap/api", payload });
         showToast(`角色卡“${card.name}”及其绑定内容已删除。`, "success");
       } catch {
         showToast("角色卡删除失败，服务器内容没有改变。", "warning");
       }
     },
-    [showToast, state.apiOnline, state.selectedPresetId],
+    [showToast, apiOnline, state.selectedPresetId],
   );
 
   const removePromptPreset = useCallback(
     async (presetToDelete: PromptPreset) => {
-      if (!state.apiOnline) {
+      if (!apiOnline) {
         showToast("离线工作区不能删除已导入预设。", "warning");
         return;
       }
@@ -1296,7 +1483,10 @@ export default function App() {
           presetId: presetToDelete.id,
           expectedRevision: presetToDelete.revision,
         });
-        const payload = await loadWorkspaceFromApi();
+        const payload = await loadWorkspaceFromApi(
+          state.selectedPresetId,
+          state.selectedConversationId,
+        );
         dispatch({ type: "bootstrap/api", payload });
         showToast(
           `预设“${presetToDelete.name}”及其绑定内容已删除。`,
@@ -1306,7 +1496,7 @@ export default function App() {
         showToast("预设删除失败，服务器内容没有改变。", "warning");
       }
     },
-    [showToast, state.apiOnline],
+    [showToast, apiOnline],
   );
 
   const installPlugin = useCallback(
@@ -1386,7 +1576,7 @@ export default function App() {
         showToast("该插件不在固定兼容目标中。", "warning");
         return;
       }
-      if (!state.apiOnline) {
+      if (!apiOnline) {
         showToast("连接本地服务后才能更新旧版插件授权。", "warning");
         return;
       }
@@ -1493,7 +1683,7 @@ export default function App() {
         showToast("插件授权失败；兼容域没有启用。", "warning");
       }
     },
-    [applyLegacyHealth, showToast, state.apiOnline],
+    [applyLegacyHealth, showToast, apiOnline],
   );
 
   const toggleTavernHelperSource = useCallback(
@@ -1530,10 +1720,14 @@ export default function App() {
     [showToast],
   );
 
-  const openTavernHelper = useCallback((tool: TavernHelperTool) => {
-    setTavernHelperInitialTool(tool);
-    setTavernHelperWorkbenchOpen(true);
-  }, []);
+  const openTavernHelper = useCallback(
+    (tool: TavernHelperTool) => {
+      setTavernHelperInitialTool(tool);
+      setTavernHelperWorkbenchOpen(true);
+      void ensureTavernHelperRuntime();
+    },
+    [ensureTavernHelperRuntime],
+  );
 
   const saveTavernHelperWorkbenchSettings = useCallback(
     async (settings: NonNullable<TavernHelperContext["settings"]>) => {
@@ -1662,7 +1856,10 @@ export default function App() {
         }
       }
       try {
-        const payload = await loadWorkspaceFromApi(state.selectedPresetId);
+        const payload = await loadWorkspaceFromApi(
+          state.selectedPresetId,
+          state.selectedConversationId,
+        );
         dispatch({ type: "bootstrap/api", payload });
       } catch {
         showToast("内容已导入，但工作区刷新失败；请重新载入页面。", "warning");
@@ -1713,7 +1910,7 @@ export default function App() {
       entry: WorldbookEntry,
       agentEditable: boolean,
     ) => {
-      if (state.apiOnline) {
+      if (apiOnline) {
         try {
           const result = await updateWorldbookEntryPermission(
             worldbook,
@@ -1745,7 +1942,7 @@ export default function App() {
       });
       showToast("离线演示中的条目权限已更新。", "success");
     },
-    [showToast, state.apiOnline],
+    [showToast, apiOnline],
   );
 
   const saveWorldbookEntry = useCallback(
@@ -1754,7 +1951,7 @@ export default function App() {
       entry: WorldbookEntry,
       patch: WorldbookEntryUpdate,
     ) => {
-      if (workspaceStateRef.current.apiOnline) {
+      if (workspaceStateRef.current.availability === "api") {
         try {
           const updated = await updateWorldbookEntry(worldbook, entry, patch);
           dispatch({
@@ -1812,7 +2009,7 @@ export default function App() {
         throw new Error("No selected preset");
       }
 
-      if (currentState.apiOnline) {
+      if (currentState.availability === "api") {
         try {
           const updated = await updatePresetPrompt({
             presetId: currentPreset.id,
@@ -1888,7 +2085,7 @@ export default function App() {
         throw new Error("No selected preset");
       }
 
-      if (currentState.apiOnline) {
+      if (currentState.availability === "api") {
         try {
           const updated = await updatePresetGeneration({
             presetId: currentPreset.id,
@@ -1943,7 +2140,7 @@ export default function App() {
         throw new Error("No selected preset");
       }
 
-      if (currentState.apiOnline) {
+      if (currentState.availability === "api") {
         try {
           const updated = await reorderPresetPromptsOnServer({
             presetId: currentPreset.id,
@@ -1984,7 +2181,7 @@ export default function App() {
       patch: { enabled?: boolean; scripts?: RegexScriptDefinition[] },
     ) => {
       const currentState = workspaceStateRef.current;
-      if (currentState.apiOnline) {
+      if (currentState.availability === "api") {
         try {
           const updated = await saveRegexScopeOnServer({ scope, ...patch });
           dispatch({ type: "regexScope/replace", scope: updated });
@@ -1993,14 +2190,15 @@ export default function App() {
             (candidate) => candidate.id === currentState.selectedConversationId,
           );
           if (activeConversation) {
-            const refreshed = await loadConversationMessages(
+            const page = await loadConversationMessagePage(
               activeConversation.id,
               currentState.selectedPresetId,
             );
             dispatch({
               type: "messages/replace",
               conversationId: activeConversation.id,
-              messages: refreshed,
+              messages: page.items,
+              nextCursor: page.nextCursor,
             });
           }
 
@@ -2035,7 +2233,7 @@ export default function App() {
 
   const confirmToolProposal = useCallback(async () => {
     if (!state.agentProposal) return;
-    if (!state.apiOnline) {
+    if (!apiOnline) {
       showToast("模型工具提案需要连接服务器后才能确认。", "warning");
       return;
     }
@@ -2046,11 +2244,11 @@ export default function App() {
     } catch {
       showToast("模型工具写入未应用；请刷新修订状态后重试。", "warning");
     }
-  }, [showToast, state]);
+  }, [apiOnline, showToast, state]);
 
   const rejectToolProposal = useCallback(async () => {
     if (!state.agentProposal) return;
-    if (!state.apiOnline || !state.agentRun) {
+    if (!apiOnline || !state.agentRun) {
       showToast("模型工具提案需要连接服务器后才能拒绝。", "warning");
       return;
     }
@@ -2062,11 +2260,11 @@ export default function App() {
     }
     dispatch({ type: "agent/rejected" });
     showToast("已拒绝这次模型工具提案。", "success");
-  }, [showToast, state.agentProposal, state.agentRun, state.apiOnline]);
+  }, [showToast, state.agentProposal, state.agentRun, apiOnline]);
 
   const undoAppliedToolProposal = useCallback(async () => {
     if (!state.agentProposal) return;
-    if (!state.apiOnline) {
+    if (!apiOnline) {
       showToast("模型工具写入需要连接服务器后才能撤销。", "warning");
       return;
     }
@@ -2079,7 +2277,7 @@ export default function App() {
       showToast("撤销失败；服务器内容没有改变。", "warning");
       return;
     }
-  }, [showToast, state]);
+  }, [apiOnline, showToast, state]);
 
   const saveProvider = useCallback(
     async (input: ProviderConnectionInput, current?: ProviderConnection) => {
@@ -2109,37 +2307,38 @@ export default function App() {
             legacyHostPlugins[canonicalId]?.enabled === true;
           return {
             id: plugin.id,
-            enabled:
-              state.apiOnline && plugin.status === "enabled" && hostEnabled,
+            enabled: apiOnline && plugin.status === "enabled" && hostEnabled,
             available:
               canonicalId !== null && legacyAvailability[canonicalId] === true,
           };
         }),
-    [legacyAvailability, legacyHostPlugins, state.apiOnline, state.plugins],
+    [legacyAvailability, legacyHostPlugins, apiOnline, state.plugins],
   );
 
   const legacyRealmPanels = (
-    <LegacyRealmBridge
-      plugins={legacyBridgePlugins}
-      scope={{
-        ...(conversation === undefined
-          ? {}
-          : { conversationId: conversation.id }),
-        ...(preset === undefined ? {} : { presetId: preset.id }),
-        revisionKey: `${String(messages.length)}:${
-          messages.at(-1)?.id ?? "empty"
-        }:${String(messages.at(-1)?.revision ?? 0)}`,
-      }}
-      onRpc={(_pluginId, request) => callLegacyRpc(request)}
-      onStatus={handleLegacyStatus}
-    />
+    <Suspense fallback={null}>
+      <LazyLegacyRealmBridge
+        plugins={legacyBridgePlugins}
+        scope={{
+          ...(conversation === undefined
+            ? {}
+            : { conversationId: conversation.id }),
+          ...(preset === undefined ? {} : { presetId: preset.id }),
+          revisionKey: `${String(messages.length)}:${
+            messages.at(-1)?.id ?? "empty"
+          }:${String(messages.at(-1)?.revision ?? 0)}`,
+        }}
+        onRpc={(_pluginId, request) => callLegacyRpc(request)}
+        onStatus={handleLegacyStatus}
+      />
+    </Suspense>
   );
 
   const workspaceOverlays = (
     <>
       <WorkspaceModals
         modal={state.modal}
-        apiOnline={state.apiOnline}
+        apiOnline={apiOnline}
         cards={state.cards}
         selectedCard={selectedCard}
         preset={preset}
@@ -2207,6 +2406,14 @@ export default function App() {
           onImport={() =>
             dispatch({ type: "modal/set", modal: { kind: "import" } })
           }
+          notice={
+            <WorkspaceConnectionBanner
+              availability={state.availability}
+              error={state.bootstrapError}
+              onRetry={bootstrapWorkspace}
+              onEnterDemo={enterDemoWorkspace}
+            />
+          }
         />
         {workspaceOverlays}
       </>
@@ -2232,17 +2439,9 @@ export default function App() {
           </div>
         </div>
         <div className="topbar__actions">
-          <SurfaceStatus tone={state.apiOnline ? "mint" : "slate"}>
-            {state.apiOnline ? (
-              <CloudCheck size={14} />
-            ) : (
-              <CloudSlash size={14} />
-            )}
-            {state.loading
-              ? "正在连接"
-              : state.apiOnline
-                ? "本地服务在线"
-                : "离线工作区"}
+          <SurfaceStatus tone={apiOnline ? "mint" : "slate"}>
+            {apiOnline ? <CloudCheck size={14} /> : <CloudSlash size={14} />}
+            {loading ? "正在连接" : apiOnline ? "本地服务在线" : "离线工作区"}
           </SurfaceStatus>
           <button
             className="topbar-button provider-button"
@@ -2366,6 +2565,12 @@ export default function App() {
         />
 
         <main className="conversation-workspace">
+          <WorkspaceConnectionBanner
+            availability={state.availability}
+            error={state.bootstrapError}
+            onRetry={bootstrapWorkspace}
+            onEnterDemo={enterDemoWorkspace}
+          />
           <header className="conversation-header">
             <div className="conversation-header__identity">
               <div>
@@ -2385,6 +2590,11 @@ export default function App() {
               .filter((candidate) => candidate.cardId === selectedCard?.id)
               .map((candidate) => candidate.id)}
             messages={messages}
+            hasMore={Boolean(
+              state.messageNextCursorByConversation[conversation.id],
+            )}
+            loadingOlder={Boolean(state.messageHistoryLoading[conversation.id])}
+            onLoadOlder={() => loadOlderMessages(conversation.id)}
             generation={state.generation}
             helperRenderSettings={tavernHelperContext?.settings?.render}
             variablesByMessage={tavernHelperContext?.variables.messages}
@@ -2448,53 +2658,54 @@ export default function App() {
           />
         </main>
 
-        <TavernHelperWorkbench
-          open={tavernHelperWorkbenchOpen}
-          initialTool={tavernHelperInitialTool}
-          context={tavernHelperContext}
-          status={tavernHelperStatus}
-          onClose={() => setTavernHelperWorkbenchOpen(false)}
-          onToggleSource={(source) => void toggleTavernHelperSource(source)}
-          onSaveSettings={saveTavernHelperWorkbenchSettings}
-          onSaveScripts={saveTavernHelperWorkbenchScripts}
-          onSaveVariables={async (target, variables) => {
-            await saveTavernHelperState({
-              conversationId: conversation.id,
-              ...(state.selectedPresetId
-                ? { presetId: state.selectedPresetId }
-                : {}),
-              namespace: target.namespace,
-              variables,
-              ...(target.messageId ? { messageId: target.messageId } : {}),
-            });
-            setTavernHelperRevision((revision) => revision + 1);
-            showToast("变量已保存。", "success");
-          }}
-          onLoadPrompt={async () => {
-            const prepared = await preparePromptTemplate({
-              conversationId: conversation.id,
-              connectionId: state.selectedProviderId,
-              ...(state.selectedPresetId
-                ? { presetId: state.selectedPresetId }
-                : {}),
-            });
-            const rendered = await renderPromptTemplateMessages(
-              prepared.messages,
-              {
-                enabled: prepared.enabled,
-                context: tavernHelperContext,
-                directives: prepared.directives,
-              },
-            );
-            return {
-              ...prepared,
-              messages: rendered.messages,
-              templateCount: rendered.sourceTemplateCount,
-              renderedCount: rendered.renderedCount,
-              diagnostics: rendered.diagnostics,
-            };
-          }}
-        />
+        <Suspense fallback={null}>
+          {tavernHelperWorkbenchOpen ? (
+            <LazyTavernHelperWorkbench
+              open
+              initialTool={tavernHelperInitialTool}
+              context={tavernHelperContext}
+              status={tavernHelperStatus}
+              onClose={() => setTavernHelperWorkbenchOpen(false)}
+              onToggleSource={(source) => void toggleTavernHelperSource(source)}
+              onSaveSettings={saveTavernHelperWorkbenchSettings}
+              onSaveScripts={saveTavernHelperWorkbenchScripts}
+              onSaveVariables={async (target, variables) => {
+                await saveTavernHelperState({
+                  conversationId: conversation.id,
+                  ...(state.selectedPresetId
+                    ? { presetId: state.selectedPresetId }
+                    : {}),
+                  namespace: target.namespace,
+                  variables,
+                  ...(target.messageId ? { messageId: target.messageId } : {}),
+                });
+                setTavernHelperRevision((revision) => revision + 1);
+                showToast("变量已保存。", "success");
+              }}
+              onLoadPrompt={async () => {
+                await ensureTavernHelperRuntime(conversation.id);
+                const prepared = await preparePromptTemplate({
+                  conversationId: conversation.id,
+                  connectionId: state.selectedProviderId,
+                  ...(state.selectedPresetId
+                    ? { presetId: state.selectedPresetId }
+                    : {}),
+                });
+                const rendered = await renderPreparedPrompt(
+                  prepared,
+                  tavernHelperContextRef.current,
+                );
+                return {
+                  ...prepared,
+                  messages: rendered.messages,
+                  templateCount: rendered.sourceTemplateCount,
+                  renderedCount: rendered.renderedCount,
+                  diagnostics: rendered.diagnostics,
+                };
+              }}
+            />
+          ) : null}
+        </Suspense>
 
         <NavigationRail
           key={state.selectedCardId || "card-list"}

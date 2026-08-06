@@ -520,4 +520,46 @@ export const migrations: readonly Migration[] = [
         ON conversations(persona_id, updated_at DESC, id);
     `,
   },
+  {
+    version: 10,
+    name: "generation-state-swipe-and-pagination-invariants",
+    sql: `
+      ALTER TABLE messages
+        ADD COLUMN generation_status TEXT NOT NULL DEFAULT 'complete'
+          CHECK (generation_status IN ('complete','partial','cancelled','error'));
+      ALTER TABLE messages
+        ADD COLUMN finish_reason TEXT
+          CHECK (
+            finish_reason IS NULL OR finish_reason IN (
+              'stop','length','tool-calls','cancelled','limit','provider-error'
+            )
+          );
+      ALTER TABLE messages
+        ADD COLUMN provider_error_code TEXT;
+
+      UPDATE swipes
+      SET selected = 0
+      WHERE selected = 1
+        AND EXISTS (
+          SELECT 1
+          FROM swipes AS preferred
+          WHERE preferred.message_id = swipes.message_id
+            AND preferred.selected = 1
+            AND (
+              preferred.position < swipes.position OR
+              (preferred.position = swipes.position AND preferred.id < swipes.id)
+            )
+        );
+
+      CREATE UNIQUE INDEX swipes_one_selected_idx
+        ON swipes(message_id)
+        WHERE selected = 1;
+      CREATE INDEX conversations_updated_idx
+        ON conversations(updated_at DESC, id);
+      CREATE INDEX messages_conversation_created_idx
+        ON messages(conversation_id, created_at DESC, id DESC);
+      CREATE INDEX worldbook_bindings_scope_idx
+        ON worldbook_bindings(scope_type, scope_id, worldbook_id);
+    `,
+  },
 ];

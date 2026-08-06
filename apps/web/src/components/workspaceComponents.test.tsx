@@ -27,6 +27,7 @@ import {
   MessageStream,
   sandboxedDisplayDocument,
 } from "./MessageStream";
+import { LegacyManagementModal } from "./LegacyManagementModal";
 import { ParticipantChips } from "./WorkspacePrimitives";
 import { WorkspaceModals } from "./WorkspaceModals";
 
@@ -108,10 +109,9 @@ describe("workspace components", () => {
       (candidate) => candidate.id === "plugin-js-slash-runner",
     )!;
     const html = renderToStaticMarkup(
-      <WorkspaceModals
-        modal={{ kind: "plugins" }}
-        apiOnline
-        cards={[]}
+      <LegacyManagementModal
+        kind="plugins"
+        online
         plugins={[plugin]}
         legacyHostPlugins={{
           "js-slash-runner": {
@@ -125,19 +125,9 @@ describe("workspace components", () => {
             enabled: false,
           },
         }}
-        worldbooks={[]}
-        providerConnections={[]}
-        selectedProviderId="fake"
         onClose={vi.fn()}
-        onSelectCard={vi.fn()}
-        onDeleteCard={vi.fn()}
-        onCreateConversation={vi.fn()}
-        onImport={vi.fn()}
-        onInstallPlugin={vi.fn()}
-        onTogglePlugin={vi.fn()}
-        onPermission={vi.fn()}
-        onSelectProvider={vi.fn()}
-        onSaveProvider={vi.fn()}
+        onInstall={vi.fn()}
+        onToggle={vi.fn()}
       />,
     );
 

@@ -12,7 +12,6 @@ import {
   PencilSimple,
   Power,
   Plus,
-  PuzzlePiece,
   X,
 } from "@phosphor-icons/react";
 import {
@@ -26,7 +25,6 @@ import {
 } from "react";
 
 import type {
-  LegacyPlugin,
   PromptPreset,
   PromptPresetEntry,
   RegexScope,
@@ -1374,89 +1372,5 @@ export function WorldbookRail({
         ) : null}
       </div>
     </SupportPanel>
-  );
-}
-
-type ExtensionsPanelProps = {
-  plugins: LegacyPlugin[];
-  pluginRealms: ReactNode;
-  onOpenPlugins: () => void;
-};
-
-export function ExtensionsPanel({
-  plugins,
-  pluginRealms,
-  onOpenPlugins,
-}: ExtensionsPanelProps) {
-  return (
-    <section className="extension-plugins" aria-labelledby="plugin-menu-title">
-      <div className="extension-plugins__heading">
-        <div>
-          <PuzzlePiece size={17} />
-          <strong id="plugin-menu-title">兼容插件</strong>
-        </div>
-        <button className="text-button" type="button" onClick={onOpenPlugins}>
-          管理插件
-        </button>
-      </div>
-      <div className="extension-plugin-list">
-        {plugins.map((plugin) => {
-          const nativeReplacement =
-            plugin.id === "plugin-js-slash-runner" ||
-            plugin.id === "plugin-st-prompt-template";
-          const active =
-            plugin.status === "enabled" && plugin.trust === "trusted";
-          return (
-            <details className="extension-plugin" key={plugin.id}>
-              <summary>
-                <span>
-                  <PuzzlePiece size={15} />
-                  <strong>{plugin.name}</strong>
-                </span>
-                <SurfaceStatus
-                  tone={nativeReplacement || active ? "mint" : "slate"}
-                >
-                  {nativeReplacement
-                    ? "原生接管"
-                    : active
-                      ? "菜单已接入"
-                      : "未启用"}
-                </SurfaceStatus>
-              </summary>
-              <div>
-                <p>
-                  {plugin.id === "plugin-js-slash-runner"
-                    ? "角色卡与预设脚本由内置酒馆助手接口执行。"
-                    : plugin.id === "plugin-st-prompt-template"
-                      ? "EJS 与模板指令由原生请求管线处理。"
-                      : plugin.description}
-                </p>
-                <small>
-                  {plugin.version} ·{" "}
-                  {nativeReplacement
-                    ? "卡片与预设能力由内置兼容层执行"
-                    : "独立兼容域运行"}
-                </small>
-                <button
-                  className="button button--quiet button--full"
-                  type="button"
-                  onClick={onOpenPlugins}
-                >
-                  查看权限与加载详情
-                </button>
-              </div>
-            </details>
-          );
-        })}
-        {plugins.length === 0 ? (
-          <p className="support-empty">
-            还没有兼容插件；安装后菜单项会自动出现在这里。
-          </p>
-        ) : null}
-      </div>
-      <div className="legacy-plugin-realms" aria-label="兼容插件菜单">
-        {pluginRealms}
-      </div>
-    </section>
   );
 }

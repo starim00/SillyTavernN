@@ -91,6 +91,10 @@ type ApiMessage = {
   appliedRegexScriptIds?: string[];
   revision?: number;
   createdAt?: string;
+  generationStatus?: "complete" | "partial" | "cancelled" | "error";
+  state?: "complete" | "partial" | "cancelled" | "error";
+  finishReason?: WorkspaceMessage["finishReason"] | null;
+  providerErrorCode?: string | null;
   swipes?: ApiSwipe[];
 };
 
@@ -257,10 +261,17 @@ export type ApiBootstrap = {
   personas?: Persona[];
   participants: Participant[];
   messagesByConversation: Record<string, WorkspaceMessage[]>;
+  conversationNextCursor?: string | null;
+  messageNextCursorByConversation?: Record<string, string | null>;
   worldbooks: Worldbook[];
   presets: PromptPreset[];
   regexScopes: RegexScope[];
   providerConnections: ProviderConnection[];
+};
+
+type ApiPage<T> = {
+  items: T[];
+  nextCursor: string | null;
 };
 
 export type GenerationReceipt =
@@ -271,7 +282,7 @@ export type GenerationReceipt =
       content: string;
       alternatives?: string[];
       incomplete?: boolean;
-      reason?: "length" | "cancelled" | "error";
+      reason?: "length" | "cancelled" | "error" | "limit";
       errorCode?: string;
       errorMessage?: string;
     }
@@ -550,6 +561,11 @@ const normalizeMessage = (item: ApiMessage): WorkspaceMessage => {
     appliedRegexScriptIds: item.appliedRegexScriptIds ?? [],
     createdLabel: timeLabel(item.createdAt),
     revision: item.revision ?? 1,
+    state: item.state ?? item.generationStatus ?? "complete",
+    ...(item.finishReason ? { finishReason: item.finishReason } : {}),
+    ...(item.providerErrorCode
+      ? { providerErrorCode: item.providerErrorCode }
+      : {}),
     ...(swipes.length > 0
       ? { swipes, activeSwipeIndex: Math.max(0, selectedIndex) }
       : {}),
@@ -904,18 +920,28 @@ export async function loadConversationMessages(
   conversationId: string,
   presetId?: string,
 ): Promise<WorkspaceMessage[]> {
-  const query =
-    presetId === undefined || presetId.length === 0
-      ? ""
-      : `?presetId=${encodeURIComponent(presetId)}`;
-  const result = await request<ApiEnvelope<ApiMessage[]>>(
-    `/conversations/${encodeURIComponent(conversationId)}/messages${query}`,
+  return (await loadConversationMessagePage(conversationId, presetId)).items;
+}
+
+export async function loadConversationMessagePage(
+  conversationId: string,
+  presetId?: string,
+  cursor?: string,
+): Promise<{ items: WorkspaceMessage[]; nextCursor: string | null }> {
+  const query = new URLSearchParams({ limit: "100" });
+  if (presetId) query.set("presetId", presetId);
+  if (cursor) query.set("cursor", cursor);
+  const result = await request<ApiEnvelope<ApiPage<ApiMessage>>>(
+    `/conversations/${encodeURIComponent(conversationId)}/messages?${query.toString()}`,
   );
-  return result.data
-    .filter(
-      (message) => message.role === "user" || message.role === "assistant",
-    )
-    .map(normalizeMessage);
+  return {
+    items: result.data.items
+      .filter(
+        (message) => message.role === "user" || message.role === "assistant",
+      )
+      .map(normalizeMessage),
+    nextCursor: result.data.nextCursor,
+  };
 }
 
 export async function loadTavernHelperContext(input: {
@@ -1051,6 +1077,7 @@ export async function loadWorldbooksFromApi(): Promise<Worldbook[]> {
 
 export async function loadWorkspaceFromApi(
   selectedPresetId?: string,
+  selectedConversationId?: string,
 ): Promise<ApiBootstrap> {
   await request<ApiEnvelope<{ ok?: boolean }>>("/health", {
     timeoutMs: 1_600,
@@ -1064,7 +1091,7 @@ export async function loadWorkspaceFromApi(
     regexResult,
     providerResult,
   ] = await Promise.all([
-    request<ApiEnvelope<ApiConversation[]>>("/conversations"),
+    request<ApiEnvelope<ApiPage<ApiConversation>>>("/conversations?limit=50"),
     request<ApiEnvelope<ApiCard[]>>("/cards"),
     request<ApiEnvelope<ApiPersona[]>>("/personas"),
     request<ApiEnvelope<ApiWorldbook[]>>("/worldbooks"),
@@ -1073,19 +1100,33 @@ export async function loadWorkspaceFromApi(
     request<ApiEnvelope<ApiProviderConnection[]>>("/providers/connections"),
   ]);
 
-  const conversations = conversationResult.data.map(normalizeConversation);
+  const conversationItems = [...conversationResult.data.items];
+  if (
+    selectedConversationId &&
+    !conversationItems.some(
+      (conversation) => conversation.id === selectedConversationId,
+    )
+  ) {
+    const selected = await request<ApiEnvelope<ApiConversation>>(
+      `/conversations/${encodeURIComponent(selectedConversationId)}`,
+    ).catch(() => undefined);
+    if (selected !== undefined) conversationItems.push(selected.data);
+  }
+  const conversations = conversationItems.map(normalizeConversation);
   const activePresetId =
     presetResult.data.find((preset) => preset.id === selectedPresetId)?.id ??
     presetResult.data[0]?.id;
-  const messagePairs = await Promise.all(
-    conversations.map(
-      async (conversation) =>
-        [
-          conversation.id,
-          await loadConversationMessages(conversation.id, activePresetId),
-        ] as const,
-    ),
-  );
+  const activeConversation =
+    conversations.find(
+      (conversation) => conversation.id === selectedConversationId,
+    ) ?? conversations[0];
+  const activeMessages =
+    activeConversation === undefined
+      ? undefined
+      : await loadConversationMessagePage(
+          activeConversation.id,
+          activePresetId,
+        );
   const participantMap = new Map<string, Participant>();
   cardResult.data.forEach((card) => {
     card.participants?.forEach((participant) => {
@@ -1097,7 +1138,7 @@ export async function loadWorkspaceFromApi(
       }
     });
   });
-  conversationResult.data.forEach((conversation) => {
+  conversationItems.forEach((conversation) => {
     conversation.participants?.forEach((participant) => {
       if (!participantMap.has(participant.id)) {
         participantMap.set(
@@ -1111,11 +1152,19 @@ export async function loadWorkspaceFromApi(
   return {
     conversations,
     cards: cardResult.data.map((card) =>
-      normalizeCard(card, conversationResult.data),
+      normalizeCard(card, conversationItems),
     ),
     personas: personaResult.data.map(normalizePersona),
     participants: [...participantMap.values()],
-    messagesByConversation: Object.fromEntries(messagePairs),
+    messagesByConversation:
+      activeConversation === undefined || activeMessages === undefined
+        ? {}
+        : { [activeConversation.id]: activeMessages.items },
+    conversationNextCursor: conversationResult.data.nextCursor,
+    messageNextCursorByConversation:
+      activeConversation === undefined || activeMessages === undefined
+        ? {}
+        : { [activeConversation.id]: activeMessages.nextCursor },
     worldbooks: worldbookResult.data.map(normalizeWorldbook),
     presets: presetResult.data.map(normalizePreset),
     regexScopes: regexResult.data.map(normalizeRegexScope),
@@ -1225,6 +1274,11 @@ type StreamEvent = {
   [key: string]: unknown;
 };
 
+const MAX_GENERATION_SSE_FRAME_BYTES = 1024 * 1024;
+const MAX_GENERATION_OUTPUT_BYTES = 4 * 1024 * 1024;
+const MAX_GENERATION_EVENTS = 100_000;
+const generationTextEncoder = new TextEncoder();
+
 function parseStreamEvent(data: string): StreamEvent {
   const parsed: unknown = JSON.parse(data);
   if (!isRecord(parsed) || typeof parsed.type !== "string") {
@@ -1264,38 +1318,44 @@ export async function generateConversation(
       content: string;
       depth: number;
     }>;
+    targetMessage?: { id: string; revision: number };
     signal?: AbortSignal;
   },
   callbacks: GenerationCallbacks = {},
 ): Promise<GenerationReceipt> {
   let response: Response;
+  const generationPath = input.targetMessage
+    ? `/api/messages/${encodeURIComponent(input.targetMessage.id)}/regenerate`
+    : `/api/conversations/${encodeURIComponent(input.conversationId)}/generate`;
   try {
-    response = await fetch(
-      `/api/conversations/${encodeURIComponent(input.conversationId)}/generate`,
-      {
-        method: "POST",
-        headers: {
-          Accept: "text/event-stream",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          connectionId: input.connectionId,
-          ...(input.presetId ? { presetId: input.presetId } : {}),
-          ...(input.messagesOverride
-            ? { messagesOverride: input.messagesOverride }
-            : {}),
-          ...(input.injects?.length ? { injects: input.injects } : {}),
-        }),
-        ...(input.signal ? { signal: input.signal } : {}),
+    response = await fetch(generationPath, {
+      method: "POST",
+      headers: {
+        Accept: "text/event-stream",
+        "Content-Type": "application/json",
       },
-    );
+      body: JSON.stringify({
+        connectionId: input.connectionId,
+        ...(input.presetId ? { presetId: input.presetId } : {}),
+        ...(input.messagesOverride
+          ? { messagesOverride: input.messagesOverride }
+          : {}),
+        ...(input.injects?.length ? { injects: input.injects } : {}),
+        ...(input.targetMessage
+          ? {
+              expectedMessageRevision: input.targetMessage.revision,
+            }
+          : {}),
+      }),
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
   } catch (error) {
     if (input.signal?.aborted) throw new GenerationInterruptedError();
     throw error;
   }
 
   if (!response.ok) {
-    throw await errorFromResponse(response, "/conversations/:id/generate");
+    throw await errorFromResponse(response, generationPath);
   }
   if (!response.body) {
     throw new WorkspaceApiError("Provider stream has no response body.", 502);
@@ -1311,14 +1371,34 @@ export async function generateConversation(
   let alternatives: string[] | undefined;
   let toolProposalReceived = false;
   let incomplete = false;
-  let incompleteReason: "length" | "cancelled" | "error" | undefined;
+  let incompleteReason: "length" | "cancelled" | "error" | "limit" | undefined;
   let errorCode: string | undefined;
   let errorMessage: string | undefined;
   let pendingError: WorkspaceApiError | undefined;
+  let eventCount = 0;
+  let outputBytes = 0;
 
   const consume = (frame: string) => {
     const data = dataFromFrame(frame);
     if (!data) return;
+    if (
+      generationTextEncoder.encode(data).byteLength >
+      MAX_GENERATION_SSE_FRAME_BYTES
+    ) {
+      throw new WorkspaceApiError(
+        "Provider SSE frame exceeded its byte budget.",
+        502,
+        "GENERATION_SSE_FRAME_LIMIT",
+      );
+    }
+    eventCount += 1;
+    if (eventCount > MAX_GENERATION_EVENTS) {
+      throw new WorkspaceApiError(
+        "Provider event count exceeded its budget.",
+        502,
+        "GENERATION_EVENT_LIMIT",
+      );
+    }
     const event = parseStreamEvent(data);
     if (event.type === "generation-id") {
       if (typeof event.generationId !== "string") {
@@ -1330,6 +1410,14 @@ export async function generateConversation(
     }
     if (event.type === "text-delta") {
       if (typeof event.delta !== "string") return;
+      outputBytes += generationTextEncoder.encode(event.delta).byteLength;
+      if (outputBytes > MAX_GENERATION_OUTPUT_BYTES) {
+        throw new WorkspaceApiError(
+          "Provider output exceeded its byte budget.",
+          502,
+          "GENERATION_OUTPUT_LIMIT",
+        );
+      }
       content += event.delta;
       callbacks.onTextDelta?.(event.delta);
       return;
@@ -1350,7 +1438,8 @@ export async function generateConversation(
         incompleteReason =
           event.reason === "length" ||
           event.reason === "cancelled" ||
-          event.reason === "error"
+          event.reason === "error" ||
+          event.reason === "limit"
             ? event.reason
             : undefined;
         errorCode =
@@ -1388,6 +1477,11 @@ export async function generateConversation(
       );
       return;
     }
+    if (event.type === "generation-limit") {
+      incomplete = true;
+      incompleteReason = "limit";
+      return;
+    }
     if (event.type === "finish" && event.reason === "cancelled") {
       incomplete = true;
       incompleteReason = "cancelled";
@@ -1401,6 +1495,16 @@ export async function generateConversation(
       buffer += decoder.decode(value, { stream: true });
       const parsed = streamFrames(buffer);
       buffer = parsed.remainder;
+      if (
+        generationTextEncoder.encode(buffer).byteLength >
+        MAX_GENERATION_SSE_FRAME_BYTES
+      ) {
+        throw new WorkspaceApiError(
+          "Provider SSE buffer exceeded its byte budget.",
+          502,
+          "GENERATION_SSE_BUFFER_LIMIT",
+        );
+      }
       parsed.frames.forEach(consume);
     }
     buffer += decoder.decode();

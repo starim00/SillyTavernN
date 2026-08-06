@@ -2,7 +2,6 @@ import {
   BookOpenText,
   BracketsCurly,
   Books,
-  Check,
   CheckCircle,
   ClockCounterClockwise,
   FileArrowUp,
@@ -10,7 +9,6 @@ import {
   LockOpen,
   PlugsConnected,
   Plus,
-  PuzzlePiece,
   ShieldWarning,
   Star,
   Trash,
@@ -20,7 +18,13 @@ import {
   PencilSimple,
   X,
 } from "@phosphor-icons/react";
-import { useState, type FormEvent, type ReactNode } from "react";
+import {
+  lazy,
+  Suspense,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 
 import type { LegacyHostPluginStatus, PersonaInput } from "../api/workspaceApi";
 import type {
@@ -39,8 +43,14 @@ import type {
   WorldbookEntry,
   WorldbookEntryUpdate,
 } from "../domain/workspace";
-import { ExtensionsPanel, RegexRail, WorldbookRail } from "./ContextRail";
+import { RegexRail, WorldbookRail } from "./ContextRail";
 import { IconButton, SurfaceStatus } from "./WorkspacePrimitives";
+
+const LazyLegacyManagementModal = lazy(() =>
+  import("./LegacyManagementModal").then((module) => ({
+    default: module.LegacyManagementModal,
+  })),
+);
 
 function ModalFrame({
   title,
@@ -160,143 +170,6 @@ function ImportModal({
           </button>
         </footer>
       </form>
-    </ModalFrame>
-  );
-}
-
-function PluginsModal({
-  online,
-  plugins,
-  legacyHostPlugins,
-  onClose,
-  onInstall,
-  onToggle,
-}: {
-  online: boolean;
-  plugins: LegacyPlugin[];
-  legacyHostPlugins: Record<string, LegacyHostPluginStatus>;
-  onClose: () => void;
-  onInstall: (plugin: LegacyPlugin) => Promise<void>;
-  onToggle: (plugin: LegacyPlugin) => Promise<void>;
-}) {
-  const [submittingId, setSubmittingId] = useState<string | null>(null);
-
-  return (
-    <ModalFrame
-      title="兼容插件"
-      description="旧版扩展在独立来源的兼容域运行；插件权限与模型工具权限彼此独立。"
-      icon={<PuzzlePiece size={22} />}
-      onClose={onClose}
-      size="large"
-    >
-      <div className="plugin-list">
-        {plugins.map((plugin) => {
-          const canonicalId = plugin.id.startsWith("plugin-")
-            ? plugin.id.slice("plugin-".length)
-            : plugin.id;
-          const host = legacyHostPlugins[canonicalId];
-          const verified = Boolean(host?.installed && host.verified);
-          const hostEnabled = verified && host?.enabled === true;
-          const runtimeAttention = hostEnabled && plugin.status === "attention";
-          const installBlocked = Boolean(host?.installed && !host.verified);
-          return (
-            <article className="plugin-row" key={plugin.id}>
-              <span className="plugin-row__icon" aria-hidden="true">
-                <PuzzlePiece size={21} />
-              </span>
-              <div className="plugin-row__body">
-                <div className="plugin-row__heading">
-                  <strong>{plugin.name}</strong>
-                  <span>v{plugin.version}</span>
-                  <SurfaceStatus
-                    tone={
-                      hostEnabled && !runtimeAttention
-                        ? "mint"
-                        : runtimeAttention
-                          ? "coral"
-                          : "slate"
-                    }
-                  >
-                    {hostEnabled && !runtimeAttention
-                      ? "已启用"
-                      : runtimeAttention
-                        ? "需要检查"
-                        : "已停用"}
-                  </SurfaceStatus>
-                </div>
-                <p>{plugin.description}</p>
-                <small>
-                  {host === undefined
-                    ? "安装服务不可用"
-                    : verified
-                      ? `已校验固定提交 ${host.commit.slice(0, 12)}，宿主${
-                          hostEnabled ? "已启用" : "保持停用"
-                        }`
-                      : host.installed
-                        ? `本地目录校验失败${host.reason ? `：${host.reason}` : ""}`
-                        : "尚未安装固定版本"}
-                  {" · "}
-                  {plugin.trust === "trusted"
-                    ? "已由用户信任 · 独立兼容域"
-                    : "未信任 · 默认不加载"}
-                </small>
-              </div>
-              <button
-                className={`button ${
-                  verified && hostEnabled
-                    ? "button--quiet"
-                    : "button--secondary"
-                }`}
-                type="button"
-                disabled={
-                  !online ||
-                  submittingId !== null ||
-                  host === undefined ||
-                  installBlocked
-                }
-                onClick={() => {
-                  setSubmittingId(plugin.id);
-                  void (
-                    verified ? onToggle(plugin) : onInstall(plugin)
-                  ).finally(() => setSubmittingId(null));
-                }}
-              >
-                {verified && hostEnabled ? (
-                  <X size={16} />
-                ) : (
-                  <Check size={16} />
-                )}
-                {submittingId === plugin.id
-                  ? verified
-                    ? "正在检查"
-                    : "正在安装"
-                  : installBlocked
-                    ? "需要处理目录"
-                    : !verified
-                      ? "安装固定版本"
-                      : hostEnabled
-                        ? "停用"
-                        : plugin.trust === "trusted"
-                          ? "启用"
-                          : "信任并启用"}
-              </button>
-            </article>
-          );
-        })}
-      </div>
-      <div className="modal-note">
-        <ShieldWarning size={17} />
-        <span>Provider 密钥、主应用 DOM 与数据库句柄不会暴露给旧版插件。</span>
-      </div>
-      <footer className="modal-actions">
-        <button
-          className="button button--primary"
-          type="button"
-          onClick={onClose}
-        >
-          完成
-        </button>
-      </footer>
     </ModalFrame>
   );
 }
@@ -1155,36 +1028,6 @@ function WorldbookModal({
   );
 }
 
-function ExtensionsModal({
-  plugins,
-  pluginRealms,
-  onClose,
-  onOpenPlugins,
-}: {
-  plugins: LegacyPlugin[];
-  pluginRealms: ReactNode;
-  onClose: () => void;
-  onOpenPlugins: () => void;
-}) {
-  return (
-    <ModalFrame
-      title="扩展"
-      description="查看兼容插件及其提供的功能菜单。"
-      icon={<PuzzlePiece size={22} />}
-      onClose={onClose}
-      size="large"
-    >
-      <div className="modal-support-content modal-support-content--extensions">
-        <ExtensionsPanel
-          plugins={plugins}
-          pluginRealms={pluginRealms}
-          onOpenPlugins={onOpenPlugins}
-        />
-      </div>
-    </ModalFrame>
-  );
-}
-
 function AgentProposalModal({
   proposal,
   onClose,
@@ -1411,24 +1254,30 @@ export function WorkspaceModals({
   }
   if (modal.kind === "plugins") {
     return (
-      <PluginsModal
-        online={apiOnline}
-        plugins={plugins}
-        legacyHostPlugins={legacyHostPlugins}
-        onClose={onClose}
-        onInstall={onInstallPlugin}
-        onToggle={onTogglePlugin}
-      />
+      <Suspense fallback={<div className="modal-backdrop" role="status" />}>
+        <LazyLegacyManagementModal
+          kind="plugins"
+          online={apiOnline}
+          plugins={plugins}
+          legacyHostPlugins={legacyHostPlugins}
+          onClose={onClose}
+          onInstall={onInstallPlugin}
+          onToggle={onTogglePlugin}
+        />
+      </Suspense>
     );
   }
   if (modal.kind === "extensions") {
     return (
-      <ExtensionsModal
-        plugins={plugins}
-        pluginRealms={pluginRealms}
-        onClose={onClose}
-        onOpenPlugins={onOpenPlugins}
-      />
+      <Suspense fallback={<div className="modal-backdrop" role="status" />}>
+        <LazyLegacyManagementModal
+          kind="extensions"
+          plugins={plugins}
+          pluginRealms={pluginRealms}
+          onClose={onClose}
+          onOpenPlugins={onOpenPlugins}
+        />
+      </Suspense>
     );
   }
   if (modal.kind === "regex") {

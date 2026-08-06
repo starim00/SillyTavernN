@@ -267,13 +267,19 @@ describe("workspace API client", () => {
       }
       if (
         [
-          "/api/conversations",
+          "/api/conversations?limit=50",
           "/api/personas",
           "/api/worldbooks",
           "/api/providers/connections",
         ].includes(url)
       ) {
-        return Promise.resolve(jsonResponse({ data: [] }));
+        return Promise.resolve(
+          jsonResponse(
+            url.startsWith("/api/conversations")
+              ? { data: { items: [], nextCursor: null } }
+              : { data: [] },
+          ),
+        );
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -627,36 +633,39 @@ describe("workspace API client", () => {
       "fetch",
       vi.fn().mockResolvedValue(
         jsonResponse({
-          data: [
-            {
-              id: "message-user",
-              conversationId: "conversation-1",
-              role: "user",
-              content: "Hello.",
-              displayContent: "<strong>Hello.</strong>",
-              appliedRegexScriptIds: ["card-user-display"],
-            },
-            {
-              id: "message-system",
-              conversationId: "conversation-1",
-              role: "system",
-              content: "Private runtime context.",
-            },
-            {
-              id: "message-assistant",
-              conversationId: "conversation-1",
-              role: "assistant",
-              content: "Welcome.",
-              displayContent: "Displayed welcome.",
-              appliedRegexScriptIds: ["preset-assistant-display"],
-            },
-            {
-              id: "message-tool",
-              conversationId: "conversation-1",
-              role: "tool",
-              content: "Private tool result.",
-            },
-          ],
+          data: {
+            items: [
+              {
+                id: "message-user",
+                conversationId: "conversation-1",
+                role: "user",
+                content: "Hello.",
+                displayContent: "<strong>Hello.</strong>",
+                appliedRegexScriptIds: ["card-user-display"],
+              },
+              {
+                id: "message-system",
+                conversationId: "conversation-1",
+                role: "system",
+                content: "Private runtime context.",
+              },
+              {
+                id: "message-assistant",
+                conversationId: "conversation-1",
+                role: "assistant",
+                content: "Welcome.",
+                displayContent: "Displayed welcome.",
+                appliedRegexScriptIds: ["preset-assistant-display"],
+              },
+              {
+                id: "message-tool",
+                conversationId: "conversation-1",
+                role: "tool",
+                content: "Private tool result.",
+              },
+            ],
+            nextCursor: null,
+          },
         }),
       ),
     );
@@ -682,7 +691,7 @@ describe("workspace API client", () => {
       }),
     ]);
     expect(fetch).toHaveBeenCalledWith(
-      "/api/conversations/conversation-1/messages?presetId=preset%20display%2F1",
+      "/api/conversations/conversation-1/messages?limit=100&presetId=preset+display%2F1",
       expect.any(Object),
     );
     expect(messages[0]?.content).toBe("Hello.");
@@ -725,7 +734,7 @@ describe("workspace API client", () => {
 
   it("confirms a server-backed conversation tool proposal without creating a run", async () => {
     const state = createDemoWorkspace();
-    state.apiOnline = true;
+    state.availability = "api";
     state.selectedProviderId = "fake";
     const worldbook = state.worldbooks[0]!;
     const run = {
@@ -815,7 +824,7 @@ describe("workspace API client", () => {
 
   it("recovers an awaiting worldbook proposal after a workspace refresh", async () => {
     const state = createDemoWorkspace();
-    state.apiOnline = true;
+    state.availability = "api";
     state.agentProposal = null;
     const worldbook = state.worldbooks[0]!;
     const entry = worldbook.entries.find(
@@ -908,7 +917,7 @@ describe("workspace API client", () => {
       targetLabel,
     }) => {
       const state = createDemoWorkspace();
-      state.apiOnline = true;
+      state.availability = "api";
       state.agentProposal = null;
       const run = {
         id: `run-pending-${artifactKind}`,
@@ -987,7 +996,7 @@ describe("workspace API client", () => {
       },
     });
     expect(proposal).not.toBeNull();
-    state.apiOnline = true;
+    state.availability = "api";
     state.agentProposal = {
       ...proposal!,
       status: "applied",

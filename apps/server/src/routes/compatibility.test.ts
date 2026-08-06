@@ -198,7 +198,7 @@ describe("native Tavern Helper compatibility routes", () => {
       url: `/api/compatibility/tavern-helper?conversationId=${conversation.id}`,
     });
     expect(initial.statusCode).toBe(200);
-    expect(initial.json().data).toMatchObject({
+    expect((initial.json() as { data: unknown }).data).toMatchObject({
       sources: [
         {
           scope: "card",
@@ -246,7 +246,9 @@ describe("native Tavern Helper compatibility routes", () => {
       payload: { scope: "card", id: card.id, granted: true },
     });
     expect(granted.statusCode).toBe(200);
-    expect(granted.json().data.granted).toBe(true);
+    expect(
+      (granted.json() as { data: { granted: boolean } }).data.granted,
+    ).toBe(true);
 
     const saved = await server.app.inject({
       method: "PUT",
@@ -275,7 +277,7 @@ describe("native Tavern Helper compatibility routes", () => {
       method: "GET",
       url: `/api/compatibility/tavern-helper?conversationId=${conversation.id}`,
     });
-    expect(reloaded.json().data).toMatchObject({
+    expect((reloaded.json() as { data: unknown }).data).toMatchObject({
       sources: [{ id: card.id, trusted: true }],
       variables: {
         messages: {
@@ -325,7 +327,13 @@ describe("native Tavern Helper compatibility routes", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json().data.variables.character).toEqual({
+    expect(
+      (
+        response.json() as {
+          data: { variables: { character: unknown } };
+        }
+      ).data.variables.character,
+    ).toEqual({
       initialized_lorebooks: { "Cross-conversation state card": [] },
       stat_data: { world: { day: 12 }, system: { created: true } },
     });
@@ -365,9 +373,9 @@ describe("native Tavern Helper compatibility routes", () => {
       },
     });
     expect(response.statusCode).toBe(400);
-    expect(response.json().error.message).toContain(
-      "must belong to this conversation",
-    );
+    expect(
+      (response.json() as { error: { message: string } }).error.message,
+    ).toContain("must belong to this conversation");
   });
 
   it("prepares trusted prompt messages with detached worldbook directives", async () => {
@@ -419,7 +427,7 @@ describe("native Tavern Helper compatibility routes", () => {
       },
     });
     expect(response.statusCode).toBe(200);
-    expect(response.json().data).toMatchObject({
+    expect((response.json() as { data: unknown }).data).toMatchObject({
       enabled: true,
       directives: [
         {

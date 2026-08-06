@@ -299,7 +299,7 @@ function protectCompleteHtmlBlocks(source: string): {
     const start = node.startIndex;
     const end = node.endIndex;
     if (
-      node.type === "text" ||
+      String(node.type) === "text" ||
       typeof start !== "number" ||
       typeof end !== "number" ||
       !startsAtLineBoundary(source, start)
@@ -838,6 +838,9 @@ type MessageStreamProps = {
   cardId?: string | undefined;
   storageConversationIds?: readonly string[] | undefined;
   messages: WorkspaceMessage[];
+  hasMore?: boolean;
+  loadingOlder?: boolean;
+  onLoadOlder?: (() => Promise<void>) | undefined;
   generation: GenerationState;
   onCopy: (message: WorkspaceMessage) => void;
   onUpdate: (message: WorkspaceMessage, content: string) => Promise<void>;
@@ -867,6 +870,9 @@ export function MessageStream({
   cardId,
   storageConversationIds,
   messages,
+  hasMore = false,
+  loadingOlder = false,
+  onLoadOlder,
   generation,
   onCopy,
   onUpdate,
@@ -882,6 +888,11 @@ export function MessageStream({
   const viewportRef = useRef<HTMLDivElement>(null);
   const sticksToBottomRef = useRef(true);
   const previousConversationIdRef = useRef(conversationId);
+  const loadingOlderRef = useRef(false);
+  const historyAnchorRef = useRef<{
+    scrollHeight: number;
+    scrollTop: number;
+  } | null>(null);
   const showsGeneration =
     generation.status !== "idle" &&
     generation.conversationId === conversationId;
@@ -908,13 +919,40 @@ export function MessageStream({
     const distanceFromBottom =
       element.scrollHeight - element.scrollTop - element.clientHeight;
     sticksToBottomRef.current = distanceFromBottom <= 80;
-  }, []);
+    if (
+      element.scrollTop <= 120 &&
+      hasMore &&
+      !loadingOlder &&
+      !loadingOlderRef.current &&
+      onLoadOlder
+    ) {
+      loadingOlderRef.current = true;
+      historyAnchorRef.current = {
+        scrollHeight: element.scrollHeight,
+        scrollTop: element.scrollTop,
+      };
+      void onLoadOlder().finally(() => {
+        loadingOlderRef.current = false;
+      });
+    }
+  }, [hasMore, loadingOlder, onLoadOlder]);
 
   const handleMessageContentResize = useCallback(() => {
     if (sticksToBottomRef.current) scrollToBottom();
   }, [scrollToBottom]);
 
   useLayoutEffect(() => {
+    const pendingAnchor = historyAnchorRef.current;
+    const element = viewportRef.current;
+    if (pendingAnchor && element) {
+      element.scrollTop =
+        element.scrollHeight -
+        pendingAnchor.scrollHeight +
+        pendingAnchor.scrollTop;
+      historyAnchorRef.current = null;
+      sticksToBottomRef.current = false;
+      return;
+    }
     const conversationChanged =
       previousConversationIdRef.current !== conversationId;
     previousConversationIdRef.current = conversationId;
@@ -926,6 +964,7 @@ export function MessageStream({
     messages.length,
     scrollToBottom,
     showsGeneration,
+    messages[0]?.id,
   ]);
 
   return (
@@ -938,6 +977,11 @@ export function MessageStream({
       aria-live="polite"
       data-layout="flow"
     >
+      {loadingOlder ? (
+        <div className="message-history-loading" role="status">
+          正在加载更早消息…
+        </div>
+      ) : null}
       {messages.length === 0 && !showsGeneration ? (
         <EmptyState
           icon={<ChatCircleDots size={28} />}

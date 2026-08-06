@@ -98,49 +98,45 @@ describe("workspaceReducer", () => {
     expect(loadWorkspaceState().agentProposal).toBeNull();
   });
 
-  it("hydrates v3 worldbook entries saved before recall fields were added", () => {
+  it("migrates only lightweight selections and drafts from v3", () => {
     const state = createDemoWorkspace();
-    const worldbook = state.worldbooks[0]!;
-    const entry = worldbook.entries[0]!;
+    const legacyPayload = JSON.stringify({
+      version: 3,
+      data: {
+        cards: [{ id: "stale-card" }],
+        messagesByConversation: { stale: [{ content: "stale" }] },
+        worldbooks: [{ id: "stale-worldbook" }],
+        plugins: [{ id: "stale-plugin" }],
+        selectedCardId: "card-live",
+        selectedConversationId: "conversation-live",
+        selectedPresetId: "preset-live",
+        selectedProviderId: "provider-live",
+        draftByConversation: { "conversation-live": "正在编辑" },
+      },
+    });
+    const getItem = vi.fn((key: string) =>
+      key === "sillytavern-n.workspace.v3" ? legacyPayload : null,
+    );
     vi.stubGlobal("window", {
       localStorage: {
-        getItem: vi.fn(() =>
-          JSON.stringify({
-            version: 3,
-            data: {
-              worldbooks: [
-                {
-                  ...worldbook,
-                  entries: [
-                    {
-                      id: entry.id,
-                      title: entry.title,
-                      keys: ["旧港", "钟楼"],
-                      content: entry.content,
-                      agentEditable: false,
-                      revision: entry.revision,
-                    },
-                  ],
-                },
-              ],
-            },
-          }),
-        ),
+        getItem,
       },
     });
 
     const hydrated = loadWorkspaceState();
 
-    expect(hydrated.worldbooks[0]?.entries[0]).toMatchObject({
-      primaryKeys: ["旧港", "钟楼"],
-      secondaryKeys: [],
-      enabled: true,
-      constant: false,
-      insertionPosition: null,
-      outletName: null,
-      insertionRole: "system",
-      order: 0,
+    expect(hydrated.selectedCardId).toBe("card-live");
+    expect(hydrated.selectedConversationId).toBe("conversation-live");
+    expect(hydrated.selectedPresetId).toBe("preset-live");
+    expect(hydrated.selectedProviderId).toBe("provider-live");
+    expect(hydrated.draftByConversation).toEqual({
+      "conversation-live": "正在编辑",
     });
+    expect(hydrated.cards).toEqual(state.cards);
+    expect(hydrated.worldbooks).toEqual(state.worldbooks);
+    expect(hydrated.plugins).toEqual(state.plugins);
+    expect(getItem).toHaveBeenNthCalledWith(1, "sillytavern-n.workspace.v4");
+    expect(getItem).toHaveBeenNthCalledWith(2, "sillytavern-n.workspace.v3");
   });
 
   it("clears stale conversation and preset selections for an empty API workspace", () => {
@@ -162,6 +158,21 @@ describe("workspaceReducer", () => {
 
     expect(next.selectedConversationId).toBe("");
     expect(next.selectedPresetId).toBe("");
+  });
+
+  it("represents loading separately without discarding the current workspace", () => {
+    const state = createDemoWorkspace();
+    const selected = workspaceReducer(state, {
+      type: "card/select",
+      id: "world-drifting-archive",
+    });
+
+    const loading = workspaceReducer(selected, { type: "bootstrap/loading" });
+
+    expect(loading.availability).toBe("loading");
+    expect(loading.bootstrapError).toBeNull();
+    expect(loading.selectedCardId).toBe("world-drifting-archive");
+    expect(loading.cards).toBe(selected.cards);
   });
 
   it("replaces a preset after one prompt is enabled or edited", () => {
@@ -658,7 +669,8 @@ describe("workspaceReducer", () => {
       },
     });
 
-    expect(next.apiOnline).toBe(true);
+    expect(next.availability).toBe("api");
+    expect(next.bootstrapError).toBeNull();
     expect(next.providerConnections).toHaveLength(1);
     expect(next.agentProposal).toBeNull();
     expect(next.agentRun).toBeNull();
@@ -681,8 +693,8 @@ describe("workspaceReducer", () => {
     });
 
     expect(next).toMatchObject({
-      source: "api",
-      apiOnline: true,
+      availability: "api",
+      bootstrapError: null,
       conversations: [],
       cards: [],
       participants: [],
@@ -690,6 +702,72 @@ describe("workspaceReducer", () => {
       worldbooks: [],
       presets: [],
     });
+  });
+
+  it("keeps the current workspace on API failure and only resets for explicit demo mode", () => {
+    const state = createDemoWorkspace();
+    const withSelection = workspaceReducer(state, {
+      type: "card/select",
+      id: "world-drifting-archive",
+    });
+
+    const failed = workspaceReducer(withSelection, {
+      type: "bootstrap/error",
+      error: "本地服务不可用",
+    });
+
+    expect(failed.availability).toBe("error");
+    expect(failed.bootstrapError).toBe("本地服务不可用");
+    expect(failed.selectedCardId).toBe("world-drifting-archive");
+
+    const demo = workspaceReducer(failed, { type: "bootstrap/demo" });
+    expect(demo.availability).toBe("demo");
+    expect(demo.bootstrapError).toBeNull();
+    expect(demo.selectedCardId).toBe("world-fog-harbor");
+  });
+
+  it("caps persisted drafts without changing the in-memory workspace", async () => {
+    const state = createDemoWorkspace();
+    const drafts = Object.fromEntries(
+      Array.from({ length: 55 }, (_, index) => [
+        `conversation-${index}`,
+        index === 54 ? "界".repeat(40_000) : `draft-${index}`,
+      ]),
+    );
+    const original = { ...state, draftByConversation: drafts };
+    const setItem = vi.fn();
+    vi.stubGlobal("window", { localStorage: { setItem } });
+
+    const { persistWorkspaceState } = await import("./workspaceReducer");
+    expect(persistWorkspaceState(original)).toBe(true);
+
+    const persisted = JSON.parse(setItem.mock.calls[0]?.[1] as string) as {
+      version: number;
+      data: { draftByConversation: Record<string, string> };
+    };
+    expect(persisted.version).toBe(4);
+    expect(Object.keys(persisted.data.draftByConversation)).toHaveLength(50);
+    expect(
+      new TextEncoder().encode(
+        persisted.data.draftByConversation["conversation-54"]!,
+      ).byteLength,
+    ).toBeLessThanOrEqual(32 * 1024);
+    expect(original.draftByConversation["conversation-54"]).toHaveLength(
+      40_000,
+    );
+  });
+
+  it("swallows local storage quota and security errors", async () => {
+    const { persistWorkspaceState } = await import("./workspaceReducer");
+    vi.stubGlobal("window", {
+      localStorage: {
+        setItem: vi.fn(() => {
+          throw new DOMException("quota", "QuotaExceededError");
+        }),
+      },
+    });
+
+    expect(persistWorkspaceState(createDemoWorkspace())).toBe(false);
   });
 
   it("upserts a Provider connection and selects it without storing a key", () => {

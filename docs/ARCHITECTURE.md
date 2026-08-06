@@ -67,7 +67,34 @@ deterministic hooks rather than raw global mutation.
 Providers implement a capability-described port. Native structured tools are
 supplied as part of ordinary chat generation when the selected Provider
 supports them. Plain text Providers remain valid for ordinary chat without
-tools.
+tools. Provider events are schema-validated before entering the application.
+Generation uses bounded input, output, event, choice, tool-call, tool-argument,
+and SSE-frame budgets. Only one generation may be active per conversation;
+client disconnect, explicit cancellation, and budget exhaustion share one
+abort path. SSE writes honor stream backpressure.
+
+### History pagination
+
+Conversation and message collections use versioned opaque cursors rather than
+unbounded responses. Conversation cursors are ordered by `updated_at DESC, id`;
+message cursors use `created_at DESC, id` and each returned page is restored to
+chronological display order. Message swipes and compatibility context are
+loaded in batches so query count does not grow per message. The web client
+loads only the selected conversation's latest page and prepends older pages
+while preserving the scroll anchor.
+
+### Bounded workers
+
+Imported compatibility regexes execute outside the server and browser main
+threads. Worker batches have script, pattern, input, output, and wall-clock
+limits; a timed-out or crashed worker is terminated and replaced. Prompt
+assembly is asynchronous because it crosses this worker boundary.
+
+Uploads are parsed with streaming multipart limits and staged in random
+temporary files that are cleaned on every route outcome. Archive and compressed
+metadata parsing must remain behind entry-count, compressed/uncompressed-size,
+time, and worker-memory limits before normalized data reaches a database
+transaction.
 
 ### Conversation model tools
 
@@ -80,7 +107,14 @@ internal execution names, not a separate user-facing Agent or objective flow.
 
 ### Extensions
 
-Native extensions run in workers or sandboxed iframes with typed capabilities. Legacy extensions run on another origin with an old-DOM shell and exact-path ESM facades. The realm cannot access the main DOM, storage, database, or Provider secrets.
+Native extensions use an `ExtensionRuntimeTransport`; production registration
+requires a Worker transport. Requests and responses are structured-cloned and
+limited to 2 MiB. Hook and lifecycle timeouts terminate and quarantine the
+failed extension for the application session without blocking later extensions.
+The inline adapter is reserved for tests and built-in trusted implementations.
+Legacy extensions run on another origin with an old-DOM shell and exact-path
+ESM facades. The realm cannot access the main DOM, storage, database, or
+Provider secrets.
 
 ## Data placement
 

@@ -2,12 +2,17 @@ import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
 import cors from "@fastify/cors";
+import multipart from "@fastify/multipart";
 import Fastify, { type FastifyInstance } from "fastify";
 import { ZodError } from "zod";
 
 import { AgentStore, AppDatabase, AppStore, StorageError } from "@stn/storage";
 
-import { type ServerContext } from "./context.js";
+import {
+  defaultGenerationBudget,
+  type GenerationBudget,
+  type ServerContext,
+} from "./context.js";
 import { ImportService } from "./import-service.js";
 import { ProviderRegistry } from "./provider-registry.js";
 import { registerAgentRoutes } from "./routes/agent.js";
@@ -27,6 +32,7 @@ export interface ServerOptions {
   readonly corsOrigin?: string;
   readonly logger?: boolean;
   readonly seedDevelopmentData?: boolean;
+  readonly generationBudget?: Partial<GenerationBudget>;
 }
 
 export interface ServerApplication {
@@ -51,6 +57,10 @@ export async function createServer(
     providers,
     vault,
     generations: new Map(),
+    generationBudget: {
+      ...defaultGenerationBudget,
+      ...options.generationBudget,
+    },
   };
   if (options.seedDevelopmentData) {
     seedDevelopmentWorkspace(store);
@@ -65,16 +75,16 @@ export async function createServer(
     credentials: false,
   });
 
-  const bufferParser = (
-    _request: unknown,
-    body: Buffer,
-    done: (error: Error | null, body?: Buffer) => void,
-  ) => done(null, body);
-  app.addContentTypeParser(
-    /^multipart\/form-data(?:;|$)/iu,
-    { parseAs: "buffer", bodyLimit: 34 * 1024 * 1024 },
-    bufferParser,
-  );
+  await app.register(multipart, {
+    limits: {
+      files: 1,
+      fields: 8,
+      parts: 9,
+      fileSize: 32 * 1024 * 1024,
+      fieldSize: 8 * 1024,
+    },
+  });
+
   app.addContentTypeParser(
     [
       "application/octet-stream",
@@ -82,8 +92,8 @@ export async function createServer(
       "application/x-zip-compressed",
       "image/png",
     ],
-    { parseAs: "buffer", bodyLimit: 34 * 1024 * 1024 },
-    bufferParser,
+    { bodyLimit: 34 * 1024 * 1024 },
+    (_request, payload, done) => done(null, payload),
   );
 
   app.addHook("onSend", async (_request, reply, payload) => {

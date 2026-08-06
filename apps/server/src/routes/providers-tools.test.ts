@@ -11,11 +11,17 @@ import {
 } from "@stn/providers";
 import type { ProviderEvent } from "@stn/contracts";
 
-import { createServer, type ServerApplication } from "../app.js";
+import {
+  createServer,
+  type ServerApplication,
+  type ServerOptions,
+} from "../app.js";
 
 const applications: ServerApplication[] = [];
 
-async function application(): Promise<ServerApplication> {
+async function application(
+  options: Pick<ServerOptions, "generationBudget"> = {},
+): Promise<ServerApplication> {
   const dataDirectory = await mkdtemp(
     path.join(tmpdir(), "stn-provider-tools-"),
   );
@@ -23,6 +29,7 @@ async function application(): Promise<ServerApplication> {
     dataDirectory,
     databasePath: ":memory:",
     seedDevelopmentData: false,
+    ...options,
   });
   applications.push(created);
   return created;
@@ -69,6 +76,35 @@ class PartialFailureProvider extends DeterministicFakeProvider {
       code: "PROVIDER_REQUEST_FAILED",
       message: "Proxy disconnected.",
       retryable: true,
+    };
+  }
+}
+
+class BlockingProvider extends DeterministicFakeProvider {
+  release: (() => void) | undefined;
+
+  override async *generate(
+    request: ProviderRequest,
+    signal?: AbortSignal,
+  ): AsyncIterable<ProviderEvent> {
+    yield {
+      type: "start",
+      requestId: request.requestId,
+      sequence: 0,
+      model: "blocking",
+      capabilities: this.capabilities(),
+    };
+    await new Promise<void>((resolve, reject) => {
+      this.release = resolve;
+      signal?.addEventListener("abort", () => reject(new Error("Aborted")), {
+        once: true,
+      });
+    });
+    yield {
+      type: "finish",
+      requestId: request.requestId,
+      sequence: 1,
+      reason: "stop",
     };
   }
 }
@@ -136,6 +172,112 @@ afterEach(async () => {
 });
 
 describe("ordinary generation worldbook tools", () => {
+  it("limits one active generation per conversation and releases the reservation", async () => {
+    const server = await application();
+    const { conversation } = workspaceFixture(server);
+    const provider = new BlockingProvider();
+    vi.spyOn(server.context.providers, "get").mockResolvedValue(provider);
+
+    const first = server.app.inject({
+      method: "POST",
+      url: `/api/conversations/${conversation.id}/generate`,
+      payload: { connectionId: "blocking" },
+    });
+    await vi.waitFor(() => expect(server.context.generations.size).toBe(1));
+    const second = await server.app.inject({
+      method: "POST",
+      url: `/api/conversations/${conversation.id}/generate`,
+      payload: { connectionId: "blocking" },
+    });
+    expect(second.statusCode).toBe(409);
+    expect(second.json()).toMatchObject({
+      error: { code: "GENERATION_ALREADY_ACTIVE" },
+    });
+
+    await vi.waitFor(() => expect(provider.release).toBeTypeOf("function"));
+    provider.release?.();
+    await first;
+    expect(server.context.generations.size).toBe(0);
+  });
+
+  it("persists visible output as partial when the event budget is exhausted", async () => {
+    const server = await application({
+      generationBudget: { maxEvents: 2 },
+    });
+    const { conversation } = workspaceFixture(server);
+    vi.spyOn(server.context.providers, "get").mockResolvedValue(
+      new DeterministicFakeProvider({ text: "budgeted output" }),
+    );
+
+    const response = await server.app.inject({
+      method: "POST",
+      url: `/api/conversations/${conversation.id}/generate`,
+      payload: { connectionId: "budget" },
+    });
+    expect(streamEvents(response.body)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "generation-limit" }),
+        expect.objectContaining({
+          type: "message-persisted",
+          state: "partial",
+          finishReason: "limit",
+        }),
+      ]),
+    );
+    expect(
+      server.context.store.listMessages(conversation.id).at(-1),
+    ).toMatchObject({
+      content: "budgeted output",
+      generationStatus: "partial",
+      finishReason: "limit",
+    });
+  });
+
+  it("regenerates directly into the target message without a temporary message", async () => {
+    const server = await application();
+    const { conversation } = workspaceFixture(server);
+    const original = server.context.store.persistAssistantGeneration({
+      conversationId: conversation.id,
+      content: "original answer",
+      status: "complete",
+      finishReason: "stop",
+    }).message;
+    vi.spyOn(server.context.providers, "get").mockResolvedValue(
+      new DeterministicFakeProvider({ text: "regenerated answer" }),
+    );
+
+    const response = await server.app.inject({
+      method: "POST",
+      url: `/api/messages/${original.id}/regenerate`,
+      payload: {
+        connectionId: "regenerate",
+        expectedMessageRevision: original.revision,
+      },
+    });
+    expect(response.statusCode).toBe(200);
+    const assistantMessages = server.context.store
+      .listMessages(conversation.id)
+      .filter((message) => message.role === "assistant");
+    expect(assistantMessages).toHaveLength(1);
+    expect(assistantMessages[0]).toMatchObject({
+      id: original.id,
+      content: "regenerated answer",
+      generationStatus: "complete",
+    });
+    expect(server.context.store.listSwipes(original.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          content: "original answer",
+          selected: false,
+        }),
+        expect.objectContaining({
+          content: "regenerated answer",
+          selected: true,
+        }),
+      ]),
+    );
+  });
+
   it("persists received text when the provider stream fails", async () => {
     const server = await application();
     const { conversation } = workspaceFixture(server);

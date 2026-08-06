@@ -898,14 +898,15 @@ export class TavernHelperRuntime {
     owner: RuntimeScript | null,
     callback: T,
   ): T {
-    const runtime = this;
+    const withOwner = this.withOwner.bind(this);
+    const reportRuntimeError = this.reportRuntimeError.bind(this);
     return function (this: unknown, ...args: never[]) {
-      return runtime
-        .withOwner(owner, () => callback.apply(this, args))
-        .catch((error) => {
-          runtime.reportRuntimeError(owner, error);
+      return withOwner(owner, () => callback.apply(this, args)).catch(
+        (error) => {
+          reportRuntimeError(owner, error);
           return undefined;
-        });
+        },
+      );
     } as T;
   }
 
@@ -1053,9 +1054,7 @@ export class TavernHelperRuntime {
       };
     }
     if (option.type !== "script") {
-      throw new Error(
-        `Unsupported Tavern Helper variable type '${option.type}'.`,
-      );
+      throw new Error("Unsupported Tavern Helper variable type.");
     }
     const owner =
       option.script_id === undefined
@@ -1333,7 +1332,7 @@ export class TavernHelperRuntime {
         (typeof value === "object" && value !== null) ||
         typeof value === "function"
       ) {
-        nativeRuntimeGlobals.add(value as object);
+        nativeRuntimeGlobals.add(value);
       }
       Object.defineProperty(global, name, {
         configurable: true,
@@ -1342,10 +1341,15 @@ export class TavernHelperRuntime {
         value,
       });
     };
-    const ownerAwareJQuery = new Proxy($, {
-      apply: (target, thisArg, argumentsList) => {
+    const jqueryTarget = $ as unknown as (...args: unknown[]) => unknown;
+    const ownerAwareJQuery = new Proxy(jqueryTarget, {
+      apply: (
+        target: typeof jqueryTarget,
+        thisArg: unknown,
+        argumentsList: unknown[],
+      ) => {
         const owner = this.activeScript;
-        const args = [...argumentsList];
+        const args: unknown[] = [...argumentsList];
         if (typeof args[0] === "function") {
           args[0] = this.bindOwner(
             owner,
@@ -1354,7 +1358,7 @@ export class TavernHelperRuntime {
         }
         return Reflect.apply(target, thisArg, args);
       },
-    });
+    }) as unknown as typeof $;
     const eventOn = (event: string, listener: EventListener) =>
       this.addListener(event, listener);
     const eventOnce = (event: string, listener: EventListener) =>
@@ -1380,7 +1384,7 @@ export class TavernHelperRuntime {
             ? this.variableStore({ type: "message", message_id: "latest" })
                 .variables
             : {},
-        ),
+        ) as JsonRecord,
       );
     };
     const replaceVariables = (variables: JsonRecord, option: VariableOption) =>
@@ -1397,12 +1401,14 @@ export class TavernHelperRuntime {
       variables: JsonRecord,
       option: VariableOption,
     ) => {
-      const result = _.merge(getVariables(option), clone(variables));
+      const result = asRecord(_.merge(getVariables(option), clone(variables)));
       replaceVariables(result, option);
       return result;
     };
     const insertVariables = (variables: JsonRecord, option: VariableOption) => {
-      const result = _.defaultsDeep(getVariables(option), clone(variables));
+      const result = asRecord(
+        _.defaultsDeep(getVariables(option), clone(variables)),
+      );
       replaceVariables(result, option);
       return result;
     };
@@ -1438,7 +1444,7 @@ export class TavernHelperRuntime {
         (typeof value === "object" && value !== null) ||
         typeof value === "function"
       ) {
-        nativeRuntimeGlobals.add(value as object);
+        nativeRuntimeGlobals.add(value);
       }
       const initialized = Promise.resolve(value);
       this.initializedGlobals.set(name, initialized);
@@ -2195,13 +2201,13 @@ export class TavernHelperRuntime {
       }
       for (const [name, descriptor] of previous) {
         if (global[name] !== installed.get(name)) continue;
-        const priorValue = descriptor?.value;
+        const priorValue: unknown = descriptor?.value as unknown;
         if (
           descriptor &&
           !(
             ((typeof priorValue === "object" && priorValue !== null) ||
               typeof priorValue === "function") &&
-            nativeRuntimeGlobals.has(priorValue as object)
+            nativeRuntimeGlobals.has(priorValue)
           )
         ) {
           Object.defineProperty(global, name, descriptor);

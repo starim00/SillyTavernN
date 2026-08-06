@@ -698,6 +698,53 @@ describe("AppStore", () => {
     }
   });
 
+  it("selects an earlier swipe without violating the one-selected index", () => {
+    const store = new AppStore();
+    try {
+      const { second } = createConversationFixture(store);
+      const earlier = store.addSwipe({
+        id: "swipe-earlier-unselected",
+        messageId: second.id,
+        content: "Earlier candidate.",
+        selected: false,
+      });
+      store.addSwipe({
+        id: "swipe-later-selected",
+        messageId: second.id,
+        content: "Later selected candidate.",
+        selected: true,
+      });
+      const current = store.getMessage(second.id);
+
+      const selected = store.selectSwipe({
+        messageId: current.id,
+        swipeId: earlier.id,
+        expectedMessageRevision: current.revision,
+      });
+
+      expect(selected.message).toMatchObject({
+        content: "Earlier candidate.",
+        revision: current.revision + 1,
+      });
+      expect(selected.swipe).toMatchObject({
+        id: earlier.id,
+        selected: true,
+      });
+      expect(store.listSwipes(second.id)).toEqual([
+        expect.objectContaining({
+          id: "swipe-earlier-unselected",
+          selected: true,
+        }),
+        expect.objectContaining({
+          id: "swipe-later-selected",
+          selected: false,
+        }),
+      ]);
+    } finally {
+      store.close();
+    }
+  });
+
   it("forces imported worldbooks to remain Agent read-only", () => {
     const store = new AppStore();
     try {

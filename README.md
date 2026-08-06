@@ -1,6 +1,6 @@
 # SillyTavern N
 
-SillyTavern N is a clean-room, compatibility-first AI role-playing workspace. It keeps the portable content ecosystem—role cards, lorebooks, prompt presets, and trusted legacy extensions—while rebuilding the runtime around explicit domains, typed ports, transactional storage, and auditable Agent tools.
+SillyTavern N is a clean-room, compatibility-first AI role-playing workspace. It keeps the portable content ecosystem—role cards, lorebooks, prompt presets, and trusted legacy extensions—while rebuilding the runtime around explicit domains, typed ports, transactional storage, and auditable model tools inside ordinary conversations.
 
 ## Status
 
@@ -14,7 +14,7 @@ Development currently covers the Phase 0–7 vertical slice:
 - preset import/export with preserved optional entries, per-entry enablement,
   and user-editable prompt content;
 - isolated legacy-extension realm contracts for JS-Slash-Runner and ST-Prompt-Template;
-- Agent worldbook, summary, profile, audit, and undo tools.
+- Ordinary conversation worldbook, message-list, summary, and participant-profile tools with confirmation, audit, and undo.
 
 See [docs/PHASES.md](docs/PHASES.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
 

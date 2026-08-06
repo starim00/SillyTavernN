@@ -45,7 +45,7 @@ several people, a narrator, or a world without changing the card/chat model.
 - Provider capability model.
 - OpenAI-compatible chat adapter and deterministic fake adapter.
 - SSE text deltas, structured tool-call events, abort, timeout, and error handling.
-- Agent disabled for providers without native tool calling.
+- Providers without native structured tool calling continue with ordinary text generation.
 
 Exit: interrupted generation never persists a partial assistant message.
 
@@ -73,14 +73,15 @@ Exit: pinned smoke fixtures load in the realm, settings persist, prompt events a
 
 ## Phase 7 — In-conversation model tools
 
-- Run state machine and tool registry.
-- Lorebook list/get/search/create/update/delete.
-- Chat summary and character/participant profile artifacts.
+- Conversation-bound run state machine and tool catalog.
+- Worldbook list/get/search/create/update/delete.
+- Ordered conversation message listing, chat summary, and participant profile artifacts.
 - Revision guard, confirmation, cancellation, idempotency, audit, diff, and undo.
 - Permission is stored per lorebook entry; model tools cannot toggle it and
   imported permission metadata is ignored.
 - Tool definitions travel with ordinary chat generation; there is no separate
-  Agent chat or objective surface.
+  Agent chat, objective, or planning surface. Pending writes are recovered from
+  the server-side waiting run and reviewed in the shared proposal modal.
 
 Exit: the end-to-end fake tool-calling run proves proposal → human confirmation
 → authorized entry write → audit → undo, plus summary/profile creation and

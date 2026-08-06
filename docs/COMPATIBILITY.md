@@ -5,7 +5,7 @@
 - Compatibility means accepting portable content and running explicitly trusted extensions, not reproducing the upstream internal architecture.
 - Old JSON shapes terminate at adapters. Internal code uses normalized types.
 - Executable templates and scripts are detected during import and remain disabled until explicitly trusted.
-- Legacy plugin writes are capability-authorized and use a distinct actor from Agent runs.
+- Legacy plugin writes are capability-authorized and use a distinct actor from conversation model-tool runs.
 
 ## JS-Slash-Runner
 

@@ -11,7 +11,7 @@ Fastify application
       │
       ├─ application commands and queries
       ├─ prompt engine and provider ports
-      ├─ Agent tool registry and policy
+      ├─ conversation model-tool catalog and policy
       └─ compatibility/import adapters
       │
 SQLite/WAL + file assets
@@ -69,9 +69,14 @@ supplied as part of ordinary chat generation when the selected Provider
 supports them. Plain text Providers remain valid for ordinary chat without
 tools.
 
-### Agent
+### Conversation model tools
 
-The model never receives direct repositories. It selects tools from a registry; server policy validates the actor and arguments; application commands perform revision-guarded transactions; the audit record and inverse patch commit atomically with the change.
+The model never receives direct repositories. Ordinary conversation generation
+selects tools from a conversation-scoped catalog; server policy validates the
+actor, conversation, participant, worldbook permission, and arguments;
+revision-guarded transactions perform the change; the audit record and inverse
+patch commit atomically with it. `AgentStore` and the Agent run tables are
+internal execution names, not a separate user-facing Agent or objective flow.
 
 ### Extensions
 

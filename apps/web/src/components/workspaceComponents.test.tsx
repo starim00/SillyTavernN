@@ -599,7 +599,7 @@ describe("workspace components", () => {
     expect(isHtmlDisplayContent(message.displayContent ?? "")).toBe(true);
   });
 
-  it("parses message Markdown and an injected fenced HTML status bar once", () => {
+  it("isolates an injected fenced HTML status bar from message Markdown", () => {
     const displayContent = `<dream>
 ## 正文标题
 
@@ -635,17 +635,48 @@ describe("workspace components", () => {
       />,
     );
 
-    expect(segments).toHaveLength(1);
-    expect(segments[0]).toMatchObject({
-      kind: "mixed",
-      content: expect.stringContaining("这里是模型正文。"),
-    });
-    const mixedHtml = mixedDisplayContent(segments[0]!.content);
-    expect(mixedHtml).toContain(">正文标题</h2>");
-    expect(mixedHtml).toContain('<div class="calendar-container">状态栏</div>');
-    expect(sandboxedDisplayDocument(mixedHtml)).not.toContain("<dream>");
+    expect(segments).toHaveLength(2);
+    expect(segments[0]).toMatchObject({ kind: "markdown" });
+    expect(segments[1]).toMatchObject({ kind: "html" });
+    expect(segments[0]?.content).toContain("这里是模型正文。");
+    expect(segments[1]?.content).toContain(
+      '<div class="calendar-container">状态栏</div>',
+    );
     expect(html).toContain("message-item__rich-content");
     expect(html.match(/<iframe/gu)).toHaveLength(1);
+    expect(html).toContain("message-item__content--markdown");
+    expect(html).toContain(">正文标题</h2>");
+  });
+
+  it("keeps a Tavern Helper full document body style away from prose", () => {
+    const displayContent = `正文段落。
+
+<current_event>当前事件</current_event>
+
+\`\`\`
+<!DOCTYPE html>
+<html>
+<head><style>body { display: flex; }</style></head>
+<body><div class="calendar-container">交互日历</div></body>
+</html>
+\`\`\``;
+    const segments = displayContentSegments(displayContent);
+
+    expect(segments).toHaveLength(2);
+    expect(segments[0]).toMatchObject({ kind: "mixed" });
+    expect(segments[1]).toMatchObject({ kind: "html" });
+
+    const proseDocument = sandboxedDisplayDocument(
+      mixedDisplayContent(segments[0]!.content),
+    );
+    const calendarDocument = sandboxedDisplayDocument(segments[1]!.content);
+    expect(proseDocument).toContain("正文段落。");
+    expect(proseDocument).not.toContain("body { display: flex; }");
+    expect(proseDocument).not.toContain("calendar-container");
+    expect(calendarDocument).toContain("body { display: flex; }");
+    expect(calendarDocument).toContain(
+      '<div class="calendar-container">交互日历</div>',
+    );
   });
 
   it("keeps arbitrary regex-injected HTML intact in one mixed document", () => {
@@ -699,8 +730,9 @@ describe("workspace components", () => {
       />,
     );
 
-    expect(segments).toHaveLength(1);
+    expect(segments).toHaveLength(2);
     expect(segments[0]).toMatchObject({ kind: "mixed" });
+    expect(segments[1]).toMatchObject({ kind: "html" });
     expect(mixedHtml).toContain("<style>");
     expect(mixedHtml).toContain('<status-panel data-kind="thinking">');
     expect(mixedHtml).toContain('<details class="thinking">');
@@ -711,9 +743,11 @@ describe("workspace components", () => {
     expect(mixedHtml).not.toMatch(
       /<summary[^>]*>[\s\S]*?<pre>[\s\S]*?<\/summary>/u,
     );
-    expect(mixedHtml).toContain('<div class="calendar">状态栏</div>');
+    expect(segments[1]?.content).toContain(
+      '<div class="calendar">状态栏</div>',
+    );
     expect(mixedHtml).toContain("<strong>Markdown</strong>");
-    expect(html.match(/<iframe/gu)).toHaveLength(1);
+    expect(html.match(/<iframe/gu)).toHaveLength(2);
     expect(html).not.toContain("message-item__content--markdown");
   });
 

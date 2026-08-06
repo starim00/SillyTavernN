@@ -346,7 +346,30 @@ export function displayContentSegments(value: string): DisplayContentSegment[] {
   if (fenced !== undefined && HTML_MARKUP_PATTERN.test(fenced)) {
     return [{ kind: "html", content: fenced }];
   }
-  return [looseDisplayContentSegment(value)];
+
+  const segments: DisplayContentSegment[] = [];
+  let cursor = 0;
+  for (const match of value.matchAll(FENCED_HTML_BLOCK_PATTERN)) {
+    const content = match[1] ?? "";
+    const start = match.index;
+    if (
+      start === undefined ||
+      !FULL_HTML_DOCUMENT_PATTERN.test(content.replace(/^\s+/u, ""))
+    ) {
+      continue;
+    }
+
+    const before = value.slice(cursor, start);
+    if (before.trim()) segments.push(looseDisplayContentSegment(before));
+    segments.push({ kind: "html", content });
+    cursor = start + match[0].length;
+  }
+
+  if (segments.length === 0) return [looseDisplayContentSegment(value)];
+
+  const after = value.slice(cursor);
+  if (after.trim()) segments.push(looseDisplayContentSegment(after));
+  return segments;
 }
 
 export function sandboxedDisplayDocument(

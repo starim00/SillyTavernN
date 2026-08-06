@@ -270,7 +270,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     ) {
       yield emit({
         type: "error",
-        code: "AGENT_NOT_SUPPORTED_BY_PROVIDER",
+        code: "PROVIDER_TOOL_CALLING_NOT_SUPPORTED",
         message:
           "This provider connection does not support native structured tool calling.",
         retryable: false,

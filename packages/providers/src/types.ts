@@ -95,19 +95,19 @@ export class ProviderConfigurationError extends Error {
   }
 }
 
-export class AgentProviderCapabilityError extends Error {
-  readonly code = "AGENT_NOT_SUPPORTED_BY_PROVIDER";
+export class ProviderToolCapabilityError extends Error {
+  readonly code = "PROVIDER_TOOL_CALLING_NOT_SUPPORTED";
 
   constructor(providerId: string) {
     super(
       `Provider '${providerId}' does not support native structured tool calling.`,
     );
-    this.name = "AgentProviderCapabilityError";
+    this.name = "ProviderToolCapabilityError";
   }
 }
 
-export function assertAgentSupported(provider: ModelProvider): void {
+export function assertToolCallingSupported(provider: ModelProvider): void {
   if (!provider.capabilities().nativeToolCalling) {
-    throw new AgentProviderCapabilityError(provider.id);
+    throw new ProviderToolCapabilityError(provider.id);
   }
 }

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { DeterministicFakeProvider } from "./fake.js";
 import { OpenAICompatibleProvider } from "./openai.js";
 import { TextCompletionProvider } from "./text.js";
-import { assertAgentSupported } from "./types.js";
+import { assertToolCallingSupported } from "./types.js";
 
 async function collect<T>(source: AsyncIterable<T>): Promise<T[]> {
   const values: T[] = [];
@@ -68,13 +68,13 @@ describe("providers", () => {
     });
   });
 
-  it("does not allow Agent mode on text completion providers", () => {
+  it("reports when a text completion provider lacks structured tool calling", () => {
     const provider = new TextCompletionProvider({
       baseUrl: "http://localhost:5001/v1",
       model: "local",
     });
-    expect(() => assertAgentSupported(provider)).toThrowError(
-      expect.objectContaining({ code: "AGENT_NOT_SUPPORTED_BY_PROVIDER" }),
+    expect(() => assertToolCallingSupported(provider)).toThrowError(
+      expect.objectContaining({ code: "PROVIDER_TOOL_CALLING_NOT_SUPPORTED" }),
     );
   });
 

@@ -13,7 +13,11 @@ import { StorageError, type AgentRun, type Worldbook } from "@stn/storage";
 
 import { envelope, type ServerContext } from "../context.js";
 import { prepareConversationPrompt } from "../prompt-service.js";
-import { builtInTools, type BuiltInTool } from "./agent.js";
+import {
+  conversationToolsByName,
+  modelConversationTools,
+  type ConversationTool,
+} from "../conversation-tools.js";
 
 const connectionSchema = z
   .object({
@@ -62,21 +66,14 @@ const generationRequestSchema = promptRequestSchema
       .default([]),
   })
   .strict();
-const maxWorldbookToolTurns = 4;
+const maxConversationToolTurns = 4;
 
-const worldbookTools = builtInTools.filter((tool) =>
-  tool.name.startsWith("worldbook."),
-);
-const worldbookToolsByName = new Map(
-  worldbookTools.map((tool) => [tool.name, tool]),
-);
-const providerWorldbookTools: readonly ProviderTool[] = worldbookTools.map(
-  ({ name, description, inputSchema }) => ({
+const providerConversationTools: readonly ProviderTool[] =
+  modelConversationTools.map(({ name, description, inputSchema }) => ({
     name,
     description,
     inputSchema,
-  }),
-);
+  }));
 
 function writeEvent(
   reply: { raw: { write: (value: string) => boolean } },
@@ -114,21 +111,32 @@ function injectCompatibilityMessages(
   return result;
 }
 
-function toolContextMessage(worldbooks: readonly Worldbook[]): ProviderMessage {
+function toolContextMessage(
+  worldbooks: readonly Worldbook[],
+  participants: readonly { id: string; name: string; role: string }[],
+): ProviderMessage {
   const catalog = worldbooks.map((worldbook) => ({
     id: worldbook.id,
     name: worldbook.name,
     revision: worldbook.revision,
   }));
+  const participantCatalog = participants.map((participant) => ({
+    id: participant.id,
+    name: participant.name,
+    role: participant.role,
+  }));
   return {
     role: "system",
     content:
-      "Worldbook tools are available as an optional part of this ordinary chat response. " +
+      "Conversation tools are available as an optional part of this ordinary chat response. " +
       "Reads execute immediately. Every create, update, or delete call is only a proposal " +
       "and must never be described as applied before the user confirms it. Make at most " +
-      "one write proposal in this response. Update and delete additionally require the " +
-      "target entry's human-granted AI edit permission. Use only worldbooks in this " +
-      `conversation-scoped catalog: ${JSON.stringify(catalog)}`,
+      "one write proposal in this response; after a proposal is pending, later tool calls " +
+      "are rejected. Worldbook update and delete additionally require the target entry's " +
+      "human-granted AI edit permission. chat.messages.list returns ordered message IDs " +
+      "and short previews for selecting a summary range, defaulting to 50 and capped at 200. " +
+      "Use only worldbooks and participants in these conversation-scoped catalogs. " +
+      `Worldbooks: ${JSON.stringify(catalog)} Participants: ${JSON.stringify(participantCatalog)}`,
   };
 }
 
@@ -144,6 +152,7 @@ function startGenerationToolRun(
 ): {
   readonly run: AgentRun;
   readonly worldbooks: readonly Worldbook[];
+  readonly participants: readonly { id: string; name: string; role: string }[];
 } {
   const created = context.agents.createRun({
     id: `generation-tool-${input.generationId}`,
@@ -153,7 +162,7 @@ function startGenerationToolRun(
     model: input.model,
     objective: generationObjective(input.messages),
     idempotencyKey: `generation:${input.generationId}:tool-run`,
-    maxSteps: maxWorldbookToolTurns,
+    maxSteps: maxConversationToolTurns,
   }).run;
   const run = context.agents.transitionRun(created.id, ["queued"], "running", {
     currentStep: 1,
@@ -161,6 +170,9 @@ function startGenerationToolRun(
   return {
     run,
     worldbooks: context.agents.listAccessibleWorldbooks(run.id),
+    participants: context.store
+      .listConversationParticipants(run.conversationId)
+      .map(({ id, name, role }) => ({ id, name, role })),
   };
 }
 
@@ -174,11 +186,12 @@ function toolError(error: unknown): { code: string; message: string } {
   };
 }
 
-function referencedWorldbookIsAccessible(
-  tool: BuiltInTool,
+function referencedResourceIsAccessible(
+  tool: ConversationTool,
   argumentsValue: Record<string, unknown>,
   accessibleWorldbookIds: ReadonlySet<string>,
 ): boolean {
+  if (!tool.name.startsWith("worldbook.")) return true;
   if (tool.name === "worldbook.list") return true;
   return (
     typeof argumentsValue.worldbookId === "string" &&
@@ -343,7 +356,10 @@ export async function registerProviderRoutes(
       const requestMessages: readonly ProviderMessage[] =
         toolRun === undefined
           ? compatibilityMessages
-          : [toolContextMessage(toolRun.worldbooks), ...compatibilityMessages];
+          : [
+              toolContextMessage(toolRun.worldbooks, toolRun.participants),
+              ...compatibilityMessages,
+            ];
       const accessibleWorldbookIds = new Set(
         toolRun?.worldbooks.map((worldbook) => worldbook.id) ?? [],
       );
@@ -383,7 +399,7 @@ export async function registerProviderRoutes(
       let toolExecutionClosed = false;
       try {
         let providerMessages = [...requestMessages];
-        for (let turn = 0; turn < maxWorldbookToolTurns; turn += 1) {
+        for (let turn = 0; turn < maxConversationToolTurns; turn += 1) {
           const providerRequestId =
             turn === 0 ? generationId : `${generationId}-tool-${String(turn)}`;
           const readToolCalls: ProviderMessageToolCall[] = [];
@@ -406,7 +422,7 @@ export async function registerProviderRoutes(
               settings: prompt.generation,
               ...(toolRun === undefined
                 ? {}
-                : { tools: providerWorldbookTools }),
+                : { tools: providerConversationTools }),
               metadata: {
                 conversationId: request.params.id,
                 ...(prompt.presetId === undefined
@@ -463,7 +479,7 @@ export async function registerProviderRoutes(
               continue;
             }
 
-            const tool = worldbookToolsByName.get(event.name);
+            const tool = conversationToolsByName.get(event.name);
             if (tool === undefined) {
               canContinueWithReadResults = false;
               writeEvent(reply, {
@@ -495,7 +511,7 @@ export async function registerProviderRoutes(
               continue;
             }
             if (
-              !referencedWorldbookIsAccessible(
+              !referencedResourceIsAccessible(
                 tool,
                 event.arguments,
                 accessibleWorldbookIds,
@@ -591,7 +607,7 @@ export async function registerProviderRoutes(
           ) {
             break;
           }
-          if (turn + 1 >= maxWorldbookToolTurns) {
+          if (turn + 1 >= maxConversationToolTurns) {
             writeEvent(reply, {
               type: "tool-rejected",
               generationId,

@@ -101,7 +101,7 @@ export class DeterministicFakeProvider implements ModelProvider {
         if (!this.supportsTools) {
           yield event({
             type: "error",
-            code: "AGENT_NOT_SUPPORTED_BY_PROVIDER",
+            code: "PROVIDER_TOOL_CALLING_NOT_SUPPORTED",
             message:
               "The deterministic provider was configured without tool calling.",
             retryable: false,

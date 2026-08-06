@@ -104,6 +104,12 @@ function workspaceFixture(server: ServerApplication) {
     conversationId: conversation.id,
     content: "Check the available lore, then answer normally.",
   });
+  const participant = server.context.store.createParticipant({
+    id: "participant-provider-tools",
+    cardId: card.id,
+    name: "Harbor keeper",
+    role: "character",
+  });
   const worldbook = server.context.store.createWorldbook({
     id: "worldbook-provider-tools",
     name: "Conversation lore",
@@ -121,7 +127,7 @@ function workspaceFixture(server: ServerApplication) {
     scopeType: "conversation",
     scopeId: conversation.id,
   });
-  return { conversation, worldbook };
+  return { conversation, worldbook, participant };
 }
 
 afterEach(async () => {
@@ -226,6 +232,13 @@ describe("ordinary generation worldbook tools", () => {
       "worldbook.entry.create",
       "worldbook.entry.update",
       "worldbook.entry.delete",
+      "chat.messages.list",
+      "chat.summary.get",
+      "chat.summary.create",
+      "chat.summary.update",
+      "character.profile.get",
+      "character.profile.create",
+      "character.profile.update",
     ]);
     expect(provider.requests[0]?.messages[0]?.content).toContain(worldbook.id);
     expect(
@@ -405,5 +418,204 @@ describe("ordinary generation worldbook tools", () => {
         .listMessages(conversation.id)
         .map((message) => message.role),
     ).toEqual(["user"]);
+  });
+
+  it("lists ordered messages before proposing, confirming, auditing, and undoing a summary", async () => {
+    const server = await application();
+    const { conversation } = workspaceFixture(server);
+    const messageId = "message-provider-tools-user";
+    const provider = new SequencedFakeProvider([
+      {
+        toolCalls: [
+          {
+            id: "call-messages",
+            name: "chat.messages.list",
+            arguments: { limit: 200 },
+          },
+        ],
+      },
+      {
+        toolCalls: [
+          {
+            id: "call-summary",
+            name: "chat.summary.create",
+            arguments: {
+              title: "Dusk summary",
+              content: "The harbor bell rings at dusk.",
+              sourceFromMessageId: messageId,
+              sourceToMessageId: messageId,
+              keyEvents: [],
+              unresolvedThreads: [],
+              characterStates: {},
+            },
+          },
+        ],
+      },
+    ]);
+    vi.spyOn(server.context.providers, "get").mockResolvedValue(provider);
+
+    const response = await server.app.inject({
+      method: "POST",
+      url: `/api/conversations/${conversation.id}/generate`,
+      payload: { connectionId: "sequenced-fake" },
+    });
+    const events = streamEvents(response.body);
+    const messagesResult = events.find(
+      (event) =>
+        event.type === "tool-result" &&
+        event.providerCallId === "call-messages",
+    );
+    expect(messagesResult?.result).toMatchObject({
+      items: [
+        expect.objectContaining({
+          id: messageId,
+          order: 0,
+          role: "user",
+          preview: "Check the available lore, then answer normally.",
+        }),
+      ],
+      offset: 0,
+      limit: 200,
+      total: 1,
+      hasMore: false,
+    });
+
+    const proposal = events.find((event) => event.type === "tool-proposal") as
+      | {
+          run: { id: string; status: string };
+          toolCall: {
+            idempotencyKey: string;
+            toolName: string;
+            arguments: Record<string, unknown>;
+            status: string;
+          };
+        }
+      | undefined;
+    expect(proposal).toMatchObject({
+      run: { status: "waiting_confirmation" },
+      toolCall: {
+        toolName: "chat.summary.create",
+        status: "awaiting_confirmation",
+      },
+    });
+    expect(provider.requests[0]?.messages[0]?.content).toContain(
+      "chat.messages.list",
+    );
+
+    const confirmed = await server.app.inject({
+      method: "POST",
+      url: `/api/agent/runs/${proposal!.run.id}/tools`,
+      payload: {
+        idempotencyKey: proposal!.toolCall.idempotencyKey,
+        toolName: proposal!.toolCall.toolName,
+        arguments: proposal!.toolCall.arguments,
+        confirmed: true,
+      },
+    });
+    const confirmedBody = confirmed.json() as {
+      data: {
+        result: { auditId: string; artifact: { id: string; revision: number } };
+      };
+    };
+    expect(confirmedBody.data.result.artifact.revision).toBe(1);
+    expect(server.context.agents.getRun(proposal!.run.id).status).toBe(
+      "completed",
+    );
+
+    const undone = await server.app.inject({
+      method: "POST",
+      url: `/api/agent/runs/${proposal!.run.id}/tools`,
+      payload: {
+        idempotencyKey: "summary-undo",
+        toolName: "agent.change.undo",
+        arguments: { auditId: confirmedBody.data.result.auditId },
+        confirmed: true,
+      },
+    });
+    expect(undone.json()).toMatchObject({
+      data: { call: { status: "succeeded" } },
+    });
+    expect(
+      server.context.store.getLatestArtifact(
+        "chat_summary",
+        "conversation",
+        conversation.id,
+      ),
+    ).toBeNull();
+  });
+
+  it("keeps participant profile reads and writes scoped to the current card", async () => {
+    const server = await application();
+    const { conversation, participant } = workspaceFixture(server);
+    const provider = new SequencedFakeProvider([
+      {
+        toolCalls: [
+          {
+            id: "call-profile-get",
+            name: "character.profile.get",
+            arguments: { participantId: participant.id },
+          },
+        ],
+      },
+      {
+        toolCalls: [
+          {
+            id: "call-profile-create",
+            name: "character.profile.create",
+            arguments: {
+              participantId: participant.id,
+              title: "Harbor keeper profile",
+              content: "Keeps the evening bell schedule.",
+              traits: ["careful"],
+              goals: [],
+              relationships: [],
+              facts: [],
+            },
+          },
+        ],
+      },
+    ]);
+    vi.spyOn(server.context.providers, "get").mockResolvedValue(provider);
+
+    const response = await server.app.inject({
+      method: "POST",
+      url: `/api/conversations/${conversation.id}/generate`,
+      payload: { connectionId: "sequenced-fake" },
+    });
+    const events = streamEvents(response.body);
+    expect(
+      events.find((event) => event.providerCallId === "call-profile-get"),
+    ).toMatchObject({
+      type: "tool-result",
+      result: { found: false },
+    });
+    const proposal = events.find((event) => event.type === "tool-proposal") as
+      | {
+          run: { id: string };
+          toolCall: {
+            idempotencyKey: string;
+            toolName: string;
+            arguments: Record<string, unknown>;
+          };
+        }
+      | undefined;
+    expect(proposal?.toolCall.toolName).toBe("character.profile.create");
+
+    const confirmed = await server.app.inject({
+      method: "POST",
+      url: `/api/agent/runs/${proposal!.run.id}/tools`,
+      payload: {
+        idempotencyKey: proposal!.toolCall.idempotencyKey,
+        toolName: proposal!.toolCall.toolName,
+        arguments: proposal!.toolCall.arguments,
+        confirmed: true,
+      },
+    });
+    expect(confirmed.json()).toMatchObject({
+      data: {
+        call: { status: "succeeded" },
+        result: { artifact: { kind: "character_profile" } },
+      },
+    });
   });
 });

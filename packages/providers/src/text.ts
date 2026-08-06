@@ -108,8 +108,8 @@ export class TextCompletionProvider implements ModelProvider {
     if (request.tools && request.tools.length > 0) {
       yield emit({
         type: "error",
-        code: "AGENT_NOT_SUPPORTED_BY_PROVIDER",
-        message: "Text completion providers cannot run Agent tools.",
+        code: "PROVIDER_TOOL_CALLING_NOT_SUPPORTED",
+        message: "Text completion providers cannot run structured tools.",
         retryable: false,
       });
       return;

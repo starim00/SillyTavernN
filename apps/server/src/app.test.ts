@@ -1090,20 +1090,35 @@ describe("SillyTavern N server", () => {
     ).toMatchObject({ role: "assistant", participantId: null });
   });
 
+  it("returns 404 for the removed standalone planning endpoints", async () => {
+    const { app } = await application();
+    const removed = [
+      { method: "POST" as const, url: "/api/agent/runs" },
+      { method: "POST" as const, url: "/api/agent/runs/run-old/plan" },
+      { method: "POST" as const, url: "/api/agent/runs/run-old/complete" },
+      { method: "GET" as const, url: "/api/agent/tools" },
+      { method: "GET" as const, url: "/api/agent/audit" },
+    ];
+    for (const request of removed) {
+      const response = await app.inject(request);
+      expect(response.statusCode, request.url).toBe(404);
+    }
+  });
+
   it("enforces entry permission, confirmation, audit, idempotency and undo", async () => {
     const { app, context } = await application();
-    const runResponse = await app.inject({
-      method: "POST",
-      url: "/api/agent/runs",
-      payload: {
-        id: "run-e2e",
-        conversationId: "conversation-harbor",
-        connectionId: "fake",
-        objective: "Remember the late bell.",
-        idempotencyKey: "run-e2e-key",
-      },
+    const run = context.agents.createRun({
+      id: "run-e2e",
+      conversationId: "conversation-harbor",
+      requestedBy: "local-user",
+      provider: "fake",
+      model: "fake-model",
+      objective: "Remember the late bell.",
+      idempotencyKey: "run-e2e-key",
+    }).run;
+    context.agents.transitionRun(run.id, ["queued"], "running", {
+      currentStep: 1,
     });
-    expect(runResponse.statusCode).toBe(201);
 
     let worldbook = context.store.getWorldbook("worldbook-harbor");
     let entry = context.store.getWorldbookEntry("entry-clocktower");

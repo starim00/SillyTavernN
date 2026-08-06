@@ -1063,6 +1063,50 @@ describe("AgentStore", () => {
     }
   });
 
+  it("lists ordered conversation messages with bounded pagination", () => {
+    const store = new AppStore();
+    const agents = new AgentStore(store);
+    try {
+      const { conversation, first, second } = createConversationFixture(store);
+      const run = agents.createRun({
+        id: "run-messages",
+        conversationId: conversation.id,
+        requestedBy: "user-1",
+        provider: "fake",
+        model: "fake",
+        objective: "List messages",
+        idempotencyKey: "run-messages",
+      }).run;
+      const listed = agents.executeTool({
+        runId: run.id,
+        idempotencyKey: "messages-list",
+        toolName: "chat.messages.list",
+        arguments: { limit: 200 },
+      });
+      expect(listed.result).toMatchObject({
+        offset: 0,
+        limit: 200,
+        total: 2,
+        items: [
+          { id: first.id, order: 0, role: "user" },
+          { id: second.id, order: 1, role: "assistant" },
+        ],
+      });
+      expect(() =>
+        agents.executeTool({
+          runId: run.id,
+          idempotencyKey: "messages-too-large",
+          toolName: "chat.messages.list",
+          arguments: { limit: 201 },
+        }),
+      ).toThrowError(
+        expect.objectContaining({ code: "TOOL_ARGUMENT_INVALID" }),
+      );
+    } finally {
+      store.close();
+    }
+  });
+
   it("gates entry updates and deletes on per-entry permission", () => {
     const store = new AppStore();
     const agents = new AgentStore(store);
@@ -1149,9 +1193,18 @@ describe("AgentStore", () => {
           content: "The bell now rings two beats late.",
         },
       };
+      const updateRun = agents.createRun({
+        id: "run-update",
+        conversationId: conversation.id,
+        requestedBy: "user-1",
+        provider: "fake",
+        model: "fake",
+        objective: "Update the durable fact",
+        idempotencyKey: "run-key-update",
+      }).run;
       expect(
         agents.executeTool({
-          runId: run.id,
+          runId: updateRun.id,
           idempotencyKey: "call-update",
           toolName: "worldbook.entry.update",
           arguments: updateArguments,
@@ -1159,7 +1212,7 @@ describe("AgentStore", () => {
       ).toBe("awaiting_confirmation");
       expect(() =>
         agents.executeTool({
-          runId: run.id,
+          runId: updateRun.id,
           idempotencyKey: "call-update",
           toolName: "worldbook.entry.update",
           arguments: updateArguments,
@@ -1172,7 +1225,7 @@ describe("AgentStore", () => {
       );
       expect(
         agents
-          .listToolCalls(run.id)
+          .listToolCalls(updateRun.id)
           .find((call) => call.idempotencyKey === "call-update"),
       ).toMatchObject({
         status: "awaiting_confirmation",
@@ -1196,7 +1249,7 @@ describe("AgentStore", () => {
       );
 
       const updated = agents.executeTool({
-        runId: run.id,
+        runId: updateRun.id,
         idempotencyKey: "call-update",
         toolName: "worldbook.entry.update",
         arguments: updateArguments,
@@ -1238,9 +1291,18 @@ describe("AgentStore", () => {
         expectedRevision: revokedForDelete.worldbook.revision,
         expectedEntryRevision: revokedForDelete.entry.revision,
       };
+      const deleteRun = agents.createRun({
+        id: "run-delete",
+        conversationId: conversation.id,
+        requestedBy: "user-1",
+        provider: "fake",
+        model: "fake",
+        objective: "Delete the durable fact",
+        idempotencyKey: "run-key-delete",
+      }).run;
       expect(
         agents.executeTool({
-          runId: run.id,
+          runId: deleteRun.id,
           idempotencyKey: "call-delete",
           toolName: "worldbook.entry.delete",
           arguments: deleteArguments,
@@ -1248,7 +1310,7 @@ describe("AgentStore", () => {
       ).toBe("awaiting_confirmation");
       expect(() =>
         agents.executeTool({
-          runId: run.id,
+          runId: deleteRun.id,
           idempotencyKey: "call-delete",
           toolName: "worldbook.entry.delete",
           arguments: deleteArguments,
@@ -1271,7 +1333,7 @@ describe("AgentStore", () => {
       });
       expect(grantedForDelete.entry.agentEditable).toBe(true);
       const deleted = agents.executeTool({
-        runId: run.id,
+        runId: deleteRun.id,
         idempotencyKey: "call-delete",
         toolName: "worldbook.entry.delete",
         arguments: deleteArguments,
@@ -1285,7 +1347,7 @@ describe("AgentStore", () => {
       };
       expect(
         agents.executeTool({
-          runId: run.id,
+          runId: deleteRun.id,
           idempotencyKey: "call-delete",
           toolName: "worldbook.entry.delete",
           arguments: {},
@@ -1297,7 +1359,7 @@ describe("AgentStore", () => {
       ).toBe("worldbook.entry.recreate");
 
       const undone = agents.executeTool({
-        runId: run.id,
+        runId: deleteRun.id,
         idempotencyKey: "call-undo",
         toolName: "agent.change.undo",
         arguments: { auditId: deleteResult.auditId },
@@ -1364,8 +1426,17 @@ describe("AgentStore", () => {
       });
       expect(confirmedSummary.call.status).toBe("succeeded");
 
+      const profileRun = agents.createRun({
+        id: "run-profile",
+        conversationId: conversation.id,
+        requestedBy: "user-1",
+        provider: "fake",
+        model: "fake",
+        objective: "Create a participant profile",
+        idempotencyKey: "run-profile",
+      }).run;
       const profile = agents.executeTool({
-        runId: run.id,
+        runId: profileRun.id,
         idempotencyKey: "profile-create",
         toolName: "character.profile.create",
         arguments: {
@@ -1384,7 +1455,7 @@ describe("AgentStore", () => {
       });
       expect(profile.call.status).toBe("awaiting_confirmation");
       const confirmedProfile = agents.executeTool({
-        runId: run.id,
+        runId: profileRun.id,
         idempotencyKey: "profile-create",
         toolName: "character.profile.create",
         arguments: {
@@ -1416,6 +1487,77 @@ describe("AgentStore", () => {
       ).not.toBeNull();
       expect(store.listMessages(conversation.id)).toEqual(beforeMessages);
       expect(store.getCard(card.card.id)).toEqual(beforeCard);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("keeps summary ranges ordered and participant profiles on the current card", () => {
+    const store = new AppStore();
+    const agents = new AgentStore(store);
+    try {
+      const { conversation, first, second } = createConversationFixture(store);
+      const invalidSummaryRun = agents.createRun({
+        id: "run-invalid-summary-range",
+        conversationId: conversation.id,
+        requestedBy: "user-1",
+        provider: "fake",
+        model: "fake",
+        objective: "Reject an invalid summary range",
+        idempotencyKey: "run-invalid-summary-range",
+      }).run;
+      const invalidSummary = agents.executeTool({
+        runId: invalidSummaryRun.id,
+        idempotencyKey: "invalid-summary-range",
+        toolName: "chat.summary.create",
+        arguments: {
+          content: "This range is backwards.",
+          sourceFromMessageId: second.id,
+          sourceToMessageId: first.id,
+        },
+      });
+      expect(invalidSummary.call.status).toBe("awaiting_confirmation");
+      expect(() =>
+        agents.executeTool({
+          runId: invalidSummaryRun.id,
+          idempotencyKey: "invalid-summary-range",
+          toolName: "chat.summary.create",
+          arguments: {
+            content: "This range is backwards.",
+            sourceFromMessageId: second.id,
+            sourceToMessageId: first.id,
+          },
+          confirmed: true,
+        }),
+      ).toThrowError(
+        expect.objectContaining({ code: "TOOL_ARGUMENT_INVALID" }),
+      );
+
+      store.createCard({
+        id: "card-foreign-profile",
+        kind: "character",
+        name: "Foreign card",
+        participants: [
+          { id: "participant-foreign", name: "Foreign participant" },
+        ],
+      });
+      const foreignProfileRun = agents.createRun({
+        id: "run-foreign-profile",
+        conversationId: conversation.id,
+        requestedBy: "user-1",
+        provider: "fake",
+        model: "fake",
+        objective: "Reject a foreign participant",
+        idempotencyKey: "run-foreign-profile",
+      }).run;
+      expect(() =>
+        agents.executeTool({
+          runId: foreignProfileRun.id,
+          idempotencyKey: "foreign-profile-read",
+          toolName: "character.profile.get",
+          arguments: { participantId: "participant-foreign" },
+        }),
+      ).toThrowError(expect.objectContaining({ code: "permission_denied" }));
     } finally {
       store.close();
     }

@@ -203,6 +203,7 @@ const toolEffects: Readonly<Record<string, "read" | "write" | "destructive">> =
     "worldbook.entry.create": "write",
     "worldbook.entry.update": "write",
     "worldbook.entry.delete": "destructive",
+    "chat.messages.list": "read",
     "chat.summary.get": "read",
     "chat.summary.create": "write",
     "chat.summary.update": "write",
@@ -362,7 +363,16 @@ export class AgentStore {
   executeTool(input: ExecuteAgentToolInput): ExecuteAgentToolResult {
     let deferredError: unknown;
     const response = this.store.database.transaction(() => {
-      const run = this.assertRunActive(input.runId);
+      const existingBeforeRun = this.store.database.get<Row>(
+        "SELECT * FROM tool_calls WHERE run_id = ? AND idempotency_key = ?",
+        input.runId,
+        input.idempotencyKey,
+      );
+      const run = this.assertRunActive(
+        input.runId,
+        input.toolName === "agent.change.undo" ||
+          existingBeforeRun?.status === "succeeded",
+      );
       const effect = toolEffects[input.toolName];
       if (!effect) {
         throw new StorageError(
@@ -456,7 +466,10 @@ export class AgentStore {
         }
 
         return this.store.database.transaction(() => {
-          const latestRun = this.assertRunActive(input.runId, true);
+          const latestRun = this.assertRunActive(
+            input.runId,
+            input.toolName === "agent.change.undo",
+          );
           const nextToolCount = latestRun.toolCallCount + 1;
           const nextWriteCount =
             effect === "read"
@@ -499,13 +512,20 @@ export class AgentStore {
             timestamp(),
             callId,
           );
+          const nextStatus: AgentRun["status"] =
+            input.toolName === "agent.change.undo" ||
+            (existing?.status === "awaiting_confirmation" &&
+              input.confirmed === true)
+              ? "completed"
+              : "running";
           this.store.database.run(
             `UPDATE agent_runs
-             SET status = 'running',
+             SET status = ?,
                  tool_call_count = ?,
                  write_call_count = ?,
                  updated_at = ?
              WHERE id = ?`,
+            nextStatus,
             nextToolCount,
             nextWriteCount,
             timestamp(),
@@ -614,6 +634,9 @@ export class AgentStore {
           toolName,
         );
         return this.worldbookDelete(run, callId, args, toolName);
+      case "chat.messages.list":
+        strictKeys(args, ["offset", "limit"], toolName);
+        return this.messagesList(run, args, toolName);
       case "chat.summary.get":
         strictKeys(args, [], toolName);
         return this.artifactGet(
@@ -702,6 +725,42 @@ export class AgentStore {
 
   private confirmationRequirement(toolName: string): boolean {
     return toolEffects[toolName] !== "read";
+  }
+
+  private messagesList(
+    run: AgentRun,
+    args: JsonObject,
+    toolName: string,
+  ): unknown {
+    const offset =
+      args.offset === undefined ? 0 : numberArgument(args, "offset", toolName);
+    const limit =
+      args.limit === undefined ? 50 : numberArgument(args, "limit", toolName);
+    if (limit < 1 || limit > 200) {
+      throw new StorageError(
+        "TOOL_ARGUMENT_INVALID",
+        "chat.messages.list limit must be between 1 and 200.",
+        400,
+      );
+    }
+    const messages = this.store.listMessages(run.conversationId);
+    const items = messages
+      .slice(offset, offset + limit)
+      .map((message, index) => ({
+        id: message.id,
+        order: offset + index,
+        role: message.role,
+        participantId: message.participantId,
+        createdAt: message.createdAt,
+        preview: message.content.replace(/\s+/g, " ").trim().slice(0, 160),
+      }));
+    return {
+      items,
+      offset,
+      limit,
+      total: messages.length,
+      hasMore: offset + items.length < messages.length,
+    };
   }
 
   private worldbookGet(
@@ -1545,8 +1604,9 @@ export class AgentStore {
   }
 
   /**
-   * Read-only planning view. It deliberately exposes only worldbooks already
-   * bound to the run's conversation; callers cannot use it to widen access.
+   * Read-only conversation access view. It deliberately exposes only
+   * worldbooks already bound to the run's conversation; callers cannot use it
+   * to widen access.
    */
   listAccessibleWorldbooks(runId: string): Worldbook[] {
     const run = this.getRun(runId);
@@ -1683,14 +1743,13 @@ export class AgentStore {
     }
   }
 
-  private assertRunActive(id: string, allowWaiting = false): AgentRun {
+  private assertRunActive(id: string, allowCompletedUndo = false): AgentRun {
     const run = this.getRun(id);
     if (run.status === "cancelled" || run.cancelledAt !== null) {
       throw new RunCancelledError(id);
     }
-    const allowed = allowWaiting
-      ? ["queued", "running", "waiting_confirmation"]
-      : ["queued", "running", "waiting_confirmation"];
+    const allowed = ["queued", "running", "waiting_confirmation"];
+    if (allowCompletedUndo) allowed.push("completed");
     if (!allowed.includes(run.status)) {
       throw new ConflictError(`Agent run '${id}' is not active.`, {
         status: run.status,

@@ -59,6 +59,10 @@ export type WorkspaceMessage = {
   finishReason?:
     "stop" | "length" | "tool-calls" | "cancelled" | "limit" | "provider-error";
   providerErrorCode?: string;
+  providerRawFinishReason?: string;
+  providerSawDone?: boolean;
+  providerLastFrameType?: string;
+  providerUpstreamRequestId?: string;
   swipes?: MessageSwipe[];
   activeSwipeIndex?: number;
 };
@@ -68,7 +72,8 @@ export type MessageSwipe = {
   content: string;
 };
 
-export type ProviderProtocol = "openai-compatible" | "text-completion" | "fake";
+export type ProviderProtocol =
+  "openai-compatible" | "openai-responses" | "text-completion" | "fake";
 
 export type ProviderConnection = {
   id: string;

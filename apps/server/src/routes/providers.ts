@@ -4,8 +4,13 @@ import { once } from "node:events";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 
-import { ProviderEventSchema, type ProviderEvent } from "@stn/contracts";
+import {
+  ProviderEventSchema,
+  type JsonObject,
+  type ProviderEvent,
+} from "@stn/contracts";
 import type {
+  ProviderDiagnosticsEvent,
   ProviderMessage,
   ProviderMessageToolCall,
   ProviderTool,
@@ -20,15 +25,38 @@ import {
   type ConversationTool,
 } from "../conversation-tools.js";
 
+function persistedProviderDiagnostics(
+  diagnostics: ProviderDiagnosticsEvent | undefined,
+) {
+  if (diagnostics === undefined) return {};
+  return {
+    ...(diagnostics.rawFinishReason === undefined
+      ? {}
+      : { providerRawFinishReason: diagnostics.rawFinishReason }),
+    providerSawDone: diagnostics.sawDone,
+    ...(diagnostics.lastFrameType === undefined
+      ? {}
+      : { providerLastFrameType: diagnostics.lastFrameType }),
+    ...(diagnostics.upstreamRequestId === undefined
+      ? {}
+      : { providerUpstreamRequestId: diagnostics.upstreamRequestId }),
+  };
+}
+
 const connectionSchema = z
   .object({
     name: z.string().trim().min(1).max(256),
-    protocol: z.enum(["openai-compatible", "text-completion", "fake"]),
+    protocol: z.enum([
+      "openai-compatible",
+      "openai-responses",
+      "text-completion",
+      "fake",
+    ]),
     baseUrl: z.string().trim().max(2048),
     model: z.string().trim().min(1).max(512),
     headers: z.record(z.string(), z.string()).default({}),
     apiKey: z.string().max(16_384).optional(),
-    nativeToolCalling: z.boolean().default(false),
+    nativeToolCalling: z.boolean().optional(),
   })
   .strict();
 
@@ -292,7 +320,8 @@ export async function registerProviderRoutes(
         model: input.model,
         headers: input.headers,
         apiKeyRef,
-        nativeToolCalling: input.nativeToolCalling,
+        nativeToolCalling:
+          input.nativeToolCalling ?? input.protocol === "openai-responses",
       });
       return reply
         .code(201)
@@ -542,6 +571,7 @@ export async function registerProviderRoutes(
       null;
     let providerError:
       { code: string; message: string; retryable: boolean } | undefined;
+    let providerDiagnostics: ProviderDiagnosticsEvent | undefined;
     let persistedMessage: { id: string; revision: number } | undefined;
     let persistenceStarted = false;
     let toolExecutionClosed = false;
@@ -554,8 +584,10 @@ export async function registerProviderRoutes(
       for (let turn = 0; turn < maxConversationToolTurns; turn += 1) {
         const providerRequestId =
           turn === 0 ? generationId : `${generationId}-tool-${String(turn)}`;
+        providerDiagnostics = undefined;
         const readToolCalls: ProviderMessageToolCall[] = [];
         const readToolMessages: ProviderMessage[] = [];
+        let providerContextItems: readonly JsonObject[] = [];
         let turnText = "";
         let canContinueWithReadResults = true;
         completed = false;
@@ -590,6 +622,30 @@ export async function registerProviderRoutes(
           },
           controller.signal,
         )) {
+          eventCount += 1;
+          if (eventCount > budget.maxEvents) {
+            throw new GenerationLimitError(
+              "Provider event count exceeded its budget.",
+            );
+          }
+          if (rawEvent.type === "provider-context") {
+            const contextBytes = Buffer.byteLength(
+              JSON.stringify(rawEvent.items),
+              "utf8",
+            );
+            outputBytes += contextBytes;
+            if (outputBytes > budget.maxOutputBytes) {
+              throw new GenerationLimitError(
+                "Provider output exceeded its byte budget.",
+              );
+            }
+            providerContextItems = rawEvent.items;
+            continue;
+          }
+          if (rawEvent.type === "provider-diagnostics") {
+            providerDiagnostics = rawEvent;
+            continue;
+          }
           const parsedEvent = ProviderEventSchema.safeParse(rawEvent);
           if (!parsedEvent.success) {
             throw new StorageError(
@@ -599,12 +655,6 @@ export async function registerProviderRoutes(
             );
           }
           const event = parsedEvent.data;
-          eventCount += 1;
-          if (eventCount > budget.maxEvents) {
-            throw new GenerationLimitError(
-              "Provider event count exceeded its budget.",
-            );
-          }
           const choiceIndex =
             "choiceIndex" in event &&
             typeof event.choiceIndex === "number" &&
@@ -848,6 +898,9 @@ export async function registerProviderRoutes(
             role: "assistant",
             content: turnText,
             toolCalls: readToolCalls,
+            ...(providerContextItems.length === 0
+              ? {}
+              : { providerContextItems }),
           },
           ...readToolMessages,
         ];
@@ -895,6 +948,7 @@ export async function registerProviderRoutes(
           ...(providerError === undefined
             ? {}
             : { providerErrorCode: providerError.code }),
+          ...persistedProviderDiagnostics(providerDiagnostics),
           ...(input.targetMessageId === undefined
             ? {}
             : {
@@ -915,6 +969,11 @@ export async function registerProviderRoutes(
             state: persisted.message.generationStatus,
             finishReason: persisted.message.finishReason,
             providerErrorCode: persisted.message.providerErrorCode,
+            providerRawFinishReason: persisted.message.providerRawFinishReason,
+            providerSawDone: persisted.message.providerSawDone,
+            providerLastFrameType: persisted.message.providerLastFrameType,
+            providerUpstreamRequestId:
+              persisted.message.providerUpstreamRequestId,
             ...(alternatives.length === 0 ? {} : { alternatives }),
             ...(incomplete
               ? {
@@ -974,6 +1033,7 @@ export async function registerProviderRoutes(
               ? "cancelled"
               : "provider-error",
           providerErrorCode: providerError.code,
+          ...persistedProviderDiagnostics(providerDiagnostics),
           ...(input.targetMessageId === undefined
             ? {}
             : {
@@ -990,6 +1050,11 @@ export async function registerProviderRoutes(
             state: persisted.message.generationStatus,
             finishReason: persisted.message.finishReason,
             providerErrorCode: persisted.message.providerErrorCode,
+            providerRawFinishReason: persisted.message.providerRawFinishReason,
+            providerSawDone: persisted.message.providerSawDone,
+            providerLastFrameType: persisted.message.providerLastFrameType,
+            providerUpstreamRequestId:
+              persisted.message.providerUpstreamRequestId,
             incomplete: true,
             reason: limitExceeded
               ? "limit"

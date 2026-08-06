@@ -43,7 +43,8 @@ export interface Card {
 export interface ProviderConnection {
   id: string;
   name: string;
-  protocol: "openai-compatible" | "text-completion" | "fake";
+  protocol:
+    "openai-compatible" | "openai-responses" | "text-completion" | "fake";
   baseUrl: string;
   model: string;
   headers: Record<string, string>;
@@ -96,6 +97,10 @@ export interface Message {
   generationStatus: GenerationStatus;
   finishReason: GenerationFinishReason | null;
   providerErrorCode: string | null;
+  providerRawFinishReason: string | null;
+  providerSawDone: boolean | null;
+  providerLastFrameType: string | null;
+  providerUpstreamRequestId: string | null;
   revision: number;
   createdAt: string;
   updatedAt: string;

@@ -195,7 +195,7 @@ function ProviderEditor({
   const [apiKey, setApiKey] = useState("");
   const [removeApiKey, setRemoveApiKey] = useState(false);
   const [nativeToolCalling, setNativeToolCalling] = useState(
-    current?.nativeToolCalling ?? false,
+    current?.nativeToolCalling ?? protocol === "openai-responses",
   );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -244,11 +244,18 @@ function ProviderEditor({
           <span>协议</span>
           <select
             value={protocol}
-            onChange={(event) =>
-              setProtocol(event.target.value as ProviderConnection["protocol"])
-            }
+            onChange={(event) => {
+              const next = event.target.value as ProviderConnection["protocol"];
+              setProtocol(next);
+              if (current === undefined && next === "openai-responses") {
+                setNativeToolCalling(true);
+              }
+            }}
           >
             <option value="openai-compatible">OpenAI Compatible</option>
+            <option value="openai-responses">
+              OpenAI Responses（DeepSeek / CPA）
+            </option>
             <option value="text-completion">Text Completion</option>
             <option value="fake">Deterministic Fake</option>
           </select>
@@ -257,9 +264,19 @@ function ProviderEditor({
           <span>Base URL</span>
           <input
             value={baseUrl}
-            placeholder="http://127.0.0.1:1234/v1"
+            placeholder={
+              protocol === "openai-responses"
+                ? "DeepSeek: https://api.deepseek.com；CPA: http://127.0.0.1:8317/v1"
+                : "http://127.0.0.1:1234/v1"
+            }
             onChange={(event) => setBaseUrl(event.target.value)}
           />
+          {protocol === "openai-responses" ? (
+            <small className="field-hint">
+              Responses 地址：DeepSeek 使用 https://api.deepseek.com，CPA 使用
+              http://127.0.0.1:8317/v1。
+            </small>
+          ) : null}
         </label>
         <label className="field">
           <span>模型</span>

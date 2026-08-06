@@ -294,6 +294,49 @@ describe("providers", () => {
     expect(events.some((event) => event.type === "finish")).toBe(false);
   });
 
+  it("preserves raw Chat Completions termination diagnostics", async () => {
+    const provider = new OpenAICompatibleProvider(
+      {
+        baseUrl: "https://example.invalid/v1",
+        model: "gemini-pro-agent",
+      },
+      async () =>
+        new Response(
+          [
+            'data: {"object":"chat.completion.chunk","choices":[{"delta":{"content":"partial plan"}}]}',
+            'data: {"object":"chat.completion.chunk","request_id":"body-request-id","choices":[{"delta":{},"finish_reason":"safety"}]}',
+            "data: [DONE]",
+            "",
+          ].join("\n\n"),
+          {
+            status: 200,
+            headers: {
+              "content-type": "text/event-stream",
+              "x-request-id": "header-request-id",
+            },
+          },
+        ),
+    );
+
+    const events = await collect(
+      provider.generate({
+        requestId: "request-diagnostics",
+        messages: [{ role: "user", content: "hello" }],
+      }),
+    );
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "provider-diagnostics",
+        rawFinishReason: "safety",
+        sawDone: true,
+        lastFrameType: "chat.completion.chunk",
+        upstreamRequestId: "header-request-id",
+      }),
+    );
+    expect(events.at(-1)).toMatchObject({ type: "finish", reason: "stop" });
+  });
+
   it("consumes the final SSE frame even when the proxy omits the trailing blank line", async () => {
     const provider = new OpenAICompatibleProvider(
       {

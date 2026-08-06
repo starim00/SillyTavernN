@@ -353,7 +353,7 @@ describe("workspace API client", () => {
           '"delta":"完整"}\n\ndata: {"type":"text-delta","requestId":"gen-1",',
           '"sequence":2,"delta":"回复"}\n\n',
           'data: {"type":"finish","requestId":"gen-1","sequence":3,"reason":"stop"}\n\n',
-          'data: {"type":"message-persisted","messageId":"message-9","revision":1}\n\n',
+          'data: {"type":"message-persisted","messageId":"message-9","revision":1,"providerRawFinishReason":"stop","providerSawDone":true,"providerLastFrameType":"chat.completion.chunk","providerUpstreamRequestId":"upstream-9"}\n\n',
         ]),
       );
     vi.stubGlobal("fetch", fetchMock);
@@ -377,6 +377,10 @@ describe("workspace API client", () => {
       messageId: "message-9",
       revision: 1,
       content: "完整回复",
+      providerRawFinishReason: "stop",
+      providerSawDone: true,
+      providerLastFrameType: "chat.completion.chunk",
+      providerUpstreamRequestId: "upstream-9",
     });
     expect(ids).toEqual(["gen-1"]);
     expect(deltas).toEqual(["完整", "回复"]);

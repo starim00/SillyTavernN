@@ -100,6 +100,10 @@ export interface PersistAssistantGenerationInput {
   status: GenerationStatus;
   finishReason: GenerationFinishReason;
   providerErrorCode?: string;
+  providerRawFinishReason?: string;
+  providerSawDone?: boolean;
+  providerLastFrameType?: string;
+  providerUpstreamRequestId?: string;
   targetMessageId?: string;
   expectedMessageRevision?: number;
 }
@@ -1195,12 +1199,23 @@ export class AppStore {
         this.database.run(
           `UPDATE messages
            SET content = ?, generation_status = ?, finish_reason = ?,
-               provider_error_code = ?, revision = revision + 1, updated_at = ?
+               provider_error_code = ?, provider_raw_finish_reason = ?,
+               provider_saw_done = ?, provider_last_frame_type = ?,
+               provider_upstream_request_id = ?,
+               revision = revision + 1, updated_at = ?
            WHERE id = ? AND revision = ?`,
           input.content,
           input.status,
           input.finishReason,
           input.providerErrorCode ?? null,
+          input.providerRawFinishReason ?? null,
+          input.providerSawDone === undefined
+            ? null
+            : input.providerSawDone
+              ? 1
+              : 0,
+          input.providerLastFrameType ?? null,
+          input.providerUpstreamRequestId ?? null,
           now,
           target.id,
           input.expectedMessageRevision,
@@ -1226,14 +1241,24 @@ export class AppStore {
         `INSERT INTO messages(
            id, conversation_id, parent_message_id, role, participant_id,
            content, generation_status, finish_reason, provider_error_code,
+           provider_raw_finish_reason, provider_saw_done,
+           provider_last_frame_type, provider_upstream_request_id,
            revision, created_at, updated_at
-         ) VALUES (?, ?, NULL, 'assistant', NULL, ?, ?, ?, ?, 1, ?, ?)`,
+         ) VALUES (?, ?, NULL, 'assistant', NULL, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
         messageId,
         conversation.id,
         input.content,
         input.status,
         input.finishReason,
         input.providerErrorCode ?? null,
+        input.providerRawFinishReason ?? null,
+        input.providerSawDone === undefined
+          ? null
+          : input.providerSawDone
+            ? 1
+            : 0,
+        input.providerLastFrameType ?? null,
+        input.providerUpstreamRequestId ?? null,
         now,
         now,
       );
@@ -2396,6 +2421,25 @@ export class AppStore {
         row.provider_error_code === undefined
           ? null
           : String(row.provider_error_code),
+      providerRawFinishReason:
+        row.provider_raw_finish_reason === null ||
+        row.provider_raw_finish_reason === undefined
+          ? null
+          : String(row.provider_raw_finish_reason),
+      providerSawDone:
+        row.provider_saw_done === null || row.provider_saw_done === undefined
+          ? null
+          : asBoolean(row.provider_saw_done),
+      providerLastFrameType:
+        row.provider_last_frame_type === null ||
+        row.provider_last_frame_type === undefined
+          ? null
+          : String(row.provider_last_frame_type),
+      providerUpstreamRequestId:
+        row.provider_upstream_request_id === null ||
+        row.provider_upstream_request_id === undefined
+          ? null
+          : String(row.provider_upstream_request_id),
       revision: Number(row.revision),
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),

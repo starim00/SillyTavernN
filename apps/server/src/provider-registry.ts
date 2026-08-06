@@ -1,6 +1,7 @@
 import {
   DeterministicFakeProvider,
   OpenAICompatibleProvider,
+  OpenAIResponsesProvider,
   TextCompletionProvider,
   type ModelProvider,
 } from "@stn/providers";
@@ -48,6 +49,9 @@ export class ProviderRegistry {
     };
     if (connection.protocol === "openai-compatible") {
       return new OpenAICompatibleProvider(config);
+    }
+    if (connection.protocol === "openai-responses") {
+      return new OpenAIResponsesProvider(config);
     }
     if (connection.protocol === "text-completion") {
       return new TextCompletionProvider(config);

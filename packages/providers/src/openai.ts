@@ -10,18 +10,25 @@ import type {
   ConnectionTestResult,
   ModelProvider,
   ProviderConnection,
+  ProviderDiagnosticsEvent,
   ProviderModel,
   ProviderRequest,
+  ProviderStreamEvent,
 } from "./types.js";
 import {
   asJsonObject,
   createRequestSignal,
+  diagnosticString,
   estimateTokens,
   joinUrl,
+  providerFrameType,
   readSseJson,
   responseError,
   safeHeaders,
+  upstreamRequestIdFromFrame,
+  upstreamRequestIdFromHeaders,
 } from "./utils.js";
+import { createToolNameAliases, type ToolNameAliases } from "./tool-aliases.js";
 
 type Fetch = typeof globalThis.fetch;
 
@@ -37,44 +44,6 @@ interface ToolAccumulator {
   argumentsText: string;
   choiceIndex: number;
   started: boolean;
-}
-
-const providerFunctionNamePattern = /^[a-zA-Z0-9_-]+$/u;
-
-interface ToolNameAliases {
-  toInternal(name: string): string;
-  toProvider(name: string): string;
-}
-
-function createToolNameAliases(
-  tools: ProviderRequest["tools"],
-): ToolNameAliases {
-  const internalToProvider = new Map<string, string>();
-  const providerToInternal = new Map<string, string>();
-
-  for (const tool of tools ?? []) {
-    const encodedName = providerFunctionNamePattern.test(tool.name)
-      ? tool.name
-      : `stn_${Array.from(new TextEncoder().encode(tool.name), (byte) =>
-          byte.toString(16).padStart(2, "0"),
-        ).join("")}`;
-    let providerName = encodedName;
-    let suffix = 2;
-    while (
-      providerToInternal.has(providerName) &&
-      providerToInternal.get(providerName) !== tool.name
-    ) {
-      providerName = `${encodedName}_${String(suffix)}`;
-      suffix += 1;
-    }
-    internalToProvider.set(tool.name, providerName);
-    providerToInternal.set(providerName, tool.name);
-  }
-
-  return {
-    toInternal: (name) => providerToInternal.get(name) ?? name,
-    toProvider: (name) => internalToProvider.get(name) ?? name,
-  };
 }
 
 function generationPayload(
@@ -247,7 +216,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
   async *generate(
     request: ProviderRequest,
     signal?: AbortSignal,
-  ): AsyncIterable<ProviderEvent> {
+  ): AsyncIterable<ProviderStreamEvent> {
     let sequence = 0;
     const emit = <T extends Omit<ProviderEvent, "requestId" | "sequence">>(
       value: T,
@@ -287,6 +256,19 @@ export class OpenAICompatibleProvider implements ModelProvider {
     );
     const toolNameAliases = createToolNameAliases(request.tools);
     const tools = new Map<string, ToolAccumulator>();
+    let rawFinishReason: string | undefined;
+    let sawDone = false;
+    let lastFrameType: string | undefined;
+    let upstreamRequestId: string | undefined;
+    const emitDiagnostics = (): ProviderDiagnosticsEvent => ({
+      type: "provider-diagnostics",
+      requestId: request.requestId,
+      sequence: sequence++,
+      ...(rawFinishReason === undefined ? {} : { rawFinishReason }),
+      sawDone,
+      ...(lastFrameType === undefined ? {} : { lastFrameType }),
+      ...(upstreamRequestId === undefined ? {} : { upstreamRequestId }),
+    });
     try {
       const response = await this.fetchImpl(
         joinUrl(this.connection.baseUrl, "/chat/completions"),
@@ -299,10 +281,10 @@ export class OpenAICompatibleProvider implements ModelProvider {
           signal: requestSignal.signal,
         },
       );
+      upstreamRequestId = upstreamRequestIdFromHeaders(response.headers);
       if (!response.ok) throw await responseError(response);
 
       let finishReason: "stop" | "length" | "tool-calls" = "stop";
-      let sawDone = false;
       let sawFinishReason = false;
       const contentType =
         response.headers.get("content-type")?.toLowerCase() ?? "";
@@ -319,6 +301,8 @@ export class OpenAICompatibleProvider implements ModelProvider {
           sawDone = true;
           break;
         }
+        lastFrameType = providerFrameType(frame, "chat.completion.frame");
+        upstreamRequestId ??= upstreamRequestIdFromFrame(frame);
         const usage = asJsonObject(frame.usage);
         if (usage) {
           yield emit({
@@ -415,12 +399,14 @@ export class OpenAICompatibleProvider implements ModelProvider {
             sawFinishReason = true;
           }
           if (choiceIndex === 0) {
+            rawFinishReason = diagnosticString(rawFinish) ?? rawFinishReason;
             if (rawFinish === "length") finishReason = "length";
             if (rawFinish === "tool_calls") finishReason = "tool-calls";
           }
         }
       }
 
+      yield emitDiagnostics();
       if (!sawDone && !sawFinishReason) {
         yield emit({
           type: "error",
@@ -455,6 +441,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       }
       yield emit({ type: "finish", reason: finishReason });
     } catch (error) {
+      yield emitDiagnostics();
       if (signal?.aborted) {
         yield emit({ type: "finish", reason: "cancelled" });
       } else {

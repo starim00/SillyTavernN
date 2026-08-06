@@ -95,6 +95,10 @@ type ApiMessage = {
   state?: "complete" | "partial" | "cancelled" | "error";
   finishReason?: WorkspaceMessage["finishReason"] | null;
   providerErrorCode?: string | null;
+  providerRawFinishReason?: string | null;
+  providerSawDone?: boolean | null;
+  providerLastFrameType?: string | null;
+  providerUpstreamRequestId?: string | null;
   swipes?: ApiSwipe[];
 };
 
@@ -285,6 +289,10 @@ export type GenerationReceipt =
       reason?: "length" | "cancelled" | "error" | "limit";
       errorCode?: string;
       errorMessage?: string;
+      providerRawFinishReason?: string;
+      providerSawDone?: boolean;
+      providerLastFrameType?: string;
+      providerUpstreamRequestId?: string;
     }
   | {
       generationId: string;
@@ -565,6 +573,18 @@ const normalizeMessage = (item: ApiMessage): WorkspaceMessage => {
     ...(item.finishReason ? { finishReason: item.finishReason } : {}),
     ...(item.providerErrorCode
       ? { providerErrorCode: item.providerErrorCode }
+      : {}),
+    ...(item.providerRawFinishReason
+      ? { providerRawFinishReason: item.providerRawFinishReason }
+      : {}),
+    ...(typeof item.providerSawDone === "boolean"
+      ? { providerSawDone: item.providerSawDone }
+      : {}),
+    ...(item.providerLastFrameType
+      ? { providerLastFrameType: item.providerLastFrameType }
+      : {}),
+    ...(item.providerUpstreamRequestId
+      ? { providerUpstreamRequestId: item.providerUpstreamRequestId }
       : {}),
     ...(swipes.length > 0
       ? { swipes, activeSwipeIndex: Math.max(0, selectedIndex) }
@@ -1374,6 +1394,10 @@ export async function generateConversation(
   let incompleteReason: "length" | "cancelled" | "error" | "limit" | undefined;
   let errorCode: string | undefined;
   let errorMessage: string | undefined;
+  let providerRawFinishReason: string | undefined;
+  let providerSawDone: boolean | undefined;
+  let providerLastFrameType: string | undefined;
+  let providerUpstreamRequestId: string | undefined;
   let pendingError: WorkspaceApiError | undefined;
   let eventCount = 0;
   let outputBytes = 0;
@@ -1447,6 +1471,22 @@ export async function generateConversation(
         errorMessage =
           typeof event.errorMessage === "string"
             ? event.errorMessage
+            : undefined;
+        providerRawFinishReason =
+          typeof event.providerRawFinishReason === "string"
+            ? event.providerRawFinishReason
+            : undefined;
+        providerSawDone =
+          typeof event.providerSawDone === "boolean"
+            ? event.providerSawDone
+            : undefined;
+        providerLastFrameType =
+          typeof event.providerLastFrameType === "string"
+            ? event.providerLastFrameType
+            : undefined;
+        providerUpstreamRequestId =
+          typeof event.providerUpstreamRequestId === "string"
+            ? event.providerUpstreamRequestId
             : undefined;
       }
       return;
@@ -1542,6 +1582,10 @@ export async function generateConversation(
     ...(incompleteReason ? { reason: incompleteReason } : {}),
     ...(errorCode ? { errorCode } : {}),
     ...(errorMessage ? { errorMessage } : {}),
+    ...(providerRawFinishReason ? { providerRawFinishReason } : {}),
+    ...(providerSawDone === undefined ? {} : { providerSawDone }),
+    ...(providerLastFrameType ? { providerLastFrameType } : {}),
+    ...(providerUpstreamRequestId ? { providerUpstreamRequestId } : {}),
   };
 }
 

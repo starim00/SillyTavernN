@@ -1300,6 +1300,34 @@ describe("SillyTavern N server", () => {
     expect((await stat(file)).mode & 0o777).toBe(0o600);
   });
 
+  it("creates OpenAI Responses connections with native tools enabled by default", async () => {
+    const { app, context } = await application(false);
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/providers/connections",
+      payload: {
+        name: "DeepSeek Responses",
+        protocol: "openai-responses",
+        baseUrl: "https://api.deepseek.com",
+        model: "deepseek-v4-flash",
+      },
+    });
+    expect(response.statusCode).toBe(201);
+    const body = response.json() as {
+      data: { id: string; protocol: string; nativeToolCalling: boolean };
+    };
+    expect(body).toMatchObject({
+      data: {
+        protocol: "openai-responses",
+        nativeToolCalling: true,
+      },
+    });
+    expect(context.store.getProviderConnection(body.data.id)).toMatchObject({
+      protocol: "openai-responses",
+      nativeToolCalling: true,
+    });
+  });
+
   it("keeps the existing Provider secret when a key PATCH has a stale revision", async () => {
     const { app, context, dataDirectory } = await application(false);
     const createdResponse = await app.inject({

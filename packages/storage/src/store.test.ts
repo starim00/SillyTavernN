@@ -40,6 +40,134 @@ function createConversationFixture(store: AppStore) {
 }
 
 describe("AppStore", () => {
+  it("stores OpenAI Responses connections and preserves them through v11 rebuild", () => {
+    const store = new AppStore();
+    try {
+      const created = store.createProviderConnection({
+        id: "provider-responses",
+        name: "DeepSeek Responses",
+        protocol: "openai-responses",
+        baseUrl: "https://api.deepseek.com",
+        model: "deepseek-v4-flash",
+        headers: { "X-Test": "fixture" },
+        apiKeyRef: "provider-secret",
+        nativeToolCalling: true,
+      });
+      expect(created).toMatchObject({
+        id: "provider-responses",
+        protocol: "openai-responses",
+        headers: { "X-Test": "fixture" },
+        apiKeyRef: "provider-secret",
+        nativeToolCalling: true,
+      });
+      expect(
+        store.database.get<{ version: number }>(
+          "SELECT version FROM schema_migrations WHERE version = 11",
+        ),
+      ).toEqual({ version: 11 });
+      expect(
+        store.database.get<{ sql: string }>(
+          "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'provider_connections'",
+        )?.sql,
+      ).toContain("openai-responses");
+      expect(store.getProviderConnection(created.id)).toMatchObject(created);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("copies legacy provider rows when applying v10 to v11", () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "stn-provider-v11-"));
+    const databasePath = path.join(directory, "legacy.sqlite");
+    const legacy = new DatabaseSync(databasePath, {
+      enableForeignKeyConstraints: true,
+    });
+    try {
+      legacy.exec(`
+        CREATE TABLE schema_migrations (
+          version INTEGER PRIMARY KEY,
+          name TEXT NOT NULL,
+          applied_at TEXT NOT NULL
+        );
+        INSERT INTO schema_migrations(version, name, applied_at)
+        VALUES
+          (1, 'v1', '2026-01-01T00:00:00.000Z'),
+          (2, 'v2', '2026-01-01T00:00:00.000Z'),
+          (3, 'v3', '2026-01-01T00:00:00.000Z'),
+          (4, 'v4', '2026-01-01T00:00:00.000Z'),
+          (5, 'v5', '2026-01-01T00:00:00.000Z'),
+          (6, 'v6', '2026-01-01T00:00:00.000Z'),
+          (7, 'v7', '2026-01-01T00:00:00.000Z'),
+          (8, 'v8', '2026-01-01T00:00:00.000Z'),
+          (9, 'v9', '2026-01-01T00:00:00.000Z'),
+          (10, 'v10', '2026-01-01T00:00:00.000Z');
+        CREATE TABLE provider_connections (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          protocol TEXT NOT NULL CHECK (
+            protocol IN ('openai-compatible','text-completion','fake')
+          ),
+          base_url TEXT NOT NULL,
+          model TEXT NOT NULL,
+          headers_json TEXT NOT NULL DEFAULT '{}',
+          api_key_ref TEXT,
+          native_tool_calling INTEGER NOT NULL DEFAULT 0 CHECK (native_tool_calling IN (0,1)),
+          revision INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE messages (
+          id TEXT PRIMARY KEY,
+          conversation_id TEXT NOT NULL,
+          parent_message_id TEXT,
+          role TEXT NOT NULL,
+          participant_id TEXT,
+          content TEXT NOT NULL,
+          revision INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          generation_status TEXT NOT NULL DEFAULT 'complete',
+          finish_reason TEXT,
+          provider_error_code TEXT
+        );
+        INSERT INTO provider_connections(
+          id, name, protocol, base_url, model, headers_json, api_key_ref,
+          native_tool_calling, revision, created_at, updated_at
+        ) VALUES (
+          'legacy-provider', 'Legacy', 'openai-compatible', 'http://legacy/v1',
+          'legacy-model', '{"X-Test":"keep"}', 'provider:legacy', 1, 7,
+          '2026-01-01T00:00:00.000Z', '2026-01-02T00:00:00.000Z'
+        );
+      `);
+    } finally {
+      legacy.close();
+    }
+    const database = new AppDatabase({ path: databasePath });
+    try {
+      expect(
+        database.get<{
+          id: string;
+          protocol: string;
+          headers_json: string;
+          api_key_ref: string;
+          revision: number;
+        }>(
+          "SELECT * FROM provider_connections WHERE id = ?",
+          "legacy-provider",
+        ),
+      ).toMatchObject({
+        id: "legacy-provider",
+        protocol: "openai-compatible",
+        headers_json: '{"X-Test":"keep"}',
+        api_key_ref: "provider:legacy",
+        revision: 7,
+      });
+    } finally {
+      database.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("creates, switches and deletes user personas without leaving chat bindings", () => {
     const store = new AppStore();
     try {
@@ -763,12 +891,20 @@ describe("AppStore", () => {
         alternatives: ["Alternative reply."],
         status: "partial",
         finishReason: "length",
+        providerRawFinishReason: "safety",
+        providerSawDone: true,
+        providerLastFrameType: "chat.completion.chunk",
+        providerUpstreamRequestId: "upstream-request-1",
       });
 
       expect(persisted.message).toMatchObject({
         content: "Primary generated reply.",
         generationStatus: "partial",
         finishReason: "length",
+        providerRawFinishReason: "safety",
+        providerSawDone: true,
+        providerLastFrameType: "chat.completion.chunk",
+        providerUpstreamRequestId: "upstream-request-1",
       });
       expect(persisted.swipes).toEqual([
         expect.objectContaining({

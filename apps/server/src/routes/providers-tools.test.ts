@@ -6,8 +6,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   DeterministicFakeProvider,
+  OpenAIResponsesProvider,
   type FakeProviderScript,
   type ProviderRequest,
+  type ProviderStreamEvent,
 } from "@stn/providers";
 import type { ProviderEvent } from "@stn/contracts";
 
@@ -76,6 +78,45 @@ class PartialFailureProvider extends DeterministicFakeProvider {
       code: "PROVIDER_REQUEST_FAILED",
       message: "Proxy disconnected.",
       retryable: true,
+    };
+  }
+}
+
+class DiagnosticProvider extends OpenAIResponsesProvider {
+  constructor() {
+    super({ baseUrl: "https://example.invalid/v1", model: "diagnostic" });
+  }
+
+  override async *generate(
+    request: ProviderRequest,
+  ): AsyncIterable<ProviderStreamEvent> {
+    yield {
+      type: "start",
+      requestId: request.requestId,
+      sequence: 0,
+      model: "diagnostic-provider",
+      capabilities: this.capabilities(),
+    };
+    yield {
+      type: "text-delta",
+      requestId: request.requestId,
+      sequence: 1,
+      delta: "Diagnostic reply.",
+    };
+    yield {
+      type: "provider-diagnostics",
+      requestId: request.requestId,
+      sequence: 2,
+      rawFinishReason: "safety",
+      sawDone: true,
+      lastFrameType: "chat.completion.chunk",
+      upstreamRequestId: "upstream-diagnostic-1",
+    };
+    yield {
+      type: "finish",
+      requestId: request.requestId,
+      sequence: 3,
+      reason: "stop",
     };
   }
 }
@@ -172,6 +213,117 @@ afterEach(async () => {
 });
 
 describe("ordinary generation worldbook tools", () => {
+  it("replays Responses output Items for a read continuation without leaking provider context", async () => {
+    const server = await application();
+    const { conversation, worldbook } = workspaceFixture(server);
+    const requests: Record<string, unknown>[] = [];
+    const provider = new OpenAIResponsesProvider(
+      {
+        baseUrl: "https://example.invalid",
+        model: "responses-fixture",
+        nativeToolCalling: true,
+      },
+      async (_url, init) => {
+        if (typeof init?.body !== "string") {
+          throw new TypeError("Expected JSON body");
+        }
+        const body = JSON.parse(init.body) as Record<string, unknown>;
+        requests.push(body);
+        const input = Array.isArray(body.input)
+          ? (body.input as Record<string, unknown>[])
+          : [];
+        if (input.some((item) => item.type === "function_call_output")) {
+          return new Response(
+            JSON.stringify({
+              status: "completed",
+              output: [
+                {
+                  type: "message",
+                  role: "assistant",
+                  content: [
+                    {
+                      type: "output_text",
+                      text: "The lore is recorded and ready.",
+                    },
+                  ],
+                },
+              ],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(
+          [
+            `data: ${JSON.stringify({
+              type: "response.completed",
+              response: {
+                status: "completed",
+                output: [
+                  {
+                    type: "reasoning",
+                    id: "reasoning-private",
+                    summary: [
+                      { type: "summary_text", text: "private reasoning" },
+                    ],
+                  },
+                  {
+                    type: "function_call",
+                    id: "function-private",
+                    call_id: "call-list",
+                    name: "worldbook.list",
+                    arguments: "{}",
+                  },
+                ],
+              },
+            })}`,
+            "",
+          ].join("\n"),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        );
+      },
+    );
+    vi.spyOn(server.context.providers, "get").mockResolvedValue(provider);
+
+    const response = await server.app.inject({
+      method: "POST",
+      url: `/api/conversations/${conversation.id}/generate`,
+      payload: { connectionId: "responses-fixture" },
+    });
+
+    const events = streamEvents(response.body);
+    expect(events.some((event) => event.type === "provider-context")).toBe(
+      false,
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "tool-result",
+        providerCallId: "call-list",
+        result: [expect.objectContaining({ id: worldbook.id })],
+      }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: "message-persisted" }),
+    );
+    expect(requests).toHaveLength(2);
+    const continuationInput = requests[1]?.input as Record<string, unknown>[];
+    expect(continuationInput).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "reasoning", id: "reasoning-private" }),
+        expect.objectContaining({
+          type: "function_call",
+          call_id: "call-list",
+        }),
+        expect.objectContaining({
+          type: "function_call_output",
+          call_id: "call-list",
+        }),
+      ]),
+    );
+    expect(
+      JSON.stringify(server.context.store.listMessages(conversation.id)),
+    ).not.toContain("private reasoning");
+  });
+
   it("limits one active generation per conversation and releases the reservation", async () => {
     const server = await application();
     const { conversation } = workspaceFixture(server);
@@ -230,6 +382,40 @@ describe("ordinary generation worldbook tools", () => {
       content: "budgeted output",
       generationStatus: "partial",
       finishReason: "limit",
+    });
+  });
+
+  it("persists upstream termination diagnostics with the assistant message", async () => {
+    const server = await application();
+    const { conversation } = workspaceFixture(server);
+    vi.spyOn(server.context.providers, "get").mockResolvedValue(
+      new DiagnosticProvider(),
+    );
+
+    const response = await server.app.inject({
+      method: "POST",
+      url: `/api/conversations/${conversation.id}/generate`,
+      payload: { connectionId: "diagnostic" },
+    });
+
+    expect(streamEvents(response.body)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "message-persisted",
+          providerRawFinishReason: "safety",
+          providerSawDone: true,
+          providerLastFrameType: "chat.completion.chunk",
+          providerUpstreamRequestId: "upstream-diagnostic-1",
+        }),
+      ]),
+    );
+    expect(
+      server.context.store.listMessages(conversation.id).at(-1),
+    ).toMatchObject({
+      providerRawFinishReason: "safety",
+      providerSawDone: true,
+      providerLastFrameType: "chat.completion.chunk",
+      providerUpstreamRequestId: "upstream-diagnostic-1",
     });
   });
 

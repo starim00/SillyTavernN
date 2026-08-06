@@ -50,6 +50,36 @@ export function asJsonObject(value: unknown): JsonObject | undefined {
   return value as JsonObject;
 }
 
+export function diagnosticString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  return normalized.length === 0 ? undefined : normalized.slice(0, 2_048);
+}
+
+export function upstreamRequestIdFromHeaders(
+  headers: Headers,
+): string | undefined {
+  for (const name of ["x-request-id", "x-openai-request-id", "request-id"]) {
+    const value = diagnosticString(headers.get(name));
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
+
+export function upstreamRequestIdFromFrame(
+  frame: JsonObject,
+): string | undefined {
+  return (
+    diagnosticString(frame.request_id) ?? diagnosticString(frame.requestId)
+  );
+}
+
+export function providerFrameType(frame: JsonObject, fallback: string): string {
+  return (
+    diagnosticString(frame.type) ?? diagnosticString(frame.object) ?? fallback
+  );
+}
+
 export function asJsonValue(value: unknown): JsonValue | undefined {
   if (
     value === null ||

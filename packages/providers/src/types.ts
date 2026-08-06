@@ -27,6 +27,11 @@ export interface ProviderMessage {
   readonly name?: string;
   readonly toolCallId?: string;
   readonly toolCalls?: readonly ProviderMessageToolCall[];
+  /**
+   * Opaque Responses output items retained only while a tool continuation is
+   * being assembled. The server must never persist or expose these items.
+   */
+  readonly providerContextItems?: readonly JsonObject[];
 }
 
 export interface ProviderTool {
@@ -43,6 +48,32 @@ export interface ProviderRequest {
   readonly tools?: readonly ProviderTool[];
   readonly metadata?: JsonObject;
 }
+
+/** Internal provider-only event; intentionally not part of the public SSE contract. */
+export interface ProviderContextEvent {
+  readonly type: "provider-context";
+  readonly requestId: string;
+  readonly sequence: number;
+  readonly items: readonly JsonObject[];
+}
+
+/**
+ * Internal terminal metadata used to persist the upstream stream outcome.
+ * It intentionally contains no request headers, credentials, or response
+ * content.
+ */
+export interface ProviderDiagnosticsEvent {
+  readonly type: "provider-diagnostics";
+  readonly requestId: string;
+  readonly sequence: number;
+  readonly rawFinishReason?: string;
+  readonly sawDone: boolean;
+  readonly lastFrameType?: string;
+  readonly upstreamRequestId?: string;
+}
+
+export type ProviderStreamEvent =
+  ProviderEvent | ProviderContextEvent | ProviderDiagnosticsEvent;
 
 export interface ConnectionTestResult {
   readonly ok: boolean;
@@ -66,7 +97,7 @@ export interface ModelProvider {
   generate(
     request: ProviderRequest,
     signal?: AbortSignal,
-  ): AsyncIterable<ProviderEvent>;
+  ): AsyncIterable<ProviderStreamEvent>;
 }
 
 export interface FakeProviderScript {

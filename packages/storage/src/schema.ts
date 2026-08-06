@@ -562,4 +562,71 @@ export const migrations: readonly Migration[] = [
         ON worldbook_bindings(scope_type, scope_id, worldbook_id);
     `,
   },
+  {
+    version: 11,
+    name: "openai-responses-provider-connections",
+    sql: `
+      -- Some clean-room test fixtures omit the optional provider table while
+      -- still recording the earlier migration as applied. Make that case an
+      -- empty, valid table before performing the normal lossless rebuild.
+      CREATE TABLE IF NOT EXISTS provider_connections (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        protocol TEXT NOT NULL CHECK (
+          protocol IN ('openai-compatible','openai-responses','text-completion','fake')
+        ),
+        base_url TEXT NOT NULL,
+        model TEXT NOT NULL,
+        headers_json TEXT NOT NULL DEFAULT '{}',
+        api_key_ref TEXT,
+        native_tool_calling INTEGER NOT NULL DEFAULT 0 CHECK (native_tool_calling IN (0,1)),
+        revision INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE provider_connections_v10 (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        protocol TEXT NOT NULL CHECK (
+          protocol IN ('openai-compatible','openai-responses','text-completion','fake')
+        ),
+        base_url TEXT NOT NULL,
+        model TEXT NOT NULL,
+        headers_json TEXT NOT NULL DEFAULT '{}',
+        api_key_ref TEXT,
+        native_tool_calling INTEGER NOT NULL DEFAULT 0 CHECK (native_tool_calling IN (0,1)),
+        revision INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      INSERT INTO provider_connections_v10(
+        id, name, protocol, base_url, model, headers_json, api_key_ref,
+        native_tool_calling, revision, created_at, updated_at
+      )
+      SELECT
+        id, name, protocol, base_url, model, headers_json, api_key_ref,
+        native_tool_calling, revision, created_at, updated_at
+      FROM provider_connections;
+
+      DROP TABLE provider_connections;
+      ALTER TABLE provider_connections_v10 RENAME TO provider_connections;
+    `,
+  },
+  {
+    version: 12,
+    name: "provider-termination-diagnostics",
+    sql: `
+      ALTER TABLE messages
+        ADD COLUMN provider_raw_finish_reason TEXT;
+      ALTER TABLE messages
+        ADD COLUMN provider_saw_done INTEGER
+          CHECK (provider_saw_done IS NULL OR provider_saw_done IN (0,1));
+      ALTER TABLE messages
+        ADD COLUMN provider_last_frame_type TEXT;
+      ALTER TABLE messages
+        ADD COLUMN provider_upstream_request_id TEXT;
+    `,
+  },
 ];

@@ -594,79 +594,6 @@ function ProvidersModal({
   );
 }
 
-function LibraryModal({
-  cards,
-  onClose,
-  onSelectCard,
-  onDeleteCard,
-}: {
-  cards: RoleCard[];
-  onClose: () => void;
-  onSelectCard: (cardId: string) => void;
-  onDeleteCard: (card: RoleCard) => void;
-}) {
-  return (
-    <ModalFrame
-      title="角色卡库"
-      description="每张角色卡都是人设、世界书和配套内容的集合；选择后直接进入最近对话。"
-      icon={<Books size={22} />}
-      onClose={onClose}
-      size="large"
-    >
-      <div className="library-grid">
-        {cards.map((card) => (
-          <article className="library-item" key={card.id}>
-            <button
-              className="library-item__open"
-              type="button"
-              onClick={() => {
-                onSelectCard(card.id);
-                onClose();
-              }}
-            >
-              <div className="library-item__heading">
-                {card.imageUrl ? (
-                  <img
-                    className="library-item__cover"
-                    src={card.imageUrl}
-                    alt=""
-                    loading="lazy"
-                  />
-                ) : (
-                  <span className="library-item__icon">
-                    <Books size={20} />
-                  </span>
-                )}
-                <div>
-                  <strong>{card.name}</strong>
-                  <span>{card.conversationCount} 个历史对话</span>
-                </div>
-              </div>
-              <p>{card.description}</p>
-            </button>
-            <IconButton
-              compact
-              className="library-item__delete"
-              label={`删除角色卡 ${card.name}`}
-              icon={<Trash size={17} />}
-              onClick={() => onDeleteCard(card)}
-            />
-          </article>
-        ))}
-      </div>
-      <footer className="modal-actions">
-        <button
-          className="button button--primary"
-          type="button"
-          onClick={onClose}
-        >
-          完成
-        </button>
-      </footer>
-    </ModalFrame>
-  );
-}
-
 function PersonaEditor({
   current,
   online,
@@ -1268,8 +1195,6 @@ type WorkspaceModalsProps = {
   providerConnections: ProviderConnection[];
   selectedProviderId: string;
   onClose: () => void;
-  onSelectCard: (cardId: string) => void;
-  onDeleteCard: (card: RoleCard) => void;
   onSelectPersona?: (persona: Persona) => Promise<void>;
   onSavePersona?: (input: PersonaInput, current?: Persona) => Promise<void>;
   onDeletePersona?: (persona: Persona) => Promise<void>;
@@ -1327,8 +1252,6 @@ export function WorkspaceModals({
   providerConnections,
   selectedProviderId,
   onClose,
-  onSelectCard,
-  onDeleteCard,
   onSelectPersona,
   onSavePersona,
   onDeletePersona,
@@ -1451,16 +1374,6 @@ export function WorkspaceModals({
     );
   }
   if (modal.kind === "personas") return null;
-  if (modal.kind === "library") {
-    return (
-      <LibraryModal
-        cards={cards}
-        onClose={onClose}
-        onSelectCard={onSelectCard}
-        onDeleteCard={onDeleteCard}
-      />
-    );
-  }
   if (modal.kind === "create_conversation") {
     const card = cards.find((candidate) => candidate.id === modal.cardId);
     return card ? (

@@ -354,7 +354,6 @@ export type ModalState =
   | { kind: "agent_proposal" }
   | { kind: "providers" }
   | { kind: "personas" }
-  | { kind: "library" }
   | { kind: "create_conversation"; cardId: string }
   | { kind: "permission"; worldbookId: string; entryId: string };
 

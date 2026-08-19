@@ -11,7 +11,6 @@ type NavigationRailProps = {
   onSelectCard: (id: string) => void;
   onCreateConversation: (cardId: string) => void;
   onDeleteCard: (card: RoleCard) => void;
-  onOpenLibrary: () => void;
   onClose: () => void;
 };
 
@@ -22,7 +21,6 @@ export function NavigationRail({
   onSelectCard,
   onCreateConversation,
   onDeleteCard,
-  onOpenLibrary,
   onClose,
 }: NavigationRailProps) {
   const [query, setQuery] = useState("");
@@ -43,25 +41,15 @@ export function NavigationRail({
       className={`navigation-rail${open ? " navigation-rail--open" : ""}`}
       aria-label="角色卡选择"
     >
-      <div className="navigation-rail__mobile-header">
-        <strong>角色卡</strong>
-        <IconButton
-          label="关闭角色卡选择"
-          icon={<X size={19} />}
-          onClick={onClose}
-          compact
-        />
-      </div>
-
       <div className="rail-title">
         <div>
           <strong>角色卡</strong>
           <span>选择角色卡进入它的聊天空间</span>
         </div>
         <IconButton
-          label="打开角色卡管理"
-          icon={<Books size={18} />}
-          onClick={onOpenLibrary}
+          label="关闭角色卡选择"
+          icon={<X size={18} />}
+          onClick={onClose}
           compact
         />
       </div>

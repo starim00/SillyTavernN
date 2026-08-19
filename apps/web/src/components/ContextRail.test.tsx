@@ -84,8 +84,6 @@ function renderRailFixture(
         providerConnections={state.providerConnections}
         selectedProviderId={state.selectedProviderId}
         onClose={noop}
-        onSelectCard={noop}
-        onDeleteCard={noop}
         onCreateConversation={async () => undefined}
         onImport={async () => undefined}
         onInstallPlugin={async () => undefined}

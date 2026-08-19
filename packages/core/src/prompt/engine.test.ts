@@ -55,6 +55,14 @@ describe("prompt engine primitives", () => {
     ).toBe("{{loop}}");
   });
 
+  it("removes unscoped trim controls and their surrounding line breaks", () => {
+    expect(expandPromptMacros("Before\n\n{{trim}}\nAfter", {})).toBe(
+      "BeforeAfter",
+    );
+    expect(expandPromptMacros("\\{{trim}}", {})).toBe("{{trim}}");
+    expect(expandPromptMacros("{{TRIM}}Content", {})).toBe("Content");
+  });
+
   it("evaluates legacy stateful, comment, random, dice, and chat macros", () => {
     const rolled: string[] = [];
     const runtime = createPromptMacroRuntime({

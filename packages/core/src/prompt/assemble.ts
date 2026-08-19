@@ -74,13 +74,15 @@ function sortedParticipants(input: PromptAssemblyInput): Participant[] {
 }
 
 function participantProfile(participant: Participant): string {
-  const rows = [`[${participant.name}]`];
+  const details: string[] = [];
   if (participant.description)
-    rows.push(`Description: ${participant.description}`);
+    details.push(`Description: ${participant.description}`);
   if (participant.personality)
-    rows.push(`Personality: ${participant.personality}`);
-  if (participant.scenario) rows.push(`Scenario: ${participant.scenario}`);
-  return rows.join("\n");
+    details.push(`Personality: ${participant.personality}`);
+  if (participant.scenario) details.push(`Scenario: ${participant.scenario}`);
+  return details.length === 0
+    ? ""
+    : [`[${participant.name}]`, ...details].join("\n");
 }
 
 function presetPosition(template: PromptTemplate): PromptSegment["position"] {
@@ -648,14 +650,45 @@ export function assemblePrompt(
   }
   const historyLength =
     messages.length + (input.currentInput === undefined ? 0 : 1);
+  const atDepthOrders = new Map<(typeof matches)[number], number>();
+  const atDepthGroups = new Map<number, Array<(typeof matches)[number]>>();
+  for (const match of matches) {
+    if (match.entry.insertionPosition !== "at-depth") continue;
+    const depth = match.entry.insertionDepth ?? 0;
+    const group = atDepthGroups.get(depth) ?? [];
+    group.push(match);
+    atDepthGroups.set(depth, group);
+  }
+  for (const [depth, group] of atDepthGroups) {
+    group
+      .sort(
+        (left, right) =>
+          left.entry.order - right.entry.order ||
+          left.worldbookId.localeCompare(right.worldbookId) ||
+          left.entry.id.localeCompare(right.entry.id),
+      )
+      .forEach((match, index) => {
+        atDepthOrders.set(
+          match,
+          atDepthHistoryOrder(depth, historyLength, index, group.length),
+        );
+      });
+  }
   matches.forEach((match, matchIndex) => {
     const insertionDepth = match.entry.insertionDepth ?? 0;
     const insertionPosition = match.entry.insertionPosition;
+    const marker = worldbookMarker(match.entry);
+    const resolvedRole =
+      (marker === undefined
+        ? undefined
+        : markerAnchors.get(marker)?.template.role) ??
+      match.entry.insertionRole ??
+      "system";
     if (insertionPosition === "outlet") {
       return;
     }
     add({
-      role: match.entry.insertionRole ?? "system",
+      role: resolvedRole,
       content: match.entry.content,
       source: {
         kind: "worldbook",
@@ -667,19 +700,20 @@ export function assemblePrompt(
           matchedKeys: [...match.matchedKeys],
           ...(insertionPosition === undefined ? {} : { insertionPosition }),
           insertionDepth,
-          insertionRole: match.entry.insertionRole ?? "system",
+          insertionRole: resolvedRole,
         },
       },
       position: worldbookPosition(match.entry),
       priority: 600 + match.entry.priority,
       order:
         insertionPosition === "at-depth"
-          ? atDepthHistoryOrder(
+          ? (atDepthOrders.get(match) ??
+            atDepthHistoryOrder(
               insertionDepth,
               historyLength,
               matchIndex,
               matches.length,
-            )
+            ))
           : (anchoredWorldbookOrders.get(match) ?? match.entry.order),
       truncation: "drop",
       regex: { placement: 5, depth: insertionDepth },

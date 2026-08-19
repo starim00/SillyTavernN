@@ -186,7 +186,12 @@ export function expandPromptMacros(
     }
   }
 
-  return output.replace(
+  const withoutTrimControls = output.replace(
+    /(?:\r?\n)*\{\{trim\}\}(?:\r?\n)*/giu,
+    "",
+  );
+
+  return withoutTrimControls.replace(
     /\u{e000}stn-escaped-macro-(\d+)\u{e001}/gu,
     (_match, rawIndex: string) =>
       escapedMacros[Number.parseInt(rawIndex, 10)] ?? "",

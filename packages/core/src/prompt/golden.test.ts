@@ -400,6 +400,13 @@ describe("prompt assembly goldens", () => {
 
   it("inserts at-depth lore at history boundaries with its provider role", () => {
     const lore = worldbook([
+      entry("depth-zero-later", [], "depth-zero-later TOKEN", {
+        constant: true,
+        insertionPosition: "at-depth",
+        insertionDepth: 0,
+        insertionRole: "assistant",
+        order: 2,
+      }),
       entry("depth-zero", [], "depth-zero TOKEN", {
         constant: true,
         insertionPosition: "at-depth",
@@ -441,7 +448,20 @@ describe("prompt assembly goldens", () => {
       ["depth-one", "user", "depth-one <strong>filtered</strong>"],
       [undefined, "user", "Latest."],
       ["depth-zero", "assistant", "depth-zero <strong>filtered</strong>"],
+      [
+        "depth-zero-later",
+        "assistant",
+        "depth-zero-later <strong>filtered</strong>",
+      ],
     ]);
+    expect(
+      renderChatPrompt(result.segments, {
+        mergeAdjacent: false,
+        mergeWorldbookAtDepth: true,
+      }).at(-1)?.content,
+    ).toBe(
+      "depth-zero <strong>filtered</strong>\n\ndepth-zero-later <strong>filtered</strong>",
+    );
   });
 
   it("maps non-depth worldbook insertion positions without creating speakers", () => {
@@ -591,7 +611,7 @@ describe("prompt assembly goldens", () => {
         {
           id: "worldInfoBefore",
           name: "World before",
-          role: "system",
+          role: "user",
           content: "",
           enabled: true,
           marker: "world-before",
@@ -640,6 +660,7 @@ describe("prompt assembly goldens", () => {
       entry("before-10", [], "Lore before 10", {
         constant: true,
         insertionPosition: "before-card",
+        insertionRole: "assistant",
         order: 10,
       }),
       entry("before-30", [], "Lore before 30", {
@@ -672,6 +693,15 @@ describe("prompt assembly goldens", () => {
       "Lore before 10",
       "Lore before 30",
       "Prompt 104",
+    ]);
+    expect(
+      result.segments
+        .filter((segment) => segment.source.kind === "worldbook")
+        .map((segment) => [segment.content, segment.role]),
+    ).toEqual([
+      ["Lore before 10", "user"],
+      ["Lore before 30", "user"],
+      ["Lore after 20", "system"],
     ]);
     expect(
       result.segments

@@ -112,6 +112,7 @@ export interface ChatPromptMessage {
 
 export interface ChatRenderOptions {
   readonly mergeAdjacent?: boolean;
+  readonly mergeWorldbookAtDepth?: boolean;
 }
 
 export interface TextRenderOptions {

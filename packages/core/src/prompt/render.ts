@@ -17,12 +17,23 @@ export function renderChatPrompt(
 ): readonly ChatPromptMessage[] {
   const mergeAdjacent = options.mergeAdjacent ?? true;
   const messages: ChatPromptMessage[] = [];
+  let previousSegment: PromptSegment | undefined;
 
   for (const segment of segments) {
     const name = speakerName(segment);
     const previous = messages.at(-1);
+    const mergeWorldbookAtDepth =
+      options.mergeWorldbookAtDepth === true &&
+      previousSegment?.source.kind === "worldbook" &&
+      segment.source.kind === "worldbook" &&
+      previousSegment.position === "history" &&
+      segment.position === "history" &&
+      previousSegment.source.detail.insertionPosition === "at-depth" &&
+      segment.source.detail.insertionPosition === "at-depth" &&
+      previousSegment.source.detail.insertionDepth ===
+        segment.source.detail.insertionDepth;
     if (
-      mergeAdjacent &&
+      (mergeAdjacent || mergeWorldbookAtDepth) &&
       previous &&
       previous.role === segment.role &&
       previous.name === name
@@ -32,6 +43,7 @@ export function renderChatPrompt(
         content: `${previous.content}\n\n${segment.content}`,
         sourceSegmentIds: [...previous.sourceSegmentIds, segment.id],
       };
+      previousSegment = segment;
       continue;
     }
     messages.push({
@@ -41,6 +53,7 @@ export function renderChatPrompt(
       sourceSegmentIds: [segment.id],
       metadata: { source: segment.source.kind } satisfies JsonObject,
     });
+    previousSegment = segment;
   }
 
   return messages;

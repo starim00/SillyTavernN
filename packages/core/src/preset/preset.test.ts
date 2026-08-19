@@ -450,6 +450,80 @@ describe("preset normalization and export", () => {
     });
   });
 
+  it("uses the OpenAI prompt order when settings contain multiple manager orders", () => {
+    const source = object({
+      prompts: [
+        {
+          identifier: "main",
+          name: "Main",
+          role: "system",
+          content: "MAIN",
+        },
+        {
+          identifier: "active-rule",
+          name: "Active rule",
+          role: "model",
+          content: "ACTIVE_RULE",
+          enabled: true,
+        },
+        {
+          identifier: "disabled-rule",
+          name: "Disabled rule",
+          role: "system",
+          content: "DISABLED_RULE",
+          enabled: true,
+        },
+      ],
+      prompt_order: [
+        {
+          character_id: 100000,
+          order: [{ identifier: "main", enabled: true }],
+        },
+        {
+          character_id: 100001,
+          order: [
+            { identifier: "active-rule", enabled: true },
+            { identifier: "disabled-rule", enabled: false },
+          ],
+        },
+      ],
+    });
+
+    const preset = importPromptPreset(source, parseOptions());
+
+    expect(
+      preset.prompts.map((prompt) => ({
+        id: prompt.id,
+        enabled: prompt.enabled,
+        order: prompt.order,
+        role: prompt.role,
+        promptOrderMember: prompt.metadata.promptOrderMember,
+      })),
+    ).toEqual([
+      {
+        id: "main",
+        enabled: false,
+        order: 0,
+        role: "system",
+        promptOrderMember: false,
+      },
+      {
+        id: "active-rule",
+        enabled: true,
+        order: 0,
+        promptOrderMember: true,
+        role: "assistant",
+      },
+      {
+        id: "disabled-rule",
+        enabled: false,
+        order: 1,
+        role: "system",
+        promptOrderMember: true,
+      },
+    ]);
+  });
+
   it("round-trips the normalized NG representation", () => {
     const preset = importPromptPreset(
       object({

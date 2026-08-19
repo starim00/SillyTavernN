@@ -206,6 +206,7 @@ function roleOf(value: JsonValue | undefined): PromptTemplate["role"] {
   ) {
     return value;
   }
+  if (value === "model") return "assistant";
   if (value === 1 || value === "1") return "user";
   if (value === 2 || value === "2") return "assistant";
   if (value === 3 || value === "3") return "tool";
@@ -294,13 +295,22 @@ interface PromptOrderValue {
   readonly enabled?: boolean;
 }
 
+const OPENAI_PROMPT_ORDER_CHARACTER_ID = 100001;
+
 function promptOrder(source: JsonValue | undefined): PromptOrderValue[] {
   if (!Array.isArray(source)) {
     return [];
   }
-  const nested = source.find(
+  const nestedOrders = source.filter(
     (item) => isJsonObject(item) && Array.isArray(item.order),
   );
+  const nested =
+    nestedOrders.find(
+      (item) =>
+        isJsonObject(item) &&
+        (item.character_id === OPENAI_PROMPT_ORDER_CHARACTER_ID ||
+          item.character_id === String(OPENAI_PROMPT_ORDER_CHARACTER_ID)),
+    ) ?? nestedOrders[0];
   const values =
     nested && isJsonObject(nested) && Array.isArray(nested.order)
       ? nested.order

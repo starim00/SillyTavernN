@@ -79,6 +79,7 @@ type ApiCard = {
 type ApiSwipe = {
   id: string;
   content: string;
+  reasoningText?: string | null;
   selected?: boolean;
   position?: number;
 };
@@ -314,6 +315,7 @@ export type GenerationToolProposal = {
 export type GenerationCallbacks = {
   onGenerationId?: (generationId: string) => void;
   onTextDelta?: (delta: string) => void;
+  onReasoningDelta?: (delta: string) => void;
   onToolProposal?: (proposal: GenerationToolProposal) => void;
   onToolResult?: (result: unknown) => void;
 };
@@ -556,9 +558,10 @@ const normalizeMessage = (item: ApiMessage): WorkspaceMessage => {
       502,
     );
   }
-  const swipes = (item.swipes ?? []).map(({ id, content }) => ({
+  const swipes = (item.swipes ?? []).map(({ id, content, reasoningText }) => ({
     id,
     content,
+    ...(reasoningText ? { reasoningText } : {}),
   }));
   const selectedIndex = (item.swipes ?? []).findIndex(
     (swipe) => swipe.selected,
@@ -572,6 +575,9 @@ const normalizeMessage = (item: ApiMessage): WorkspaceMessage => {
     role: item.role,
     content: selectedContent ?? item.content,
     displayContent: item.displayContent ?? selectedContent ?? item.content,
+    ...(selectedIndex >= 0 && swipes[selectedIndex]?.reasoningText
+      ? { reasoningText: swipes[selectedIndex].reasoningText }
+      : {}),
     appliedRegexScriptIds: item.appliedRegexScriptIds ?? [],
     createdLabel: timeLabel(item.createdAt),
     revision: item.revision ?? 1,
@@ -1450,6 +1456,12 @@ export async function generateConversation(
       }
       content += event.delta;
       callbacks.onTextDelta?.(event.delta);
+      return;
+    }
+    if (event.type === "reasoning-delta") {
+      if (typeof event.delta === "string") {
+        callbacks.onReasoningDelta?.(event.delta);
+      }
       return;
     }
     if (event.type === "message-persisted") {

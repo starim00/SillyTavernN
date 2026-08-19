@@ -281,8 +281,9 @@ describe("workspace components", () => {
           mode: null,
           conversationId: null,
           generationId: null,
-          targetMessageId: null,
-          preview: "",
+        targetMessageId: null,
+        preview: "",
+        reasoningPreview: "",
         }}
         onCopy={noop}
         onUpdate={noop}
@@ -754,5 +755,36 @@ describe("workspace components", () => {
     expect(document).toContain("<body><!DOCTYPE html>");
     expect(document).not.toContain("```");
     expect(raw.startsWith("```")).toBe(true);
+  });
+
+  it("renders persisted model reasoning in a collapsed disclosure", () => {
+    const noop = vi.fn();
+    const html = renderToStaticMarkup(
+      <MessageCard
+        message={{
+          id: "message-reasoning",
+          conversationId: "conversation-test",
+          role: "assistant",
+          content: "最终回复",
+          reasoningText: "先检查上下文，再组织回复。",
+          createdLabel: "10:33",
+          revision: 1,
+        }}
+        isLast
+        onCopy={noop}
+        onUpdate={noop}
+        onDelete={noop}
+        onRegenerate={noop}
+        onContinue={noop}
+        onSelectSwipe={noop}
+      />,
+    );
+
+    expect(html).toContain("思考过程");
+    expect(html).toContain("先检查上下文，再组织回复。");
+    expect(html).toContain('<details class="message-reasoning">');
+    expect(html).not.toContain(
+      '<details class="message-reasoning" open="">',
+    );
   });
 });

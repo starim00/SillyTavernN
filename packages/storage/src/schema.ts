@@ -629,4 +629,40 @@ export const migrations: readonly Migration[] = [
         ADD COLUMN provider_upstream_request_id TEXT;
     `,
   },
+  {
+    version: 13,
+    name: "provider-swipe-context",
+    sql: `
+      -- Minimal clean-room fixtures may record the core migration without
+      -- creating chat tables. Keep later compatibility migrations applicable.
+      CREATE TABLE IF NOT EXISTS swipes (
+        id TEXT PRIMARY KEY,
+        message_id TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        selected INTEGER NOT NULL DEFAULT 0 CHECK (selected IN (0,1)),
+        revision INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (message_id, position)
+      );
+
+      CREATE TABLE provider_swipe_contexts (
+        swipe_id TEXT PRIMARY KEY REFERENCES swipes(id) ON DELETE CASCADE,
+        provider_connection_id TEXT NOT NULL,
+        context_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX provider_swipe_contexts_connection_idx
+        ON provider_swipe_contexts(provider_connection_id);
+    `,
+  },
+  {
+    version: 14,
+    name: "swipe-reasoning-text",
+    sql: `
+      ALTER TABLE swipes ADD COLUMN reasoning_text TEXT;
+    `,
+  },
 ];

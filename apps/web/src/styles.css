@@ -1293,6 +1293,36 @@ select:focus-visible {
   color: #3f5d6c;
 }
 
+.message-reasoning {
+  margin: 2px 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(237, 247, 252, 0.55);
+  color: var(--text-soft);
+}
+
+.message-reasoning > summary {
+  cursor: pointer;
+  padding: 8px 10px;
+  color: #4d6977;
+  font-size: 12px;
+  font-weight: 650;
+  user-select: none;
+}
+
+.message-reasoning__content {
+  max-height: 320px;
+  overflow: auto;
+  padding: 0 10px 10px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.message-reasoning__content > :last-child {
+  margin-bottom: 0;
+}
+
 .generation-caret {
   display: inline-block;
   width: 2px;

@@ -18,6 +18,7 @@ import {
   type ServerApplication,
   type ServerOptions,
 } from "../app.js";
+import { prepareConversationPrompt } from "../prompt-service.js";
 
 const applications: ServerApplication[] = [];
 
@@ -319,9 +320,32 @@ describe("ordinary generation worldbook tools", () => {
         }),
       ]),
     );
+    const storedMessages = server.context.store.listMessages(conversation.id);
+    expect(storedMessages.at(-1)?.swipes[0]).toMatchObject({
+      reasoningText: "private reasoning",
+    });
+    expect(JSON.stringify(storedMessages)).not.toContain("function-private");
+    const nextPrompt = await prepareConversationPrompt(server.context.store, {
+      conversationId: conversation.id,
+      providerConnectionId: "responses-fixture",
+    });
     expect(
-      JSON.stringify(server.context.store.listMessages(conversation.id)),
-    ).not.toContain("private reasoning");
+      nextPrompt.messages.find(
+        (message) => message.content === "The lore is recorded and ready.",
+      )?.providerContextItems,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "reasoning",
+          id: "reasoning-private",
+        }),
+        expect.objectContaining({
+          type: "function_call_output",
+          call_id: "call-list",
+        }),
+        expect.objectContaining({ type: "message", role: "assistant" }),
+      ]),
+    );
   });
 
   it("limits one active generation per conversation and releases the reservation", async () => {
@@ -505,6 +529,7 @@ describe("ordinary generation worldbook tools", () => {
     const { conversation, worldbook } = workspaceFixture(server);
     const provider = new SequencedFakeProvider([
       {
+        reasoningChunks: ["I need to list the available lore."],
         toolCalls: [
           {
             id: "call-list",
@@ -579,6 +604,7 @@ describe("ordinary generation worldbook tools", () => {
     expect(continuedMessages.at(-2)).toMatchObject({
       role: "assistant",
       content: "",
+      reasoningContent: "I need to list the available lore.",
       toolCalls: [
         {
           id: "call-list",

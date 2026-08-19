@@ -481,6 +481,7 @@ export async function registerProviderRoutes(
       const capabilities = provider.capabilities();
       const prompt = await prepareConversationPrompt(context.store, {
         conversationId,
+        providerConnectionId: input.connectionId,
         ...(input.presetId === undefined ? {} : { presetId: input.presetId }),
         ...(input.settings === undefined ? {} : { settings: input.settings }),
         ...(capabilities.maxContextTokens === undefined
@@ -578,6 +579,10 @@ export async function registerProviderRoutes(
     let eventCount = 0;
     let outputBytes = 0;
     let toolCallCount = 0;
+    let providerContextItems: readonly JsonObject[];
+    let accumulatedProviderContextItems: readonly JsonObject[] = [];
+    let persistedProviderContextItems: readonly JsonObject[] = [];
+    let reasoningText = "";
     const choiceIndexes = new Set<number>();
     try {
       let providerMessages = [...requestMessages];
@@ -587,7 +592,8 @@ export async function registerProviderRoutes(
         providerDiagnostics = undefined;
         const readToolCalls: ProviderMessageToolCall[] = [];
         const readToolMessages: ProviderMessage[] = [];
-        let providerContextItems: readonly JsonObject[] = [];
+        providerContextItems = [];
+        let turnReasoningText = "";
         let turnText = "";
         let canContinueWithReadResults = true;
         completed = false;
@@ -640,6 +646,10 @@ export async function registerProviderRoutes(
               );
             }
             providerContextItems = rawEvent.items;
+            persistedProviderContextItems = [
+              ...accumulatedProviderContextItems,
+              ...rawEvent.items,
+            ];
             continue;
           }
           if (rawEvent.type === "provider-diagnostics") {
@@ -690,6 +700,10 @@ export async function registerProviderRoutes(
                 `${alternativeContent.get(choiceIndex) ?? ""}${event.delta}`,
               );
             }
+          }
+          if (event.type === "reasoning-delta" && choiceIndex === 0) {
+            reasoningText += event.delta;
+            turnReasoningText += event.delta;
           }
           if (choiceIndex !== 0) continue;
           if (event.type === "error") {
@@ -898,12 +912,26 @@ export async function registerProviderRoutes(
             role: "assistant",
             content: turnText,
             toolCalls: readToolCalls,
+            ...(turnReasoningText.length === 0
+              ? {}
+              : { reasoningContent: turnReasoningText }),
             ...(providerContextItems.length === 0
               ? {}
               : { providerContextItems }),
           },
           ...readToolMessages,
         ];
+        accumulatedProviderContextItems = [
+          ...persistedProviderContextItems,
+          ...readToolMessages.map(
+            (message): JsonObject => ({
+              type: "function_call_output",
+              call_id: message.toolCallId ?? message.name ?? "unknown-call",
+              output: message.content,
+            }),
+          ),
+        ];
+        persistedProviderContextItems = accumulatedProviderContextItems;
         const current = context.agents.getRun(toolRun.run.id);
         context.agents.transitionRun(current.id, ["running"], "running", {
           currentStep: current.currentStep + 1,
@@ -949,6 +977,15 @@ export async function registerProviderRoutes(
             ? {}
             : { providerErrorCode: providerError.code }),
           ...persistedProviderDiagnostics(providerDiagnostics),
+          ...(reasoningText.length === 0 ? {} : { reasoningText }),
+          ...(persistedProviderContextItems.length === 0
+            ? {}
+            : {
+                providerContext: {
+                  connectionId: input.connectionId,
+                  items: persistedProviderContextItems,
+                },
+              }),
           ...(input.targetMessageId === undefined
             ? {}
             : {
@@ -1034,6 +1071,15 @@ export async function registerProviderRoutes(
               : "provider-error",
           providerErrorCode: providerError.code,
           ...persistedProviderDiagnostics(providerDiagnostics),
+          ...(reasoningText.length === 0 ? {} : { reasoningText }),
+          ...(persistedProviderContextItems.length === 0
+            ? {}
+            : {
+                providerContext: {
+                  connectionId: input.connectionId,
+                  items: persistedProviderContextItems,
+                },
+              }),
           ...(input.targetMessageId === undefined
             ? {}
             : {

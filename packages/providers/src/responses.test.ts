@@ -89,6 +89,11 @@ describe("OpenAI Responses provider", () => {
         requestId: "responses-payload",
         messages: [
           { role: "system", content: "You are concise." },
+          {
+            role: "assistant",
+            content: "Imported greeting.",
+            reasoningContent: "Imported visible reasoning.",
+          },
           { role: "user", content: "Read the lore." },
           {
             role: "assistant",
@@ -146,13 +151,19 @@ describe("OpenAI Responses provider", () => {
     expect(body).not.toHaveProperty("maxContextTokens");
     expect(body).not.toHaveProperty("input", "must-not-win");
     const input = body?.input as Record<string, unknown>[];
-    expect(input).toHaveLength(4);
-    expect(input[2]).toMatchObject({
+    expect(input).toHaveLength(5);
+    expect(input[1]).toEqual({
+      type: "message",
+      role: "assistant",
+      content: "Imported greeting.",
+      reasoning_text: "Imported visible reasoning.",
+    });
+    expect(input[3]).toMatchObject({
       type: "function_call",
       call_id: "call-1",
     });
-    expect(input[2]?.name).toMatch(/^stn_[0-9a-f]+$/u);
-    expect(input[3]).toEqual({
+    expect(input[3]?.name).toMatch(/^stn_[0-9a-f]+$/u);
+    expect(input[4]).toEqual({
       type: "function_call_output",
       call_id: "call-1",
       output: '{"id":"b1"}',

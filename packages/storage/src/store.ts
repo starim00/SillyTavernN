@@ -106,6 +106,11 @@ export interface PersistAssistantGenerationInput {
   providerUpstreamRequestId?: string;
   targetMessageId?: string;
   expectedMessageRevision?: number;
+  reasoningText?: string;
+  providerContext?: {
+    connectionId: string;
+    items: readonly JsonObject[];
+  };
 }
 
 export interface PersistAssistantGenerationResult {
@@ -1188,13 +1193,23 @@ export class AppStore {
           target.id,
         );
         choices.forEach((content, index) => {
-          this.insertSwipe({
+          const swipeId = this.insertSwipe({
             messageId: target.id,
             content,
             position: startPosition + index,
             selected: index === 0,
             now,
+            ...(index === 0 && input.reasoningText
+              ? { reasoningText: input.reasoningText }
+              : {}),
           });
+          if (index === 0) {
+            this.insertProviderSwipeContext(
+              swipeId,
+              input.providerContext,
+              now,
+            );
+          }
         });
         this.database.run(
           `UPDATE messages
@@ -1263,13 +1278,23 @@ export class AppStore {
         now,
       );
       choices.forEach((content, index) => {
-        this.insertSwipe({
+        const swipeId = this.insertSwipe({
           messageId,
           content,
           position: index,
           selected: index === 0,
           now,
+          ...(index === 0 && input.reasoningText
+            ? { reasoningText: input.reasoningText }
+            : {}),
         });
+        if (index === 0) {
+          this.insertProviderSwipeContext(
+            swipeId,
+            input.providerContext,
+            now,
+          );
+        }
       });
       this.touchConversation(conversation.id, now);
       this.invalidateConversationSummary(conversation.id, now);
@@ -1287,6 +1312,51 @@ export class AppStore {
         messageId,
       )
       .map((row) => this.mapSwipe(row));
+  }
+
+  selectedProviderContexts(
+    conversationId: string,
+    providerConnectionId: string,
+  ): ReadonlyMap<string, readonly JsonObject[]> {
+    const result = new Map<string, readonly JsonObject[]>();
+    for (const row of this.database.all<Row>(
+      `SELECT messages.id AS message_id, provider_swipe_contexts.context_json
+       FROM messages
+       JOIN swipes
+         ON swipes.message_id = messages.id AND swipes.selected = 1
+       JOIN provider_swipe_contexts
+         ON provider_swipe_contexts.swipe_id = swipes.id
+       WHERE messages.conversation_id = ?
+         AND provider_swipe_contexts.provider_connection_id = ?`,
+      conversationId,
+      providerConnectionId,
+    )) {
+      const messageId = row.message_id;
+      const contextJson = row.context_json;
+      if (typeof messageId !== "string" || typeof contextJson !== "string") {
+        throw new StorageError(
+          "invalid_provider_context",
+          "Persisted provider context is invalid.",
+          500,
+        );
+      }
+      const decoded = JSON.parse(contextJson) as unknown;
+      if (
+        !Array.isArray(decoded) ||
+        !decoded.every(
+          (item) =>
+            item !== null && typeof item === "object" && !Array.isArray(item),
+        )
+      ) {
+        throw new StorageError(
+          "invalid_provider_context",
+          "Persisted provider context is invalid.",
+          500,
+        );
+      }
+      result.set(messageId, decoded as JsonObject[]);
+    }
+    return result;
   }
 
   selectSwipe(input: {
@@ -2478,18 +2548,45 @@ export class AppStore {
     position: number;
     selected: boolean;
     now: string;
-  }): void {
+    reasoningText?: string;
+  }): string {
+    const id = identifier();
     this.database.run(
       `INSERT INTO swipes(
-         id, message_id, position, content, selected, revision, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
-      identifier(),
+         id, message_id, position, content, reasoning_text, selected,
+         revision, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+      id,
       input.messageId,
       input.position,
       input.content,
+      input.reasoningText ?? null,
       input.selected ? 1 : 0,
       input.now,
       input.now,
+    );
+    return id;
+  }
+
+  private insertProviderSwipeContext(
+    swipeId: string,
+    context:
+      | { connectionId: string; items: readonly JsonObject[] }
+      | undefined,
+    now: string,
+  ): void {
+    if (context === undefined || context.items.length === 0) {
+      return;
+    }
+    this.database.run(
+      `INSERT INTO provider_swipe_contexts(
+         swipe_id, provider_connection_id, context_json, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?)`,
+      swipeId,
+      context.connectionId,
+      encode(context.items),
+      now,
+      now,
     );
   }
 
@@ -2533,6 +2630,8 @@ export class AppStore {
       messageId: String(row.message_id),
       position: Number(row.position),
       content: String(row.content),
+      reasoningText:
+        typeof row.reasoning_text === "string" ? row.reasoning_text : null,
       selected: asBoolean(row.selected),
       revision: Number(row.revision),
       createdAt: String(row.created_at),

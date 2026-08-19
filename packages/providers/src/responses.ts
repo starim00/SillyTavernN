@@ -145,6 +145,7 @@ function functionCallFromItem(
 function inputItems(
   messages: readonly ProviderMessage[],
   aliases: ToolNameAliases,
+  includeEmptyAssistantReasoningText = false,
 ): JsonObject[] {
   const result: JsonObject[] = [];
   for (const message of messages) {
@@ -189,6 +190,9 @@ function inputItems(
       type: "message",
       role: message.role,
       content: message.content,
+      ...(includeEmptyAssistantReasoningText && message.role === "assistant"
+        ? { reasoning_text: message.reasoningContent ?? "" }
+        : {}),
       ...(message.name === undefined ? {} : { name: message.name }),
     });
   }
@@ -203,7 +207,11 @@ function generationPayload(
   const generation = request.settings ?? {};
   const payload: JsonObject = {
     model: connection.model,
-    input: inputItems(request.messages, aliases),
+    input: inputItems(
+      request.messages,
+      aliases,
+      connection.model.toLowerCase().startsWith("deepseek"),
+    ),
     stream: generation.stream !== false,
     store: false,
   };

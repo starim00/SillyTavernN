@@ -109,6 +109,7 @@ import type {
   GenerationMode,
   LegacyPlugin,
   PromptPreset,
+  PromptPresetEntry,
   ProviderConnection,
   ProviderConnectionInput,
   Persona,
@@ -919,6 +920,9 @@ export default function App() {
                 "js_stream_token_received_incrementally",
                 delta,
               );
+            },
+            onReasoningDelta: (delta) => {
+              dispatch({ type: "generation/reasoning-delta", delta });
             },
             onToolProposal: (event) => {
               try {
@@ -1999,7 +2003,12 @@ export default function App() {
   const changePresetPrompt = useCallback(
     async (
       promptId: string,
-      patch: { enabled?: boolean; inserted?: boolean; content?: string },
+      patch: {
+        enabled?: boolean;
+        inserted?: boolean;
+        content?: string;
+        role?: PromptPresetEntry["role"];
+      },
     ) => {
       const currentState = workspaceStateRef.current;
       const currentPreset = currentState.presets.find(
@@ -2025,7 +2034,7 @@ export default function App() {
               : patch.inserted === false
                 ? "预设条目已移出当前列表。"
                 : patch.enabled === undefined
-                  ? "预设条目正文已保存。"
+                  ? "预设条目已保存。"
                   : patch.enabled
                     ? "预设条目已启用。"
                     : "预设条目已停用。",
@@ -2552,8 +2561,8 @@ export default function App() {
           onTogglePrompt={(promptId, enabled) =>
             changePresetPrompt(promptId, { enabled })
           }
-          onSavePrompt={(promptId, content) =>
-            changePresetPrompt(promptId, { content })
+          onSavePrompt={(promptId, content, role) =>
+            changePresetPrompt(promptId, { content, role })
           }
           onSaveGeneration={changePresetGeneration}
           onInsertPrompt={(promptId) =>

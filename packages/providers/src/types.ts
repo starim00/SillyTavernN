@@ -27,9 +27,11 @@ export interface ProviderMessage {
   readonly name?: string;
   readonly toolCallId?: string;
   readonly toolCalls?: readonly ProviderMessageToolCall[];
+  /** Provider-returned visible reasoning required by some thinking-mode APIs. */
+  readonly reasoningContent?: string;
   /**
-   * Opaque Responses output items retained only while a tool continuation is
-   * being assembled. The server must never persist or expose these items.
+   * Opaque Responses output items retained for stateless continuation. The
+   * server may persist them in private storage but must never expose them.
    */
   readonly providerContextItems?: readonly JsonObject[];
 }
@@ -103,6 +105,7 @@ export interface ModelProvider {
 export interface FakeProviderScript {
   readonly text?: string;
   readonly chunks?: readonly string[];
+  readonly reasoningChunks?: readonly string[];
   readonly toolCalls?: readonly {
     id: string;
     name: string;

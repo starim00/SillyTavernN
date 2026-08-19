@@ -85,6 +85,7 @@ type WorkspaceAction =
     }
   | { type: "generation/id"; id: string }
   | { type: "generation/delta"; delta: string }
+  | { type: "generation/reasoning-delta"; delta: string }
   | { type: "generation/stopping" }
   | { type: "generation/reset" }
   | { type: "plugin/update"; plugin: LegacyPlugin }
@@ -122,6 +123,7 @@ const idleGeneration = (): WorkspaceState["generation"] => ({
   generationId: null,
   targetMessageId: null,
   preview: "",
+  reasoningPreview: "",
 });
 
 const withProposalPermissionState = (
@@ -526,9 +528,14 @@ export function workspaceReducer(
                 { id: `${message.id}-swipe-1`, content: message.content },
                 action.swipe,
               ];
+          const messageWithoutReasoning = { ...message };
+          delete messageWithoutReasoning.reasoningText;
           return {
-            ...message,
+            ...messageWithoutReasoning,
             content: action.swipe.content,
+            ...(action.swipe.reasoningText
+              ? { reasoningText: action.swipe.reasoningText }
+              : {}),
             swipes,
             activeSwipeIndex: swipes.length - 1,
             revision: message.revision + 1,
@@ -541,9 +548,14 @@ export function workspaceReducer(
         messagesByConversation: mapMessages(state, (message) => {
           const swipe = message.swipes?.[action.index];
           if (message.id !== action.messageId || !swipe) return message;
+          const messageWithoutReasoning = { ...message };
+          delete messageWithoutReasoning.reasoningText;
           return {
-            ...message,
+            ...messageWithoutReasoning,
             content: swipe.content,
+            ...(swipe.reasoningText
+              ? { reasoningText: swipe.reasoningText }
+              : {}),
             activeSwipeIndex: action.index,
           };
         }),
@@ -637,6 +649,7 @@ export function workspaceReducer(
           generationId: null,
           targetMessageId: action.targetMessageId,
           preview: "",
+          reasoningPreview: "",
         },
       };
     case "generation/id":
@@ -654,6 +667,17 @@ export function workspaceReducer(
             generation: {
               ...state.generation,
               preview: state.generation.preview + action.delta,
+            },
+          };
+    case "generation/reasoning-delta":
+      return state.generation.status === "idle"
+        ? state
+        : {
+            ...state,
+            generation: {
+              ...state.generation,
+              reasoningPreview:
+                state.generation.reasoningPreview + action.delta,
             },
           };
     case "generation/stopping":

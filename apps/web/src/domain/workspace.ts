@@ -52,6 +52,7 @@ export type WorkspaceMessage = {
   role: MessageRole;
   content: string;
   displayContent?: string;
+  reasoningText?: string;
   appliedRegexScriptIds?: string[];
   createdLabel: string;
   revision: number;
@@ -70,6 +71,7 @@ export type WorkspaceMessage = {
 export type MessageSwipe = {
   id: string;
   content: string;
+  reasoningText?: string;
 };
 
 export type ProviderProtocol =
@@ -111,6 +113,7 @@ export type GenerationState = {
   generationId: string | null;
   targetMessageId: string | null;
   preview: string;
+  reasoningPreview: string;
 };
 
 export type WorldbookHit = {

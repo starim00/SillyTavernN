@@ -119,6 +119,7 @@ export interface PrepareConversationPromptInput {
   readonly presetId?: string;
   readonly settings?: Readonly<Record<string, unknown>>;
   readonly maxContextTokens?: number;
+  readonly providerConnectionId?: string;
 }
 
 export interface PreparedConversationPrompt {
@@ -756,11 +757,20 @@ export async function prepareConversationPrompt(
   const participantNames = new Map(
     storedParticipants.map((participant) => [participant.id, participant.name]),
   );
-  const messages = store
-    .listMessages(storedConversation.id)
-    .map((message, sequence) =>
-      messageContract(message, sequence, participantNames),
-    );
+  const storedMessages = store.listMessages(storedConversation.id);
+  const reasoningByMessageId = new Map(
+    storedMessages.flatMap((message) => {
+      const selectedSwipe =
+        message.swipes.find((swipe) => swipe.selected) ??
+        message.swipes.find((swipe) => swipe.content === message.content);
+      return selectedSwipe?.reasoningText
+        ? [[message.id, selectedSwipe.reasoningText] as const]
+        : [];
+    }),
+  );
+  const messages = storedMessages.map((message, sequence) =>
+    messageContract(message, sequence, participantNames),
+  );
   const preset =
     input.presetId === undefined
       ? undefined
@@ -800,11 +810,46 @@ export async function prepareConversationPrompt(
       reservedOutputTokens,
     },
   });
-  const renderedMessages = renderChatPrompt(assembled.segments).map(
-    (message): ProviderMessage => ({
-      role: message.role,
-      content: message.content,
-    }),
+  const providerContexts =
+    input.providerConnectionId === undefined
+      ? new Map<string, readonly StoredJsonObject[]>()
+      : store.selectedProviderContexts(
+          storedConversation.id,
+          input.providerConnectionId,
+        );
+  const segmentsById = new Map(
+    assembled.segments.map((segment) => [segment.id, segment]),
+  );
+  const renderedMessages = renderChatPrompt(assembled.segments, {
+    mergeAdjacent: false,
+    mergeWorldbookAtDepth: true,
+  }).map(
+    (message): ProviderMessage => {
+      const sourceSegments = message.sourceSegmentIds
+        .map((id) => segmentsById.get(id))
+        .filter((segment): segment is PromptSegment => segment !== undefined);
+      const sourceMessageId =
+        sourceSegments.length === 1 &&
+        sourceSegments[0]?.source.kind === "message"
+          ? sourceSegments[0].source.id
+          : undefined;
+      const providerContextItems =
+        message.role === "assistant" && sourceMessageId !== undefined
+          ? providerContexts.get(sourceMessageId)
+          : undefined;
+      const reasoningContent =
+        message.role === "assistant" && sourceMessageId !== undefined
+          ? reasoningByMessageId.get(sourceMessageId)
+          : undefined;
+      return {
+        role: message.role,
+        content: message.content,
+        ...(reasoningContent === undefined ? {} : { reasoningContent }),
+        ...(providerContextItems === undefined
+          ? {}
+          : { providerContextItems }),
+      };
+    },
   );
 
   return {

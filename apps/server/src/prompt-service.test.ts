@@ -238,6 +238,103 @@ afterEach(async () => {
 });
 
 describe("server prompt integration", () => {
+  it("preserves adjacent preset entries as separate provider messages", async () => {
+    const created = await application();
+    const card = created.context.store.createCard({
+      id: "card-prompt-boundaries",
+      kind: "character",
+      name: "Prompt boundaries",
+    }).card;
+    const conversation = created.context.store.createConversation({
+      id: "conversation-prompt-boundaries",
+      title: "Prompt boundaries",
+      cardId: card.id,
+    });
+    const preset: PromptPreset = {
+      id: "preset-prompt-boundaries",
+      name: "Prompt boundaries",
+      mode: "chat-completion",
+      prompts: [
+        {
+          id: "first-user-prompt",
+          name: "First user prompt",
+          role: "user",
+          content: "FIRST_USER_PROMPT",
+          enabled: true,
+          order: 0,
+          systemPrompt: false,
+          metadata: {},
+        },
+        {
+          id: "second-user-prompt",
+          name: "Second user prompt",
+          role: "user",
+          content: "SECOND_USER_PROMPT",
+          enabled: true,
+          order: 1,
+          systemPrompt: false,
+          metadata: {},
+        },
+      ],
+      generation: { stop: [], samplerOrder: [], additional: {} },
+      extensions: {},
+      createdAt: now,
+      updatedAt: now,
+    };
+    created.context.store.createPreset({
+      id: preset.id,
+      name: preset.name,
+      kind: preset.mode,
+      payload: jsonObject(preset),
+    });
+
+    const prompt = await prepareConversationPrompt(created.context.store, {
+      conversationId: conversation.id,
+      presetId: preset.id,
+    });
+
+    expect(prompt.messages).toEqual([
+      { role: "user", content: "FIRST_USER_PROMPT" },
+      { role: "user", content: "SECOND_USER_PROMPT" },
+    ]);
+  });
+
+  it("rehydrates selected Swipe reasoning for thinking-mode history", async () => {
+    const created = await application();
+    const card = created.context.store.createCard({
+      id: "card-reasoning-history",
+      kind: "character",
+      name: "Reasoning history",
+    }).card;
+    const conversation = created.context.store.createConversation({
+      id: "conversation-reasoning-history",
+      title: "Reasoning history",
+      cardId: card.id,
+    });
+    created.context.store.addUserMessage({
+      conversationId: conversation.id,
+      content: "Inspect the lore.",
+    });
+    created.context.store.persistAssistantGeneration({
+      conversationId: conversation.id,
+      content: "The lore is ready.",
+      reasoningText: "I inspected the lore before answering.",
+      status: "complete",
+      finishReason: "stop",
+    });
+
+    const prompt = await prepareConversationPrompt(created.context.store, {
+      conversationId: conversation.id,
+      providerConnectionId: "deepseek-compatible",
+    });
+
+    expect(prompt.messages.at(-1)).toMatchObject({
+      role: "assistant",
+      content: "The lore is ready.",
+      reasoningContent: "I inspected the lore before answering.",
+    });
+  });
+
   it("uses the active user persona for prompt text and persona-scoped lore", async () => {
     const created = await application();
     const { context } = created;

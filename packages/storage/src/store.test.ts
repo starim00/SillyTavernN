@@ -895,6 +895,11 @@ describe("AppStore", () => {
         providerSawDone: true,
         providerLastFrameType: "chat.completion.chunk",
         providerUpstreamRequestId: "upstream-request-1",
+        reasoningText: "Visible reasoning.",
+        providerContext: {
+          connectionId: "responses-1",
+          items: [{ type: "reasoning", id: "reasoning-1" }],
+        },
       });
 
       expect(persisted.message).toMatchObject({
@@ -909,6 +914,7 @@ describe("AppStore", () => {
       expect(persisted.swipes).toEqual([
         expect.objectContaining({
           content: "Primary generated reply.",
+          reasoningText: "Visible reasoning.",
           selected: true,
         }),
         expect.objectContaining({
@@ -916,6 +922,19 @@ describe("AppStore", () => {
           selected: false,
         }),
       ]);
+      expect(
+        store.selectedProviderContexts(conversation.id, "responses-1"),
+      ).toEqual(
+        new Map([
+          [
+            persisted.message.id,
+            [{ type: "reasoning", id: "reasoning-1" }],
+          ],
+        ]),
+      );
+      expect(
+        store.selectedProviderContexts(conversation.id, "responses-2"),
+      ).toEqual(new Map());
       expect(store.getConversation(conversation.id).revision).toBe(
         before.revision + 1,
       );

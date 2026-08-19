@@ -111,6 +111,7 @@ export interface Swipe {
   messageId: string;
   position: number;
   content: string;
+  reasoningText: string | null;
   selected: boolean;
   revision: number;
   createdAt: string;

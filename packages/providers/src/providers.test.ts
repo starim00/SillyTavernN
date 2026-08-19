@@ -533,7 +533,7 @@ describe("providers", () => {
     const provider = new OpenAICompatibleProvider(
       {
         baseUrl: "https://example.invalid/v1",
-        model: "test",
+        model: "deepseek-v4-flash",
         nativeToolCalling: true,
       },
       async (_url, init) => {
@@ -552,10 +552,12 @@ describe("providers", () => {
       provider.generate({
         requestId: "request-tool-continuation",
         messages: [
+          { role: "assistant", content: "Imported greeting." },
           { role: "user", content: "What lore is available?" },
           {
             role: "assistant",
             content: "",
+            reasoningContent: "I should inspect the available lore.",
             toolCalls: [
               {
                 id: "call-list",
@@ -576,10 +578,16 @@ describe("providers", () => {
 
     expect(body).toMatchObject({
       messages: [
+        {
+          role: "assistant",
+          content: "Imported greeting.",
+          reasoning_content: "",
+        },
         { role: "user", content: "What lore is available?" },
         {
           role: "assistant",
           content: null,
+          reasoning_content: "I should inspect the available lore.",
           tool_calls: [
             {
               id: "call-list",

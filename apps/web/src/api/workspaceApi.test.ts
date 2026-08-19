@@ -350,6 +350,7 @@ describe("workspace API client", () => {
       .mockResolvedValue(
         sseResponse([
           'data: {"type":"generation-id","generationId":"gen-1"}\n\n',
+          'data: {"type":"reasoning-delta","requestId":"gen-1","sequence":0,"delta":"先分析"}\n\n',
           'data: {"type":"text-delta","requestId":"gen-1","sequence":1,',
           '"delta":"完整"}\n\ndata: {"type":"text-delta","requestId":"gen-1",',
           '"sequence":2,"delta":"回复"}\n\n',
@@ -360,6 +361,7 @@ describe("workspace API client", () => {
     vi.stubGlobal("fetch", fetchMock);
     const deltas: string[] = [];
     const ids: string[] = [];
+    const reasoningDeltas: string[] = [];
 
     const receipt = await generateConversation(
       {
@@ -370,6 +372,7 @@ describe("workspace API client", () => {
       {
         onGenerationId: (id) => ids.push(id),
         onTextDelta: (delta) => deltas.push(delta),
+        onReasoningDelta: (delta) => reasoningDeltas.push(delta),
       },
     );
 
@@ -383,6 +386,7 @@ describe("workspace API client", () => {
       providerLastFrameType: "chat.completion.chunk",
       providerUpstreamRequestId: "upstream-9",
     });
+    expect(reasoningDeltas).toEqual(["先分析"]);
     expect(ids).toEqual(["gen-1"]);
     expect(deltas).toEqual(["完整", "回复"]);
     const request = fetchMock.mock.calls[0]?.[1] as RequestInit;

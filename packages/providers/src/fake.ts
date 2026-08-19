@@ -97,6 +97,11 @@ export class DeterministicFakeProvider implements ModelProvider {
         return;
       }
 
+      for (const chunk of this.script.reasoningChunks ?? []) {
+        await wait(this.script.delayMs ?? 0, signal);
+        yield event({ type: "reasoning-delta", delta: chunk });
+      }
+
       for (const toolCall of this.script.toolCalls ?? []) {
         if (!this.supportsTools) {
           yield event({

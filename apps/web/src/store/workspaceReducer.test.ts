@@ -602,7 +602,11 @@ describe("workspaceReducer", () => {
       type: "generation/delta",
       delta: "还没有完成",
     });
-    const stopped = workspaceReducer(previewed, {
+    const reasoned = workspaceReducer(previewed, {
+      type: "generation/reasoning-delta",
+      delta: "正在分析",
+    });
+    const stopped = workspaceReducer(reasoned, {
       type: "generation/stopping",
     });
     const reset = workspaceReducer(stopped, { type: "generation/reset" });
@@ -611,6 +615,7 @@ describe("workspaceReducer", () => {
       generationId: "generation-live",
       preview: "还没有完成",
     });
+    expect(reasoned.generation.reasoningPreview).toBe("正在分析");
     expect(stopped.generation.status).toBe("stopping");
     expect(reset.generation.status).toBe("idle");
     expect(reset.generation.preview).toBe("");

@@ -654,6 +654,7 @@ export const MessageCard = memo(function MessageCard({
   const displaysHtml = displaySegments.some(
     (segment) => segment.kind === "html" || segment.kind === "mixed",
   );
+  const reasoningText = message.reasoningText?.trim();
 
   useEffect(() => {
     if (!editing) setEditValue(message.content);
@@ -684,6 +685,18 @@ export const MessageCard = memo(function MessageCard({
         </span>
         <time>{message.createdLabel}</time>
       </header>
+
+      {message.role === "assistant" && reasoningText ? (
+        <details className="message-reasoning">
+          <summary>思考过程</summary>
+          <div className="message-reasoning__content">
+            <MarkdownMessageContent
+              content={reasoningText}
+              appliedRegexScriptIds={[]}
+            />
+          </div>
+        </details>
+      ) : null}
 
       {editing ? (
         <div className="message-editor">
@@ -1034,6 +1047,17 @@ export function MessageStream({
                       : "正在生成"}
                 </span>
               </header>
+              {generation.reasoningPreview ? (
+                <details className="message-reasoning" open>
+                  <summary>正在思考</summary>
+                  <div className="message-reasoning__content">
+                    <MarkdownMessageContent
+                      content={generation.reasoningPreview}
+                      appliedRegexScriptIds={[]}
+                    />
+                  </div>
+                </details>
+              ) : null}
               <div className="message-item__content generation-preview">
                 {generation.preview || "正在等待第一个内容片段…"}
                 <span className="generation-caret" aria-hidden="true" />

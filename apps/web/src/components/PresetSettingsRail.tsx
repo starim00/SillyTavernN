@@ -5,7 +5,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 
-import type { PromptPreset } from "../domain/workspace";
+import type { PromptPreset, PromptPresetEntry } from "../domain/workspace";
 import { PresetDetail } from "./ContextRail";
 import type { PresetGenerationPatch } from "./PresetGenerationControls";
 import { IconButton } from "./WorkspacePrimitives";
@@ -17,7 +17,11 @@ type PresetSettingsRailProps = {
   onSelectPreset: (presetId: string) => void;
   onDeletePreset: (preset: PromptPreset) => void;
   onTogglePrompt: (promptId: string, enabled: boolean) => Promise<void>;
-  onSavePrompt: (promptId: string, content: string) => Promise<void>;
+  onSavePrompt: (
+    promptId: string,
+    content: string,
+    role: PromptPresetEntry["role"],
+  ) => Promise<void>;
   onSaveGeneration: (patch: PresetGenerationPatch) => Promise<void>;
   onInsertPrompt: (promptId: string) => Promise<void>;
   onDetachPrompt: (promptId: string) => Promise<void>;

@@ -960,6 +960,7 @@ describe("prompt preset routes", () => {
       payload: {
         expectedRevision: enabledPreset.revision,
         content: "EDITED_OPTIONAL_CONTENT",
+        role: "assistant",
       },
     });
     expect(edited.statusCode).toBe(200);
@@ -972,6 +973,7 @@ describe("prompt preset routes", () => {
               id: string;
               content: string;
               enabled: boolean;
+              role: string;
             }>;
           };
         };
@@ -993,6 +995,7 @@ describe("prompt preset routes", () => {
     ).toMatchObject({
       content: "EDITED_OPTIONAL_CONTENT",
       enabled: true,
+      role: "assistant",
     });
 
     const exported = await app.inject({
@@ -1003,7 +1006,7 @@ describe("prompt preset routes", () => {
     });
     expect(exported.statusCode).toBe(200);
     const exportedPreset = exported.json() as {
-      prompts: Array<{ identifier: string; content: string }>;
+      prompts: Array<{ identifier: string; content: string; role: string }>;
       prompt_order: Array<{
         character_id: number;
         order: Array<{ identifier: string; enabled: boolean }>;
@@ -1015,6 +1018,7 @@ describe("prompt preset routes", () => {
       ),
     ).toMatchObject({
       content: "EDITED_OPTIONAL_CONTENT",
+      role: "assistant",
     });
     expect(exportedPreset.prompt_order).toEqual([
       {

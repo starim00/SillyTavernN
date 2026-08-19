@@ -101,7 +101,11 @@ function PresetPromptItem({
   dragging: boolean;
   onEdit: (promptId: string | null) => void;
   onToggle: (promptId: string, enabled: boolean) => Promise<void>;
-  onSave: (promptId: string, content: string) => Promise<void>;
+  onSave: (
+    promptId: string,
+    content: string,
+    role: PromptPresetEntry["role"],
+  ) => Promise<void>;
   onDetach: (promptId: string) => Promise<void>;
   onPointerDown: (
     promptId: string,
@@ -109,14 +113,16 @@ function PresetPromptItem({
   ) => void;
 }) {
   const [draft, setDraft] = useState(prompt.content);
-  const [saving, setSaving] = useState<"toggle" | "content" | "detach" | null>(
+  const [draftRole, setDraftRole] = useState(prompt.role);
+  const [saving, setSaving] = useState<"toggle" | "entry" | "detach" | null>(
     null,
   );
   const busy = saving !== null || reordering;
 
   useEffect(() => {
     setDraft(prompt.content);
-  }, [prompt.content]);
+    setDraftRole(prompt.role);
+  }, [prompt.content, prompt.role]);
 
   const toggle = async () => {
     if (saving) return;
@@ -131,10 +137,12 @@ function PresetPromptItem({
   };
 
   const save = async () => {
-    if (saving || draft === prompt.content) return;
-    setSaving("content");
+    if (saving || (draft === prompt.content && draftRole === prompt.role)) {
+      return;
+    }
+    setSaving("entry");
     try {
-      await onSave(prompt.id, draft);
+      await onSave(prompt.id, draft, draftRole);
     } catch {
       // The parent surface reports a durable toast and keeps the draft editable.
     } finally {
@@ -184,6 +192,12 @@ function PresetPromptItem({
         </button>
         <div className="preset-prompt__identity" title={prompt.name}>
           <strong>{prompt.name}</strong>
+          <span
+            className="preset-prompt__role"
+            title={`发送角色：${prompt.role}`}
+          >
+            {prompt.role}
+          </span>
           {prompt.dynamicMarker ? <span>动态</span> : null}
         </div>
         <div className="preset-prompt__controls">
@@ -233,6 +247,22 @@ function PresetPromptItem({
             </p>
           ) : null}
           <label>
+            <span>发送角色</span>
+            <select
+              aria-label={`修改 ${prompt.name} 的发送角色`}
+              value={draftRole}
+              onChange={(event) =>
+                setDraftRole(event.target.value as PromptPresetEntry["role"])
+              }
+              disabled={busy}
+            >
+              <option value="system">system</option>
+              <option value="user">user</option>
+              <option value="assistant">assistant</option>
+              <option value="tool">tool</option>
+            </select>
+          </label>
+          <label>
             <span>条目正文</span>
             <textarea
               aria-label={`编辑 ${prompt.name} 的正文`}
@@ -249,6 +279,7 @@ function PresetPromptItem({
               type="button"
               onClick={() => {
                 setDraft(prompt.content);
+                setDraftRole(prompt.role);
                 onEdit(null);
               }}
               disabled={busy}
@@ -259,10 +290,12 @@ function PresetPromptItem({
               className="button button--secondary"
               type="button"
               onClick={() => void save()}
-              disabled={busy || draft === prompt.content}
+              disabled={
+                busy || (draft === prompt.content && draftRole === prompt.role)
+              }
             >
               <FloppyDisk size={15} />
-              {saving === "content" ? "保存中" : "保存正文"}
+              {saving === "entry" ? "保存中" : "保存条目"}
             </button>
           </div>
         </div>
@@ -282,7 +315,11 @@ export function PresetDetail({
 }: {
   preset: PromptPreset;
   onToggle: (promptId: string, enabled: boolean) => Promise<void>;
-  onSave: (promptId: string, content: string) => Promise<void>;
+  onSave: (
+    promptId: string,
+    content: string,
+    role: PromptPresetEntry["role"],
+  ) => Promise<void>;
   onSaveGeneration: (patch: PresetGenerationPatch) => Promise<void>;
   onInsert: (promptId: string) => Promise<void>;
   onDetach: (promptId: string) => Promise<void>;

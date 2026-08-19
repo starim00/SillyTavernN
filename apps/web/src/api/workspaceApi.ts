@@ -1722,14 +1722,16 @@ export async function updatePresetPrompt(input: {
   enabled?: boolean;
   inserted?: boolean;
   content?: string;
+  role?: PromptPresetEntry["role"];
 }): Promise<PromptPreset> {
   if (
     input.enabled === undefined &&
     input.inserted === undefined &&
-    input.content === undefined
+    input.content === undefined &&
+    input.role === undefined
   ) {
     throw new TypeError(
-      "Preset prompt update requires enabled, inserted or content.",
+      "Preset prompt update requires enabled, inserted, content or role.",
     );
   }
   const result = await request<ApiEnvelope<ApiPreset>>(
@@ -1743,6 +1745,7 @@ export async function updatePresetPrompt(input: {
         ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
         ...(input.inserted === undefined ? {} : { inserted: input.inserted }),
         ...(input.content === undefined ? {} : { content: input.content }),
+        ...(input.role === undefined ? {} : { role: input.role }),
       }),
     },
   );

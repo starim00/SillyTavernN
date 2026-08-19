@@ -1478,6 +1478,7 @@ describe("workspace API client", () => {
         expectedRevision: 7,
         enabled: true,
         content: "新的可选摘要指令",
+        role: "assistant",
       });
       return Promise.resolve(
         jsonResponse({
@@ -1501,7 +1502,7 @@ describe("workspace API client", () => {
                 {
                   id: "optional summary",
                   name: "可选摘要",
-                  role: "system",
+                  role: "assistant",
                   content: "新的可选摘要指令",
                   enabled: true,
                   order: 1,
@@ -1522,6 +1523,7 @@ describe("workspace API client", () => {
       expectedRevision: 7,
       enabled: true,
       content: "新的可选摘要指令",
+      role: "assistant",
     });
 
     expect(updated).toMatchObject({
@@ -1534,6 +1536,7 @@ describe("workspace API client", () => {
       id: "optional summary",
       enabled: true,
       content: "新的可选摘要指令",
+      role: "assistant",
       marker: "custom",
     });
   });

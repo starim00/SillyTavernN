@@ -12,6 +12,7 @@ import {
 } from "@stn/core";
 import {
   GenerationSettingsSchema,
+  PromptRoleSchema,
   PromptPresetSchema,
   type JsonObject,
   type JsonValue,
@@ -50,15 +51,18 @@ const promptPatchSchema = z
     enabled: z.boolean().optional(),
     inserted: z.boolean().optional(),
     content: z.string().optional(),
+    role: PromptRoleSchema.optional(),
   })
   .strict()
   .refine(
     (value) =>
       value.enabled !== undefined ||
       value.inserted !== undefined ||
-      value.content !== undefined,
+      value.content !== undefined ||
+      value.role !== undefined,
     {
-      message: "At least one of enabled, inserted or content must be provided.",
+      message:
+        "At least one of enabled, inserted, content or role must be provided.",
     },
   )
   .refine((value) => !(value.inserted === false && value.enabled === true), {
@@ -557,6 +561,7 @@ export async function registerPresetRoutes(
         let nextPrompt = {
           ...prompt,
           ...(input.content === undefined ? {} : { content: input.content }),
+          ...(input.role === undefined ? {} : { role: input.role }),
         };
         if (input.inserted === false) {
           nextPrompt = {

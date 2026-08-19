@@ -2414,6 +2414,12 @@ select:focus-visible {
   font-weight: 700;
 }
 
+.preset-prompt__identity .preset-prompt__role {
+  color: #426c81;
+  background: var(--pale-blue);
+  text-transform: lowercase;
+}
+
 .preset-prompt__controls {
   display: flex;
   align-items: center;
@@ -2497,10 +2503,9 @@ select:focus-visible {
   font-size: 9px;
 }
 
-.preset-prompt__editor textarea {
+.preset-prompt__editor textarea,
+.preset-prompt__editor select {
   width: 100%;
-  min-height: 92px;
-  resize: vertical;
   padding: 8px;
   color: var(--text);
   background: var(--surface-strong);
@@ -2510,6 +2515,16 @@ select:focus-visible {
   font-family: inherit;
   font-size: 10px;
   line-height: 1.55;
+}
+
+.preset-prompt__editor textarea {
+  min-height: 92px;
+  resize: vertical;
+}
+
+.preset-prompt__editor select {
+  height: 32px;
+  padding: 0 8px;
 }
 
 .preset-prompt__dynamic-note {
@@ -2522,7 +2537,8 @@ select:focus-visible {
   line-height: 1.45;
 }
 
-.preset-prompt__editor textarea:focus {
+.preset-prompt__editor textarea:focus,
+.preset-prompt__editor select:focus {
   border-color: #8fb7ca;
   box-shadow: 0 0 0 2px rgba(143, 183, 202, 0.2);
 }

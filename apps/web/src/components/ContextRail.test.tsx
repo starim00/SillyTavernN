@@ -231,6 +231,8 @@ describe("ContextRail", () => {
     expect(html).toContain("1/2 启用");
     expect(html).toContain("主要指令");
     expect(html).toContain("回合摘要（可选）");
+    expect(html).toContain('title="发送角色：system"');
+    expect(html.match(/class="preset-prompt__role"/g)).toHaveLength(2);
     expect(html).toContain('role="switch"');
     expect(html).toContain('aria-checked="true"');
     expect(html).toContain('aria-checked="false"');

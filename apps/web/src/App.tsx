@@ -837,6 +837,21 @@ export default function App() {
   );
 
   useEffect(() => {
+    if (!apiOnline || !conversation?.id) return;
+    // Card and conversation entry must initialize compatibility scripts on
+    // arrival. Workbench and generation actions may reuse this runtime, but
+    // they must not be the events that create it.
+    void ensureTavernHelperRuntime(conversation.id);
+  }, [
+    apiOnline,
+    conversation?.id,
+    ensureTavernHelperRuntime,
+    state.selectedPresetId,
+    state.selectedProviderId,
+    tavernHelperRevision,
+  ]);
+
+  useEffect(() => {
     if (!apiOnline || !conversation) return;
     let active = true;
     void loadConversationMessagePage(conversation.id, state.selectedPresetId)

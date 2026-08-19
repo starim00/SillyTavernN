@@ -52,6 +52,54 @@ describe("native Prompt Template processing", () => {
     expect(result.renderedCount).toBe(0);
   });
 
+  it("omits template messages that render to empty content", async () => {
+    vi.stubGlobal("window", {});
+    const result = await renderPromptTemplateMessages(
+      [
+        { role: "user", content: "<% const hidden = true; %>" },
+        { role: "user", content: "Visible" },
+      ],
+      { enabled: true, context: null },
+    );
+    expect(result.messages).toEqual([{ role: "user", content: "Visible" }]);
+  });
+
+  it("inherits the latest initialized MVU state across an empty user floor", async () => {
+    vi.stubGlobal("window", {});
+    const result = await renderPromptTemplateMessages(
+      [
+        {
+          role: "user",
+          content:
+            "<% if (variables.stat_data.phase === 'ready') { %>initialized<% } %>",
+        },
+      ],
+      {
+        enabled: true,
+        context: {
+          conversation: {
+            id: "conversation",
+            cardId: "card",
+            presetId: null,
+          },
+          sources: [],
+          variables: {
+            global: {},
+            character: {},
+            preset: {},
+            chat: {},
+            messages: {
+              opening: { stat_data: { phase: "ready" } },
+              user: { stat_data: {}, display_data: { compact: true } },
+            },
+            scripts: {},
+          },
+        },
+      },
+    );
+    expect(result.messages).toEqual([{ role: "user", content: "initialized" }]);
+  });
+
   it("applies generation and independent message injection directives", async () => {
     vi.stubGlobal("window", {});
     const result = await renderPromptTemplateMessages(

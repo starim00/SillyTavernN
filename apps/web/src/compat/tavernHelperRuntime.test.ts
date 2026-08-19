@@ -120,6 +120,16 @@ describe("Tavern Helper message compatibility", () => {
     expect(
       shouldSeedOpeningMessageVariables(
         { role: "assistant" },
+        {},
+        {
+          initialized_lorebooks: { "Fixture lorebook": [] },
+          stat_data: {},
+        },
+      ),
+    ).toBe(true);
+    expect(
+      shouldSeedOpeningMessageVariables(
+        { role: "assistant" },
         { stat_data: { world: { day: 1 } } },
         { stat_data: { world: { day: 12 } } },
       ),

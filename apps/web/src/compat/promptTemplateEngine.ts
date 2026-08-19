@@ -53,7 +53,25 @@ function latestMessageVariables(
 ): Record<string, unknown> {
   if (!context) return {};
   const values = Object.values(context.variables.messages);
-  return structuredClone(values.at(-1) ?? context.variables.chat);
+  const latest = values.at(-1) ?? context.variables.chat;
+  if (_.isPlainObject(latest.stat_data) && !_.isEmpty(latest.stat_data)) {
+    return structuredClone(latest);
+  }
+  for (let index = values.length - 2; index >= 0; index -= 1) {
+    const candidate = values[index];
+    if (
+      candidate &&
+      _.isPlainObject(candidate.stat_data) &&
+      !_.isEmpty(candidate.stat_data)
+    ) {
+      return structuredClone({
+        ...candidate,
+        ...latest,
+        stat_data: candidate.stat_data,
+      });
+    }
+  }
+  return structuredClone(latest);
 }
 
 function stripExecutableTemplate(content: string): string {
@@ -728,7 +746,7 @@ export async function renderPromptTemplateMessages(
     }
   }
   return {
-    messages: rendered,
+    messages: rendered.filter((message) => message.content.trim().length > 0),
     diagnostics,
     renderedCount,
     sourceTemplateCount,

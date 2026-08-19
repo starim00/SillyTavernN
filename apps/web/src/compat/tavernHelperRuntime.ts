@@ -6,6 +6,7 @@ import * as YAML from "yaml";
 import * as z from "zod";
 
 import type { WorkspaceMessage } from "../domain/workspace";
+import { createBrowserIdentifier } from "./browserIdentifier";
 import type {
   TavernHelperContext,
   TavernHelperRuntimeButton,
@@ -348,7 +349,7 @@ export function shouldSeedOpeningMessageVariables(
 ): boolean {
   return (
     message?.role === "assistant" &&
-    messageVariables === undefined &&
+    (messageVariables === undefined || _.isEmpty(messageVariables)) &&
     isCrossConversationMvuState(characterVariables)
   );
 }
@@ -481,7 +482,7 @@ export class TavernHelperRuntime {
   >();
   private readonly loadedScriptIds: string[] = [];
   private readonly errors: TavernHelperRuntimeStatus["errors"] = [];
-  private readonly runtimeId = crypto.randomUUID();
+  private readonly runtimeId = createBrowserIdentifier();
   private listenerSequence = 0;
   private activeScript: RuntimeScript | null = null;
   private nativeMvuParser:
@@ -1851,7 +1852,7 @@ export class TavernHelperRuntime {
       }>,
       options: { once?: boolean } = {},
     ) => {
-      const id = crypto.randomUUID();
+      const id = createBrowserIdentifier();
       this.injections.set(id, {
         prompts: prompts.map((prompt) => ({
           role: prompt.role,

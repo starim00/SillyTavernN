@@ -27,7 +27,7 @@
     "test:changed": "vitest run --changed --passWithNoTests",
     "test:related": "vitest related --run --passWithNoTests",
     "test:watch": "vitest",
-    "verify": "npm run format:check && npm run lint && npm run typecheck && npm run build && vitest run && npm run test:sites --workspace @stn/web"
+    "verify": "npm run format:check && npm run build:packages && npm run lint && npm run typecheck && npm run build:apps && vitest run && npm run test:sites --workspace @stn/web"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

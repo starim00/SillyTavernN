@@ -12,4 +12,3 @@ coverage/
 /data/
 runtime/extensions/
 runtime/imports/
-apps/web/.openai/hosting.json

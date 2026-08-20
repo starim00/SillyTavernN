@@ -385,6 +385,7 @@ export class ImportService {
       });
       const messageIdMap = new Map<string, string>();
       const swipeIds = new Set<string>();
+      let previousCreatedAt = Number.NEGATIVE_INFINITY;
       for (const message of imported.value.messages) {
         const active =
           message.swipes.find((swipe) => swipe.id === message.activeSwipeId) ??
@@ -394,11 +395,21 @@ export class ImportService {
           ? (messageIdMap.get(message.parentMessageId) ??
             message.parentMessageId)
           : undefined;
+        const parsedCreatedAt = Date.parse(message.createdAt);
+        const candidateCreatedAt = Number.isFinite(parsedCreatedAt)
+          ? parsedCreatedAt
+          : Date.now();
+        const orderedCreatedAt = Math.max(
+          candidateCreatedAt,
+          previousCreatedAt + 1,
+        );
+        previousCreatedAt = orderedCreatedAt;
         const common = {
           id: message.id,
           conversationId: conversation.id,
           ...(parentMessageId === undefined ? {} : { parentMessageId }),
           content: active.content,
+          createdAt: new Date(orderedCreatedAt).toISOString(),
         };
         const persisted =
           message.role === "user"
@@ -425,6 +436,7 @@ export class ImportService {
             messageId: persisted.id,
             content: swipe.content,
             selected: swipe.id === message.activeSwipeId,
+            createdAt: swipe.createdAt,
             ...(swipeState?.reasoningText === undefined
               ? {}
               : { reasoningText: swipeState.reasoningText }),

@@ -839,6 +839,72 @@ describe("AppStore", () => {
     }
   });
 
+  it("uses insertion order when paginating messages with equal timestamps", () => {
+    const store = new AppStore();
+    try {
+      const { card } = createConversationFixture(store);
+      const conversation = store.createConversation({
+        id: "conversation-equal-times",
+        title: "Equal timestamp order",
+        cardId: card.card.id,
+      });
+      const createdAt = "2026-08-18T10:22:00.000Z";
+      const messages = [
+        store.addUserMessage({
+          id: "z-first-user",
+          conversationId: conversation.id,
+          content: "First user",
+          createdAt,
+        }),
+        store.addAssistantMessage({
+          id: "a-first-assistant",
+          conversationId: conversation.id,
+          content: "First assistant",
+          createdAt,
+        }),
+        store.addUserMessage({
+          id: "y-second-user",
+          conversationId: conversation.id,
+          content: "Second user",
+          createdAt,
+        }),
+        store.addAssistantMessage({
+          id: "b-second-assistant",
+          conversationId: conversation.id,
+          content: "Second assistant",
+          createdAt,
+        }),
+      ];
+
+      expect(
+        store
+          .listChatMessagesPage({ conversationId: conversation.id, limit: 10 })
+          .items.map((message) => message.id),
+      ).toEqual(messages.map((message) => message.id));
+
+      const newer = store.listChatMessagesPage({
+        conversationId: conversation.id,
+        limit: 2,
+      });
+      expect(newer.items.map((message) => message.id)).toEqual([
+        "y-second-user",
+        "b-second-assistant",
+      ]);
+      const cursor = newer.items[0]!;
+      expect(
+        store
+          .listChatMessagesPage({
+            conversationId: conversation.id,
+            limit: 2,
+            before: { createdAt: cursor.createdAt, id: cursor.id },
+          })
+          .items.map((message) => message.id),
+      ).toEqual(["z-first-user", "a-first-assistant"]);
+    } finally {
+      store.close();
+    }
+  });
+
   it("selects an earlier swipe without violating the one-selected index", () => {
     const store = new AppStore();
     try {

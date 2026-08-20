@@ -836,6 +836,7 @@ export class AppStore {
     conversationId: string;
     parentMessageId?: string | null;
     content: string;
+    createdAt?: string;
   }): Message {
     return this.insertMessage({
       ...input,
@@ -851,6 +852,7 @@ export class AppStore {
     parentMessageId?: string | null;
     participantId?: string | null;
     content: string;
+    createdAt?: string;
   }): Message {
     if (input.participantId) {
       const conversation = this.getConversation(input.conversationId);
@@ -880,6 +882,7 @@ export class AppStore {
     parentMessageId?: string | null;
     role: InternalMessageRole;
     content: string;
+    createdAt?: string;
   }): Message {
     return this.insertMessage({
       ...input,
@@ -895,6 +898,7 @@ export class AppStore {
     role: "system" | "user" | "assistant" | "tool";
     participantId: string | null;
     content: string;
+    createdAt?: string;
     allowInternalParent: boolean;
   }): Message {
     return this.database.transaction(() => {
@@ -922,6 +926,7 @@ export class AppStore {
       }
       const id = input.id ?? identifier();
       const now = timestamp();
+      const createdAt = input.createdAt ?? now;
       this.database.run(
         `INSERT INTO messages(
            id, conversation_id, parent_message_id, role, participant_id, content,
@@ -933,7 +938,7 @@ export class AppStore {
         input.role,
         input.participantId ?? null,
         input.content,
-        now,
+        createdAt,
         now,
       );
       this.database.run(
@@ -1073,7 +1078,17 @@ export class AppStore {
     const params: Array<string | number> = [input.conversationId];
     let cursorPredicate = "";
     if (input.before !== undefined) {
-      cursorPredicate = "AND (created_at < ? OR (created_at = ? AND id < ?))";
+      cursorPredicate = `AND (
+        created_at < ?
+        OR (
+          created_at = ?
+          AND rowid < (
+            SELECT cursor_message.rowid
+            FROM messages AS cursor_message
+            WHERE cursor_message.id = ?
+          )
+        )
+      )`;
       params.push(
         input.before.createdAt,
         input.before.createdAt,
@@ -1085,7 +1100,7 @@ export class AppStore {
       `SELECT * FROM messages
        WHERE conversation_id = ? AND role IN ('user', 'assistant')
        ${cursorPredicate}
-       ORDER BY created_at DESC, id DESC
+       ORDER BY created_at DESC, rowid DESC
        LIMIT ?`,
       ...params,
     );
@@ -1123,6 +1138,7 @@ export class AppStore {
     content: string;
     selected?: boolean;
     reasoningText?: string;
+    createdAt?: string;
     providerContext?: {
       connectionId: string;
       items: readonly JsonObject[];
@@ -1136,6 +1152,7 @@ export class AppStore {
       );
       const position = next?.position ?? 0;
       const now = timestamp();
+      const createdAt = input.createdAt ?? now;
       const id = input.id ?? identifier();
       if (input.selected) {
         this.database.run(
@@ -1154,7 +1171,7 @@ export class AppStore {
         input.content,
         input.reasoningText ?? null,
         input.selected ? 1 : 0,
-        now,
+        createdAt,
         now,
       );
       this.insertProviderSwipeContext(id, input.providerContext, now);

@@ -697,6 +697,82 @@ describe("portable import routes", () => {
     expect(importedMessage.content).toBe("Selected path");
   });
 
+  it("preserves JSONL record order when imported timestamps collide", async () => {
+    const { app, context } = await application();
+    const card = context.store.createCard({
+      id: "card-ordered-history",
+      kind: "character",
+      name: "Ordered history card",
+    }).card;
+    const timestamp = "2026-08-18T10:22:00.000Z";
+    const source = [
+      JSON.stringify({
+        user_name: "User",
+        character_name: "Model",
+        chat_metadata: {},
+      }),
+      JSON.stringify({
+        name: "User",
+        is_user: true,
+        mes: "First user turn",
+        send_date: timestamp,
+      }),
+      JSON.stringify({
+        name: "Model",
+        is_user: false,
+        mes: "First model turn",
+        send_date: timestamp,
+      }),
+      JSON.stringify({
+        name: "User",
+        is_user: true,
+        mes: "Second user turn",
+        send_date: timestamp,
+      }),
+      JSON.stringify({
+        name: "Model",
+        is_user: false,
+        mes: "Second model turn",
+        send_date: timestamp,
+      }),
+    ].join("\n");
+    const boundary = "stn-ordered-conversation-import";
+    const imported = await app.inject({
+      method: "POST",
+      url: "/api/conversations/import",
+      headers: {
+        "content-type": `multipart/form-data; boundary=${boundary}`,
+      },
+      payload: multipartConversationImport({
+        boundary,
+        cardId: card.id,
+        filename: "ordered-history.jsonl",
+        bytes: Buffer.from(source),
+      }),
+    });
+    expect(imported.statusCode).toBe(201);
+    const conversationId = (
+      imported.json() as { data: { conversation: { id: string } } }
+    ).data.conversation.id;
+
+    const page = context.store.listChatMessagesPage({
+      conversationId,
+      limit: 20,
+    });
+    expect(page.items.map(({ role, content }) => ({ role, content }))).toEqual([
+      { role: "user", content: "First user turn" },
+      { role: "assistant", content: "First model turn" },
+      { role: "user", content: "Second user turn" },
+      { role: "assistant", content: "Second model turn" },
+    ]);
+    expect(page.items.map((message) => message.createdAt)).toEqual([
+      "2026-08-18T10:22:00.000Z",
+      "2026-08-18T10:22:00.001Z",
+      "2026-08-18T10:22:00.002Z",
+      "2026-08-18T10:22:00.003Z",
+    ]);
+  });
+
   it("round-trips an STN conversation with variables and Swipe runtime state", async () => {
     const { app, context } = await application();
     const card = context.store.createCard({

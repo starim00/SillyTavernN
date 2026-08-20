@@ -1003,7 +1003,6 @@ select:focus-visible {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  scroll-behavior: smooth;
   scrollbar-color: #c9d2d8 transparent;
   scrollbar-width: thin;
   background: var(--message-surface);
@@ -1278,6 +1277,25 @@ select:focus-visible {
   display: grid;
   min-width: 0;
   gap: 0;
+}
+
+.message-item__deferred-frame {
+  justify-self: start;
+  margin: 6px 0;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: #e8eef1;
+  color: #435965;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.message-item__deferred-frame:hover {
+  background: #dce7eb;
+  color: #2f4652;
 }
 
 .message-item__footer {

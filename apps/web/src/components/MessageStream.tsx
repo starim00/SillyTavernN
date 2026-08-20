@@ -344,6 +344,24 @@ function TrustedDisplayFrame({
   );
 }
 
+type DeferredTrustedDisplayFrameProps = TrustedDisplayFrameProps;
+
+function DeferredTrustedDisplayFrame(props: DeferredTrustedDisplayFrameProps) {
+  const [visible, setVisible] = useState(false);
+
+  if (visible) return <TrustedDisplayFrame {...props} />;
+
+  return (
+    <button
+      className="message-item__deferred-frame"
+      type="button"
+      onClick={() => setVisible(true)}
+    >
+      显示前端代码块
+    </button>
+  );
+}
+
 function MarkdownMessageContent({
   content,
   appliedRegexScriptIds,
@@ -490,7 +508,7 @@ export const MessageCard = memo(function MessageCard({
             </button>
           </div>
         </div>
-      ) : message.role === "user" || !renderRichContent ? (
+      ) : message.role === "user" ? (
         <div className="mes_text" data-collapse-code={collapseCodeBlocks}>
           <MarkdownMessageContent
             content={displayContent}
@@ -501,24 +519,37 @@ export const MessageCard = memo(function MessageCard({
         <div className="message-item__rich-content mes_text">
           {displaySegments.map((segment, index) =>
             segment.kind === "html" || segment.kind === "mixed" ? (
-              <TrustedDisplayFrame
-                key={`html-${String(index)}-${String(helperHostReady)}`}
-                frameName={`TH-message--${String(messageIndex)}--${String(index)}`}
-                hostRuntimeReady={helperHostReady}
-                title={
-                  segment.kind === "mixed"
-                    ? `${actorLabel}的混合 Markdown 与 HTML 内容`
-                    : `${actorLabel}的正则显示内容`
-                }
-                content={
-                  segment.kind === "mixed"
-                    ? mixedDisplayContent(segment.content)
-                    : segment.content
-                }
-                displayKind={segment.kind}
-                appliedRegexScriptIds={appliedRegexScriptIds}
-                onHeightChange={onContentResize}
-              />
+              segment.kind === "html" && !renderRichContent ? (
+                <DeferredTrustedDisplayFrame
+                  key={`deferred-html-${String(index)}`}
+                  frameName={`TH-message--${String(messageIndex)}--${String(index)}`}
+                  hostRuntimeReady={helperHostReady}
+                  title={`${actorLabel}的正则显示内容`}
+                  content={segment.content}
+                  displayKind="html"
+                  appliedRegexScriptIds={appliedRegexScriptIds}
+                  onHeightChange={onContentResize}
+                />
+              ) : (
+                <TrustedDisplayFrame
+                  key={`html-${String(index)}-${String(helperHostReady)}`}
+                  frameName={`TH-message--${String(messageIndex)}--${String(index)}`}
+                  hostRuntimeReady={helperHostReady}
+                  title={
+                    segment.kind === "mixed"
+                      ? `${actorLabel}的混合 Markdown 与 HTML 内容`
+                      : `${actorLabel}的正则显示内容`
+                  }
+                  content={
+                    segment.kind === "mixed"
+                      ? mixedDisplayContent(segment.content)
+                      : segment.content
+                  }
+                  displayKind={segment.kind}
+                  appliedRegexScriptIds={appliedRegexScriptIds}
+                  onHeightChange={onContentResize}
+                />
+              )
             ) : (
               <div
                 key={`markdown-${String(index)}`}

@@ -370,6 +370,13 @@ describe("workspace components", () => {
     }
   });
 
+  it("positions conversation changes immediately instead of animating from the top", () => {
+    const streamBlock = cssBlocks(".message-stream")[0] ?? "";
+
+    expect(streamBlock).toMatch(/overflow-y:\s*auto/);
+    expect(streamBlock).not.toMatch(/scroll-behavior:\s*smooth/);
+  });
+
   it("renders trusted display frames as one seamless message surface", () => {
     const frameBlock = cssBlocks(".message-item__display-frame")[0] ?? "";
     const richContentBlock = cssBlocks(".message-item__rich-content")[0] ?? "";
@@ -847,6 +854,60 @@ describe("workspace components", () => {
     expect(mixedHtml).toContain("<strong>Markdown</strong>");
     expect(html.match(/<iframe/gu)).toHaveLength(2);
     expect(html).not.toContain("message-item__content--markdown");
+  });
+
+  it("defers full frontend documents beyond render depth without flattening mixed HTML", () => {
+    const displayContent = `正文仍然可见。
+
+\`\`\`html
+<!DOCTYPE html>
+<html><body><main>行动选项</main></body></html>
+\`\`\`
+
+<details class="variable-log">
+<summary>变量更新LOG // 处理完成</summary>
+<div>变更记录</div>
+</details>
+
+\`\`\`html
+<!DOCTYPE html>
+<html><body><aside>状态总览</aside></body></html>
+\`\`\``;
+    const message: WorkspaceMessage = {
+      id: "message-depth-limited-rich-content",
+      conversationId: "conversation-test",
+      role: "assistant",
+      content: "raw content",
+      displayContent,
+      appliedRegexScriptIds: [
+        "card-options",
+        "preset-variables",
+        "card-status",
+      ],
+      createdLabel: "10:32",
+      revision: 1,
+    };
+    const noop = vi.fn();
+    const html = renderToStaticMarkup(
+      <MessageCard
+        message={message}
+        isLast
+        renderRichContent={false}
+        collapseCodeBlocks="frontend"
+        onCopy={noop}
+        onUpdate={noop}
+        onDelete={noop}
+        onRegenerate={noop}
+        onContinue={noop}
+        onSelectSwipe={noop}
+      />,
+    );
+
+    expect(html.match(/显示前端代码块/gu)).toHaveLength(2);
+    expect(html.match(/<iframe/gu)).toHaveLength(1);
+    expect(html).toContain("变量更新LOG // 处理完成");
+    expect(html).not.toContain("&lt;!DOCTYPE html&gt;");
+    expect(html).not.toContain('<code class="language-html lang-html">');
   });
 
   it("unwraps a full fenced HTML greeting only in its display copy", () => {

@@ -438,6 +438,13 @@ describe("native Tavern Helper compatibility routes", () => {
       conversationId: conversation.id,
       content: "Question",
     });
+    server.context.store.persistAssistantGeneration({
+      conversationId: conversation.id,
+      content: "Answer",
+      reasoningText: "Private provider reasoning",
+      status: "complete",
+      finishReason: "stop",
+    });
     const worldbook = server.context.store.createWorldbook({
       id: "worldbook-prompt-template",
       name: "Template directives",
@@ -481,5 +488,24 @@ describe("native Tavern Helper compatibility routes", () => {
         },
       ],
     });
+    const messages = (
+      response.json() as {
+        data: { messages: Array<Record<string, unknown>> };
+      }
+    ).data.messages;
+    expect(messages.at(-1)).toEqual({
+      role: "assistant",
+      content: "Answer",
+    });
+
+    const generation = await server.app.inject({
+      method: "POST",
+      url: `/api/conversations/${conversation.id}/generate`,
+      payload: {
+        connectionId: "fake",
+        messagesOverride: messages,
+      },
+    });
+    expect(generation.statusCode).toBe(200);
   });
 });

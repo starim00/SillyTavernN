@@ -795,7 +795,7 @@ export async function registerCompatibilityRoutes(
       extensionBoolean(context, `preset:${input.presetId}`);
     return envelope({
       enabled: cardTrusted || presetTrusted,
-      messages: prompt.messages,
+      messages: prompt.messages.map(({ role, content }) => ({ role, content })),
       directives: promptTemplateDirectives(
         context,
         conversation.id,

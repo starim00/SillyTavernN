@@ -10,6 +10,7 @@ import {
   callLegacyRpc,
   confirmAgentProposal,
   createConversationSpace,
+  exportConversationArchive,
   generateConversation,
   importPortableFile,
   installLegacyPlugin,
@@ -1180,6 +1181,7 @@ describe("workspace API client", () => {
         expect(init?.body).toBeInstanceOf(FormData);
         if (url === "/api/conversations/import") {
           expect((init?.body as FormData).get("cardId")).toBe("card-current");
+          expect((init?.body as FormData).get("presetId")).toBeNull();
         }
       }
       return Promise.resolve(jsonResponse({ data: { receivedAt: url } }, 201));
@@ -1212,6 +1214,33 @@ describe("workspace API client", () => {
       status: 400,
     });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("loads a complete conversation archive for download", async () => {
+    const archive = {
+      spec: "sillytavern_n_conversation" as const,
+      version: 1 as const,
+      title: "Portable chat",
+      exportedAt: "2026-08-20T00:00:00.000Z",
+      messages: [],
+      variables: { chat: { scene: 3 } },
+    };
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      void url;
+      void init;
+      return Promise.resolve(jsonResponse({ data: archive }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      exportConversationArchive("conversation / 1"),
+    ).resolves.toEqual(archive);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "/api/conversations/conversation%20%2F%201/export",
+    );
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      Accept: "application/json",
+    });
   });
 
   it("updates a scoped regex grant explicitly", async () => {

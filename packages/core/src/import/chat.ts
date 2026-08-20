@@ -10,6 +10,7 @@ import { isJsonObject, parseSafeJson, pickUnknownFields } from "./safe-json.js";
 import {
   readArray,
   readBoolean,
+  readNumber,
   readObject,
   readString,
 } from "./value-readers.js";
@@ -25,8 +26,27 @@ const knownMetadataFields = [
   "create_date",
   "chat_metadata",
   "messages",
+  "spec",
+  "version",
+  "exportedAt",
+  "title",
+  "card",
+  "preset",
+  "personaId",
+  "variables",
 ] as const;
 const knownMessageFields = [
+  "id",
+  "role",
+  "content",
+  "author",
+  "participantId",
+  "parentMessageId",
+  "activeSwipeId",
+  "createdAt",
+  "updatedAt",
+  "metadata",
+  "variables",
   "name",
   "is_user",
   "is_system",
@@ -34,11 +54,63 @@ const knownMessageFields = [
   "send_date",
   "swipes",
   "swipe_id",
+  "swipe_info",
+  "variables_initialized",
   "extra",
   "force_avatar",
   "gen_started",
   "gen_finished",
 ] as const;
+
+function objectRecord(
+  value: JsonObject | undefined,
+): Record<string, JsonObject> {
+  if (!value) return {};
+  return Object.fromEntries(
+    Object.entries(value).filter((entry): entry is [string, JsonObject] =>
+      isJsonObject(entry[1]),
+    ),
+  );
+}
+
+function portableProviderContext(
+  raw: JsonObject,
+): { connectionId: string; items: JsonObject[] } | undefined {
+  const providerContext = readObject(raw, "providerContext");
+  if (!providerContext) return undefined;
+  const connectionId = readString(providerContext, "connectionId")?.trim();
+  const items = (readArray(providerContext, "items") ?? []).filter(
+    isJsonObject,
+  );
+  return connectionId && items.length > 0 ? { connectionId, items } : undefined;
+}
+
+function legacyMessageVariables(
+  raw: JsonObject,
+  activeSwipeIndex: number,
+): JsonObject | undefined {
+  const snapshots = readArray(raw, "variables");
+  const selected = snapshots?.[activeSwipeIndex];
+  if (isJsonObject(selected)) return selected;
+  return readObject(raw, "variables");
+}
+
+function legacySwipeReasoning(
+  raw: JsonObject,
+  swipeIndex: number,
+  activeSwipeIndex: number,
+): string | undefined {
+  const swipeInfo = readArray(raw, "swipe_info")?.[swipeIndex];
+  const swipeExtra = isJsonObject(swipeInfo)
+    ? readObject(swipeInfo, "extra")
+    : undefined;
+  const messageExtra =
+    swipeIndex === activeSwipeIndex ? readObject(raw, "extra") : undefined;
+  return (
+    (swipeExtra ? readString(swipeExtra, "reasoning") : undefined) ??
+    (messageExtra ? readString(messageExtra, "reasoning") : undefined)
+  );
+}
 
 function importedRole(raw: JsonObject): Message["role"] {
   const nativeRole = readString(raw, "role");
@@ -141,6 +213,64 @@ export function importConversation(
   const now = context.now();
   const conversationId = context.id("conversation");
   const branchId = context.id("branch");
+  const portable =
+    readString(records.metadata, "spec") === "sillytavern_n_conversation" &&
+    readNumber(records.metadata, "version") === 1;
+  const portableVariables = portable
+    ? readObject(records.metadata, "variables")
+    : undefined;
+  const legacyChatMetadata = readObject(records.metadata, "chat_metadata");
+  const legacyChatVariables = legacyChatMetadata
+    ? readObject(legacyChatMetadata, "variables")
+    : undefined;
+  const portableCard = portable
+    ? readObject(records.metadata, "card")
+    : undefined;
+  const portablePreset = portable
+    ? readObject(records.metadata, "preset")
+    : undefined;
+  const portableScripts = portableVariables
+    ? readObject(portableVariables, "scripts")
+    : undefined;
+  const portableCharacterVariables = portableVariables
+    ? readObject(portableVariables, "character")
+    : undefined;
+  const portableChatVariables = portableVariables
+    ? readObject(portableVariables, "chat")
+    : undefined;
+  const portablePresetVariables = portableVariables
+    ? readObject(portableVariables, "preset")
+    : undefined;
+  const portablePersonaId = portable
+    ? readString(records.metadata, "personaId")
+    : undefined;
+  const originalCardId = portableCard
+    ? readString(portableCard, "id")
+    : undefined;
+  const originalPresetId = portablePreset
+    ? readString(portablePreset, "id")
+    : undefined;
+  const portableMessageVariables = objectRecord(
+    portableVariables ? readObject(portableVariables, "messages") : undefined,
+  );
+  const portableSwipeVariables = objectRecord(
+    portableVariables ? readObject(portableVariables, "swipes") : undefined,
+  );
+  const sourceMessageKeys = records.messages.map(
+    (raw, sequence) => readString(raw, "id") ?? `#${String(sequence)}`,
+  );
+  const generatedMessageIds = records.messages.map(() => context.id("message"));
+  const messageIdBySourceKey = new Map(
+    sourceMessageKeys.map((sourceId, index) => [
+      sourceId,
+      generatedMessageIds[index]!,
+    ]),
+  );
+  const importedMessageVariables: Record<string, JsonObject> = {};
+  const importedSwipeVariables: Record<string, JsonObject> = {};
+  const importedSwipeState: NonNullable<
+    ConversationImportResult["value"]["portableState"]
+  >["swipes"] = {};
   const userName = readString(records.metadata, "user_name")?.trim() || "User";
   const observedAssistantNames = Array.from(
     new Set(
@@ -172,6 +302,10 @@ export function importConversation(
     const isUser = role === "user";
     const isAssistant = role === "assistant";
     const rawName = importedDisplayName(raw);
+    const rawAuthor = readObject(raw, "author");
+    const participantId =
+      (rawAuthor ? readString(rawAuthor, "participantId") : undefined) ??
+      readString(raw, "participantId");
     const displayName =
       rawName ??
       (isUser ? userName : isAssistant ? metadataCharacterName : undefined);
@@ -192,13 +326,6 @@ export function importConversation(
         isJsonObject(value) ? readString(value, "id") : undefined,
       ) ?? [];
     const nativeActiveSwipeId = readString(raw, "activeSwipeId");
-    const swipes = contents.map((content) => ({
-      id: context.id("swipe"),
-      content,
-      createdAt:
-        readString(raw, "createdAt") ?? readString(raw, "send_date") ?? now,
-      metadata: {},
-    }));
     const nativeActiveIndex =
       nativeActiveSwipeId === undefined
         ? -1
@@ -211,21 +338,87 @@ export function importConversation(
           : 0;
     const activeIndex = Math.max(
       0,
-      Math.min(swipes.length - 1, activeIndexRaw),
+      Math.min(contents.length - 1, activeIndexRaw),
     );
+    const swipes = contents.map((content, swipeIndex) => {
+      const sourceSwipe = sourceSwipes?.[swipeIndex];
+      const sourceSwipeObject = isJsonObject(sourceSwipe)
+        ? sourceSwipe
+        : undefined;
+      const swipeId = context.id("swipe");
+      const sourceSwipeId = sourceSwipeObject
+        ? readString(sourceSwipeObject, "id")
+        : undefined;
+      const legacySnapshot = readArray(raw, "variables")?.[swipeIndex];
+      const swipeVariables = portable
+        ? sourceSwipeId
+          ? portableSwipeVariables[sourceSwipeId]
+          : undefined
+        : isJsonObject(legacySnapshot)
+          ? legacySnapshot
+          : undefined;
+      if (swipeVariables) importedSwipeVariables[swipeId] = swipeVariables;
+      if (portable && sourceSwipeObject) {
+        const reasoningText = readString(sourceSwipeObject, "reasoningText");
+        const providerContext = portableProviderContext(sourceSwipeObject);
+        if (reasoningText !== undefined || providerContext !== undefined) {
+          importedSwipeState[swipeId] = {
+            ...(reasoningText === undefined ? {} : { reasoningText }),
+            ...(providerContext === undefined ? {} : { providerContext }),
+          };
+        }
+      } else if (!portable) {
+        const reasoningText = legacySwipeReasoning(
+          raw,
+          swipeIndex,
+          activeIndex,
+        );
+        if (reasoningText !== undefined) {
+          importedSwipeState[swipeId] = { reasoningText };
+        }
+      }
+      return {
+        id: swipeId,
+        content,
+        createdAt:
+          (sourceSwipeObject
+            ? readString(sourceSwipeObject, "createdAt")
+            : undefined) ??
+          readString(raw, "createdAt") ??
+          readString(raw, "send_date") ??
+          now,
+        metadata: {},
+      };
+    });
     const activeSwipe = swipes[activeIndex];
     if (!activeSwipe) {
       throw new Error("Imported message did not produce a swipe");
     }
 
+    const messageId = generatedMessageIds[sequence]!;
+    const sourceMessageKey = sourceMessageKeys[sequence]!;
+    {
+      const variables = portable
+        ? (readObject(raw, "variables") ??
+          portableMessageVariables[sourceMessageKey])
+        : legacyMessageVariables(raw, activeIndex);
+      if (variables) importedMessageVariables[messageId] = variables;
+    }
+    const sourceParentMessageId = readString(raw, "parentMessageId");
+    const parentMessageId = sourceParentMessageId
+      ? messageIdBySourceKey.get(sourceParentMessageId)
+      : undefined;
+
     return MessageSchema.parse({
-      id: context.id("message"),
+      id: messageId,
       conversationId,
       branchId,
+      ...(parentMessageId === undefined ? {} : { parentMessageId }),
       sequence,
       role,
       author: {
         kind: role,
+        ...(isAssistant && participantId ? { participantId } : {}),
         ...(displayName === undefined ? {} : { displayName }),
       },
       swipes,
@@ -271,6 +464,7 @@ export function importConversation(
     participants: [],
     worldbookIds: [],
     activeBranchId: branchId,
+    ...(portablePersonaId ? { personaId: portablePersonaId } : {}),
     metadata: readObject(records.metadata, "chat_metadata") ?? {},
     compatibility: {
       sourceFormat: records.format,
@@ -285,7 +479,55 @@ export function importConversation(
   });
 
   return {
-    value: { conversation, messages, participants: [] },
+    value: {
+      conversation,
+      messages,
+      participants: [],
+      ...(portable ||
+      legacyChatVariables !== undefined ||
+      Object.keys(importedMessageVariables).length > 0 ||
+      Object.keys(importedSwipeState).length > 0
+        ? {
+            portableState: {
+              spec: portable
+                ? ("sillytavern_n_conversation" as const)
+                : ("sillytavern_jsonl_chat" as const),
+              version: 1 as const,
+              ...(originalCardId ? { originalCardId } : {}),
+              ...(originalPresetId ? { originalPresetId } : {}),
+              ...(portablePersonaId ? { personaId: portablePersonaId } : {}),
+              variables: {
+                ...(portableCharacterVariables
+                  ? { character: portableCharacterVariables }
+                  : {}),
+                ...(portableChatVariables
+                  ? { chat: portableChatVariables }
+                  : legacyChatVariables
+                    ? { chat: legacyChatVariables }
+                    : {}),
+                ...(portablePresetVariables
+                  ? { preset: portablePresetVariables }
+                  : {}),
+                messages: importedMessageVariables,
+                swipes: importedSwipeVariables,
+                scripts: {
+                  card: objectRecord(
+                    portableScripts
+                      ? readObject(portableScripts, "card")
+                      : undefined,
+                  ),
+                  preset: objectRecord(
+                    portableScripts
+                      ? readObject(portableScripts, "preset")
+                      : undefined,
+                  ),
+                },
+              },
+              swipes: importedSwipeState,
+            },
+          }
+        : {}),
+    },
     diagnostics: [],
     sourceFormat: records.format,
   };

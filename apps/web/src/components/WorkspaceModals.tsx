@@ -135,7 +135,7 @@ function ImportModal({
   return (
     <ModalFrame
       title="导入便携内容"
-      description="角色卡、世界书、提示词预设与聊天记录都会先经过兼容适配器；聊天记录必须导入到当前选择的角色卡。"
+      description="角色卡、世界书、提示词预设与聊天记录都会先经过兼容适配器；聊天归档会导入到当前选择的角色卡。"
       icon={<FileArrowUp size={22} />}
       onClose={onClose}
     >
@@ -153,7 +153,8 @@ function ImportModal({
         <div className="modal-note">
           <Lock size={17} />
           <span>
-            导入的世界书条目始终禁止 AI 编辑。可执行模板与脚本不会被自动信任。
+            原生聊天归档会恢复消息、Swipe、推理上下文以及聊天和消息变量；角色卡、预设、脚本、全局和
+            Provider 密钥不会随聊天归档写入。可执行模板与脚本不会被自动信任。
           </span>
         </div>
         {!online ? (

@@ -1,6 +1,8 @@
 import {
   Books,
   ChatCircleDots,
+  FileArrowDown,
+  FileArrowUp,
   List,
   PaperPlaneRight,
   Plus,
@@ -56,6 +58,8 @@ type ConversationComposerProps = {
   onSelectConversation: (conversationId: string) => void;
   onDeleteConversation: (conversation: ConversationSpace) => void;
   onCreateConversation: () => void;
+  onImportConversation: () => void;
+  onExportConversation: () => void;
   onOpenCards: () => void;
   onOpenHelperTool: (
     tool: "variables" | "prompt" | "logs" | "audio" | "workbench",
@@ -80,6 +84,8 @@ export function ConversationComposer({
   onSelectConversation,
   onDeleteConversation,
   onCreateConversation,
+  onImportConversation,
+  onExportConversation,
   onOpenCards,
   onOpenHelperTool,
   onToggleScriptSource,
@@ -288,6 +294,26 @@ export function ConversationComposer({
                   })}
                 </div>
                 <div className="composer-history__footer">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHistoryOpen(false);
+                      onImportConversation();
+                    }}
+                  >
+                    <FileArrowUp size={15} />
+                    导入聊天记录
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHistoryOpen(false);
+                      onExportConversation();
+                    }}
+                  >
+                    <FileArrowDown size={15} />
+                    导出当前对话
+                  </button>
                   <button
                     type="button"
                     onClick={() => {

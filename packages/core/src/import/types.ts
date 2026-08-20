@@ -2,6 +2,7 @@ import type {
   Card,
   Conversation,
   Diagnostic,
+  JsonObject,
   Message,
   Participant,
   PromptPreset,
@@ -47,6 +48,37 @@ export interface ConversationImportValue {
   conversation: Conversation;
   messages: Message[];
   participants: Participant[];
+  portableState?: ConversationPortableState;
+}
+
+export interface ConversationPortableVariables {
+  character?: JsonObject;
+  chat?: JsonObject;
+  preset?: JsonObject;
+  messages: Record<string, JsonObject>;
+  swipes: Record<string, JsonObject>;
+  scripts: {
+    card: Record<string, JsonObject>;
+    preset: Record<string, JsonObject>;
+  };
+}
+
+export interface ConversationPortableSwipeState {
+  reasoningText?: string;
+  providerContext?: {
+    connectionId: string;
+    items: JsonObject[];
+  };
+}
+
+export interface ConversationPortableState {
+  spec: "sillytavern_n_conversation" | "sillytavern_jsonl_chat";
+  version: 1;
+  originalCardId?: string;
+  originalPresetId?: string;
+  personaId?: string;
+  variables: ConversationPortableVariables;
+  swipes: Record<string, ConversationPortableSwipeState>;
 }
 
 export type ConversationImportResult = ImportResult<ConversationImportValue>;

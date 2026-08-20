@@ -195,6 +195,8 @@ describe("workspace components", () => {
         onSelectConversation={noop}
         onDeleteConversation={noop}
         onCreateConversation={noop}
+        onImportConversation={noop}
+        onExportConversation={noop}
         onOpenCards={noop}
         onOpenHelperTool={noop}
         onSend={noop}
@@ -326,6 +328,22 @@ describe("workspace components", () => {
       );
       expect(block).not.toMatch(/(?:^|;)\s*max-height\s*:/);
     }
+  });
+
+  it("renders trusted display frames as one seamless message surface", () => {
+    const frameBlock = cssBlocks(".message-item__display-frame")[0] ?? "";
+    const richContentBlock = cssBlocks(".message-item__rich-content")[0] ?? "";
+
+    expect(frameBlock).toMatch(/height\s*:\s*20px/);
+    expect(frameBlock).toMatch(/margin\s*:\s*0/);
+    expect(frameBlock).toMatch(/border\s*:\s*0/);
+    expect(frameBlock).toMatch(/border-radius\s*:\s*0/);
+    expect(frameBlock).toMatch(/background\s*:\s*transparent/);
+    expect(richContentBlock).toMatch(/gap\s*:\s*0/);
+
+    const document = trustedDisplayDocument("<main>状态栏</main>");
+    expect(document).toContain("background: transparent");
+    expect(document).not.toContain("background:#ffffff!important");
   });
 
   it("exposes copy, edit, delete, regenerate, continue, and Swipe controls", () => {

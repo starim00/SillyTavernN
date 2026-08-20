@@ -153,4 +153,147 @@ describe("conversation import", () => {
       },
     ]);
   });
+
+  it("maps an STN conversation archive and its variable state to fresh ids", () => {
+    const result = importConversation(
+      {
+        spec: "sillytavern_n_conversation",
+        version: 1,
+        title: "Portable state",
+        personaId: "persona-portable",
+        card: { id: "card-source", name: "Source card" },
+        preset: { id: "preset-source", name: "Source preset" },
+        messages: [
+          {
+            id: "source-opening",
+            role: "assistant",
+            content: "Opening",
+            swipes: [{ id: "source-opening-swipe", content: "Opening" }],
+            activeSwipeId: "source-opening-swipe",
+            createdAt: "2026-07-29T10:00:00.000Z",
+          },
+          {
+            id: "source-reply",
+            parentMessageId: "source-opening",
+            role: "assistant",
+            content: "Reply",
+            swipes: [
+              {
+                id: "source-reply-swipe",
+                content: "Reply",
+                reasoningText: "Reasoning",
+                providerContext: {
+                  connectionId: "provider-source",
+                  items: [{ type: "reasoning", id: "item-source" }],
+                },
+              },
+            ],
+            activeSwipeId: "source-reply-swipe",
+            createdAt: "2026-07-29T10:00:01.000Z",
+          },
+        ],
+        variables: {
+          character: { route: "good" },
+          chat: { scene: 3 },
+          preset: { style: "novel" },
+          messages: {
+            "source-reply": { stat_data: { score: 7 } },
+          },
+          scripts: {
+            card: { mvu: { initialized: true } },
+            preset: { formatter: { enabled: true } },
+          },
+        },
+      },
+      importOptions(),
+    );
+
+    const [opening, reply] = result.value.messages;
+    const replySwipe = reply?.swipes[0];
+    expect(reply?.parentMessageId).toBe(opening?.id);
+    expect(result.value.conversation.personaId).toBe("persona-portable");
+    expect(result.value.portableState).toMatchObject({
+      originalCardId: "card-source",
+      originalPresetId: "preset-source",
+      personaId: "persona-portable",
+      variables: {
+        character: { route: "good" },
+        chat: { scene: 3 },
+        preset: { style: "novel" },
+        scripts: {
+          card: { mvu: { initialized: true } },
+          preset: { formatter: { enabled: true } },
+        },
+      },
+    });
+    expect(
+      result.value.portableState?.variables.messages[reply?.id ?? ""],
+    ).toEqual({ stat_data: { score: 7 } });
+    expect(result.value.portableState?.swipes[replySwipe?.id ?? ""]).toEqual({
+      reasoningText: "Reasoning",
+      providerContext: {
+        connectionId: "provider-source",
+        items: [{ type: "reasoning", id: "item-source" }],
+      },
+    });
+  });
+
+  it("restores legacy JSONL chat variables and the active Swipe snapshot", () => {
+    const source = [
+      JSON.stringify({
+        user_name: "Lin",
+        character_name: "Aria",
+        chat_metadata: {
+          variables: {
+            localFlag: "ready",
+            stat_data: { scene: 2 },
+          },
+        },
+      }),
+      JSON.stringify({
+        name: "Aria",
+        is_user: false,
+        mes: "Second answer",
+        swipes: ["First answer", "Second answer"],
+        swipe_id: 1,
+        swipe_info: [
+          { extra: { reasoning: "First reasoning" } },
+          { extra: { reasoning: "Second reasoning" } },
+        ],
+        variables: [{ stat_data: { score: 1 } }, { stat_data: { score: 2 } }],
+        variables_initialized: [true, true],
+      }),
+    ].join("\n");
+
+    const result = importConversation(source, importOptions());
+    const message = result.value.messages[0]!;
+
+    expect(result.value.portableState).toMatchObject({
+      spec: "sillytavern_jsonl_chat",
+      variables: {
+        chat: {
+          localFlag: "ready",
+          stat_data: { scene: 2 },
+        },
+      },
+    });
+    expect(result.value.portableState?.variables.messages[message.id]).toEqual({
+      stat_data: { score: 2 },
+    });
+    expect(
+      message.swipes.find((swipe) => swipe.id === message.activeSwipeId)
+        ?.content,
+    ).toBe("Second answer");
+    expect(
+      message.swipes.map(
+        (swipe) => result.value.portableState?.swipes[swipe.id]?.reasoningText,
+      ),
+    ).toEqual(["First reasoning", "Second reasoning"]);
+    expect(
+      message.swipes.map(
+        (swipe) =>
+          result.value.portableState?.variables.swipes[swipe.id]?.stat_data,
+      ),
+    ).toEqual([{ score: 1 }, { score: 2 }]);
+  });
 });

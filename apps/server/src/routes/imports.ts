@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 
 import { envelope, type ServerContext } from "../context.js";
+import { exportConversationArchive } from "../conversation-archive.js";
 import { receiveImportUpload, type StagedUpload } from "../upload.js";
 
 const entityId = z.string().trim().min(1).max(256);
@@ -22,6 +23,18 @@ export async function registerImportRoutes(
   app: FastifyInstance,
   context: ServerContext,
 ): Promise<void> {
+  app.get<{
+    Params: { id: string };
+  }>("/api/conversations/:id/export", (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    return envelope(
+      exportConversationArchive(
+        context.store,
+        entityId.parse(request.params.id),
+      ),
+    );
+  });
+
   app.post("/api/worldbooks/import", async (request, reply) => {
     const file = await receiveImportUpload(request);
     try {

@@ -79,16 +79,20 @@ function tavernHelperWithContent(content: string) {
 function multipartConversationImport(input: {
   boundary: string;
   cardId: string;
+  presetId?: string;
   filename: string;
   bytes: Buffer;
 }): Buffer {
+  const presetPart = input.presetId
+    ? `--${input.boundary}\r\nContent-Disposition: form-data; name="presetId"\r\n\r\n${input.presetId}\r\n`
+    : "";
   return Buffer.concat([
     Buffer.from(
       `--${input.boundary}\r\nContent-Disposition: form-data; name="file"; filename="${input.filename}"\r\nContent-Type: application/octet-stream\r\n\r\n`,
     ),
     input.bytes,
     Buffer.from(
-      `\r\n--${input.boundary}\r\nContent-Disposition: form-data; name="cardId"\r\n\r\n${input.cardId}\r\n--${input.boundary}--\r\n`,
+      `\r\n--${input.boundary}\r\nContent-Disposition: form-data; name="cardId"\r\n\r\n${input.cardId}\r\n${presetPart}--${input.boundary}--\r\n`,
     ),
   ]);
 }
@@ -612,6 +616,301 @@ describe("portable import routes", () => {
         content: "Guide: I can show the way.",
       },
     ]);
+  });
+
+  it("restores legacy JSONL chat variables and active Swipe variables", async () => {
+    const { app, context } = await application();
+    const card = context.store.createCard({
+      id: "card-legacy-variable-history",
+      kind: "character",
+      name: "Legacy variable history card",
+    }).card;
+    const source = [
+      JSON.stringify({
+        user_name: "Lin",
+        character_name: "Guide",
+        chat_metadata: {
+          variables: { scene: 5, stat_data: { stage: "arrival" } },
+        },
+      }),
+      JSON.stringify({
+        name: "Guide",
+        is_user: false,
+        mes: "Selected path",
+        swipes: ["Other path", "Selected path"],
+        swipe_id: 1,
+        variables: [{ stat_data: { score: 1 } }, { stat_data: { score: 8 } }],
+        variables_initialized: [true, true],
+      }),
+    ].join("\n");
+    const boundary = "stn-legacy-variable-conversation-import";
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/conversations/import",
+      headers: {
+        "content-type": `multipart/form-data; boundary=${boundary}`,
+      },
+      payload: multipartConversationImport({
+        boundary,
+        cardId: card.id,
+        filename: "legacy-variables.jsonl",
+        bytes: Buffer.from(source),
+      }),
+    });
+
+    expect(response.statusCode).toBe(201);
+    const payload = response.json() as {
+      data: {
+        conversation: { id: string };
+        restoredVariables: { chat: boolean; messages: number; swipes: number };
+      };
+    };
+    const importedMessage = context.store.listMessages(
+      payload.data.conversation.id,
+    )[0]!;
+    expect(payload.data.restoredVariables).toMatchObject({
+      chat: true,
+      messages: 1,
+      swipes: 2,
+    });
+    expect(
+      context.store.getExtensionSetting(
+        "stn.tavern-helper",
+        `variables:conversation:${payload.data.conversation.id}`,
+      )?.value,
+    ).toEqual({ scene: 5, stat_data: { stage: "arrival" } });
+    expect(
+      context.store.getExtensionSetting(
+        "stn.tavern-helper",
+        `variables:message:${importedMessage.id}`,
+      )?.value,
+    ).toEqual({ stat_data: { score: 8 } });
+    expect(
+      importedMessage.swipes.map(
+        (swipe) =>
+          context.store.getExtensionSetting(
+            "stn.tavern-helper",
+            `variables:swipe:${swipe.id}`,
+          ).value,
+      ),
+    ).toEqual([{ stat_data: { score: 1 } }, { stat_data: { score: 8 } }]);
+    expect(importedMessage.content).toBe("Selected path");
+  });
+
+  it("round-trips an STN conversation with variables and Swipe runtime state", async () => {
+    const { app, context } = await application();
+    const card = context.store.createCard({
+      id: "card-portable-conversation",
+      kind: "character",
+      name: "Portable conversation card",
+      participants: [
+        {
+          id: "participant-portable-conversation",
+          name: "Portable assistant",
+        },
+      ],
+    }).card;
+    const now = "2026-08-20T00:00:00.000Z";
+    const preset = context.store.createPreset({
+      id: "preset-portable-conversation",
+      name: "Portable conversation preset",
+      kind: "native",
+      payload: {
+        id: "preset-portable-conversation",
+        name: "Portable conversation preset",
+        mode: "native",
+        prompts: [],
+        generation: { stop: [], samplerOrder: [], additional: {} },
+        extensions: {},
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+    const conversation = context.store.createConversation({
+      id: "conversation-portable-source",
+      title: "Portable conversation",
+      cardId: card.id,
+    });
+    const user = context.store.addUserMessage({
+      id: "message-portable-user",
+      conversationId: conversation.id,
+      content: "Continue the scene.",
+    });
+    context.store.addSwipe({
+      id: "swipe-portable-user",
+      messageId: user.id,
+      content: user.content,
+      selected: true,
+    });
+    const assistant = context.store.addAssistantMessage({
+      id: "message-portable-assistant",
+      conversationId: conversation.id,
+      parentMessageId: user.id,
+      participantId: "participant-portable-conversation",
+      content: "The scene continues.",
+    });
+    context.store.addSwipe({
+      id: "swipe-portable-assistant-a",
+      messageId: assistant.id,
+      content: "The first path.",
+    });
+    context.store.addSwipe({
+      id: "swipe-portable-assistant-b",
+      messageId: assistant.id,
+      content: "The scene continues.",
+      selected: true,
+      reasoningText: "Portable reasoning",
+      providerContext: {
+        connectionId: "provider-portable",
+        items: [{ type: "reasoning", id: "provider-item-portable" }],
+      },
+    });
+    const states = [
+      [`variables:card:${card.id}`, { route: "light" }],
+      [`variables:conversation:${conversation.id}`, { scene: 4 }],
+      [`variables:message:${assistant.id}`, { stat_data: { score: 9 } }],
+      [
+        "variables:swipe:swipe-portable-assistant-a",
+        { stat_data: { score: 3 } },
+      ],
+      [
+        "variables:swipe:swipe-portable-assistant-b",
+        { stat_data: { score: 9 } },
+      ],
+      [`variables:preset:${preset.id}`, { prose: "clean" }],
+      [`variables:script:card:${card.id}:mvu`, { initialized: true }],
+      [`variables:script:preset:${preset.id}:formatter`, { enabled: true }],
+    ] as const;
+    states.forEach(([key, value]) =>
+      context.store.setExtensionSetting("stn.tavern-helper", key, value),
+    );
+
+    const exported = await app.inject({
+      method: "GET",
+      url: `/api/conversations/${conversation.id}/export`,
+    });
+    expect(exported.statusCode).toBe(200);
+    expect(exported.headers["cache-control"]).toBe("no-store");
+    const archive = (exported.json() as { data: Record<string, unknown> }).data;
+    expect(archive).toMatchObject({
+      spec: "sillytavern_n_conversation",
+      version: 1,
+      title: "Portable conversation",
+    });
+    expect(archive).not.toHaveProperty("preset");
+    expect(archive.variables).toEqual({
+      chat: { scene: 4 },
+      messages: {
+        "message-portable-assistant": { stat_data: { score: 9 } },
+      },
+      swipes: {
+        "swipe-portable-assistant-a": { stat_data: { score: 3 } },
+        "swipe-portable-assistant-b": { stat_data: { score: 9 } },
+      },
+    });
+
+    context.store.setExtensionSetting(
+      "stn.tavern-helper",
+      `variables:card:${card.id}`,
+      { route: "changed" },
+    );
+    context.store.setExtensionSetting(
+      "stn.tavern-helper",
+      `variables:preset:${preset.id}`,
+      { prose: "changed" },
+    );
+    const boundary = "stn-conversation-round-trip";
+    const imported = await app.inject({
+      method: "POST",
+      url: "/api/conversations/import",
+      headers: {
+        "content-type": `multipart/form-data; boundary=${boundary}`,
+      },
+      payload: multipartConversationImport({
+        boundary,
+        cardId: card.id,
+        filename: "portable-conversation.json",
+        bytes: Buffer.from(JSON.stringify(archive)),
+      }),
+    });
+    expect(imported.statusCode).toBe(201);
+    const importedBody = imported.json() as {
+      data: {
+        conversation: { id: string };
+        restoredVariables: {
+          chat: boolean;
+          messages: number;
+          swipes: number;
+        };
+      };
+    };
+    expect(importedBody.data.restoredVariables).toEqual({
+      chat: true,
+      messages: 1,
+      swipes: 2,
+    });
+    const importedConversationId = importedBody.data.conversation.id;
+    const importedMessages = context.store.listMessages(importedConversationId);
+    expect(importedMessages).toHaveLength(2);
+    expect(importedMessages[1]).toMatchObject({
+      parentMessageId: importedMessages[0]?.id,
+      participantId: "participant-portable-conversation",
+      content: "The scene continues.",
+      swipes: [
+        expect.objectContaining({
+          content: "The first path.",
+          selected: false,
+        }),
+        expect.objectContaining({
+          content: "The scene continues.",
+          reasoningText: "Portable reasoning",
+          selected: true,
+        }),
+      ],
+    });
+    const importedAssistant = importedMessages[1]!;
+    expect(
+      context.store.getExtensionSetting(
+        "stn.tavern-helper",
+        `variables:message:${importedAssistant.id}`,
+      ).value,
+    ).toEqual({ stat_data: { score: 9 } });
+    expect(
+      importedAssistant.swipes.map(
+        (swipe) =>
+          context.store.getExtensionSetting(
+            "stn.tavern-helper",
+            `variables:swipe:${swipe.id}`,
+          ).value,
+      ),
+    ).toEqual([{ stat_data: { score: 3 } }, { stat_data: { score: 9 } }]);
+    expect(
+      context.store.getExtensionSetting(
+        "stn.tavern-helper",
+        `variables:conversation:${importedConversationId}`,
+      ).value,
+    ).toEqual({ scene: 4 });
+    expect(
+      context.store.getExtensionSetting(
+        "stn.tavern-helper",
+        `variables:card:${card.id}`,
+      ).value,
+    ).toEqual({ route: "changed" });
+    expect(
+      context.store.getExtensionSetting(
+        "stn.tavern-helper",
+        `variables:preset:${preset.id}`,
+      ).value,
+    ).toEqual({ prose: "changed" });
+    const importedSelectedSwipe = importedAssistant.swipes.find(
+      (swipe) => swipe.selected,
+    )!;
+    expect(
+      context.store.getProviderSwipeContext(importedSelectedSwipe.id),
+    ).toMatchObject({
+      connectionId: "provider-portable",
+      items: [{ type: "reasoning", id: "provider-item-portable" }],
+    });
   });
 });
 

@@ -363,6 +363,15 @@ export class ImportService {
     cardId: string,
   ) {
     return this.store.database.transaction(() => {
+      const portableState = imported.value.portableState;
+      let personaId: string | undefined;
+      if (portableState?.personaId) {
+        try {
+          personaId = this.store.getPersona(portableState.personaId).id;
+        } catch {
+          personaId = undefined;
+        }
+      }
       const cardParticipantIds = new Set(
         this.store
           .listCardParticipants(cardId)
@@ -372,8 +381,10 @@ export class ImportService {
         id: imported.value.conversation.id,
         title: imported.value.conversation.title,
         cardId,
+        ...(personaId === undefined ? {} : { personaId }),
       });
       const messageIdMap = new Map<string, string>();
+      const swipeIds = new Set<string>();
       for (const message of imported.value.messages) {
         const active =
           message.swipes.find((swipe) => swipe.id === message.activeSwipeId) ??
@@ -407,18 +418,62 @@ export class ImportService {
                 });
         messageIdMap.set(message.id, persisted.id);
         for (const swipe of message.swipes) {
+          swipeIds.add(swipe.id);
+          const swipeState = portableState?.swipes[swipe.id];
           this.store.addSwipe({
             id: swipe.id,
             messageId: persisted.id,
             content: swipe.content,
             selected: swipe.id === message.activeSwipeId,
+            ...(swipeState?.reasoningText === undefined
+              ? {}
+              : { reasoningText: swipeState.reasoningText }),
+            ...(swipeState?.providerContext === undefined
+              ? {}
+              : { providerContext: swipeState.providerContext }),
           });
         }
+      }
+      const restoredVariables = {
+        chat: false,
+        messages: 0,
+        swipes: 0,
+      };
+      if (portableState?.variables.chat !== undefined) {
+        this.store.setExtensionSetting(
+          "stn.tavern-helper",
+          `variables:conversation:${conversation.id}`,
+          portableState.variables.chat,
+        );
+        restoredVariables.chat = true;
+      }
+      for (const [messageId, variables] of Object.entries(
+        portableState?.variables.messages ?? {},
+      )) {
+        if (!messageIdMap.has(messageId)) continue;
+        this.store.setExtensionSetting(
+          "stn.tavern-helper",
+          `variables:message:${messageId}`,
+          variables,
+        );
+        restoredVariables.messages += 1;
+      }
+      for (const [swipeId, variables] of Object.entries(
+        portableState?.variables.swipes ?? {},
+      )) {
+        if (!swipeIds.has(swipeId)) continue;
+        this.store.setExtensionSetting(
+          "stn.tavern-helper",
+          `variables:swipe:${swipeId}`,
+          variables,
+        );
+        restoredVariables.swipes += 1;
       }
       return {
         conversation,
         diagnostics: imported.diagnostics,
         sourceFormat: imported.sourceFormat,
+        restoredVariables,
       };
     });
   }

@@ -329,6 +329,22 @@ export type PortableImportResult = {
   result: unknown;
 };
 
+export type ConversationVariableRestoreSummary = {
+  chat: boolean;
+  messages: number;
+  swipes: number;
+};
+
+export type ConversationArchive = {
+  spec: "sillytavern_n_conversation";
+  version: 1;
+  title: string;
+  exportedAt: string;
+  messages: unknown[];
+  variables: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
 export type RegexGrantScope = "card" | "preset";
 
 export type LegacyActor = "legacy-plugin" | "embedded-script";
@@ -2467,7 +2483,9 @@ async function detectPortableImportKind(
 
 export async function importPortableFile(
   file: File,
-  options: { conversationCardId?: string } = {},
+  options: {
+    conversationCardId?: string;
+  } = {},
 ): Promise<PortableImportResult> {
   const kind = await detectPortableImportKind(file);
   if (kind === "preset") {
@@ -2507,6 +2525,16 @@ export async function importPortableFile(
     timeoutMs: 20_000,
   });
   return { kind, result: response.data };
+}
+
+export async function exportConversationArchive(
+  conversationId: string,
+): Promise<ConversationArchive> {
+  const response = await request<ApiEnvelope<ConversationArchive>>(
+    `/conversations/${encodeURIComponent(conversationId)}/export`,
+    { timeoutMs: 20_000 },
+  );
+  return response.data;
 }
 
 export async function updateRegexGrant(input: {

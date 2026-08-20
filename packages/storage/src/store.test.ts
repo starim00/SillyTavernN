@@ -389,6 +389,11 @@ describe("AppStore", () => {
       );
       store.setExtensionSetting(
         "stn.tavern-helper",
+        "variables:swipe:swipe-delete",
+        { swipeValue: 1 },
+      );
+      store.setExtensionSetting(
+        "stn.tavern-helper",
         `variables:script:card:${card.card.id}:fixture`,
         { scriptValue: 1 },
       );
@@ -578,9 +583,10 @@ describe("AppStore", () => {
         store.database.get<{ count: number }>(
           `SELECT COUNT(*) AS count
            FROM extension_settings
-           WHERE key IN (?, ?, ?)`,
+           WHERE key IN (?, ?, ?, ?)`,
           `variables:conversation:${conversation.id}`,
           `variables:message:${first.id}`,
+          "variables:swipe:swipe-delete",
           `variables:conversation:${otherConversation.id}`,
         )?.count,
       ).toBe(1);

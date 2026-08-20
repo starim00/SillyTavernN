@@ -118,6 +118,12 @@ export interface Swipe {
   updatedAt: string;
 }
 
+export interface ProviderSwipeContext {
+  swipeId: string;
+  connectionId: string;
+  items: JsonObject[];
+}
+
 export interface Worldbook {
   id: string;
   name: string;

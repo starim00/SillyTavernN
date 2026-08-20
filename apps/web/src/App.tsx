@@ -36,6 +36,7 @@ import {
   deleteRoleCard,
   deletePersona,
   deleteWorkspaceMessage,
+  exportConversationArchive,
   exportProviderConnection,
   generateConversation,
   generateWithTavernHelper,
@@ -71,6 +72,7 @@ import {
   updatePersona,
   saveTavernHelperState,
   type LegacyHostPluginStatus,
+  type ConversationVariableRestoreSummary,
   WorkspaceApiError,
   type PersonaInput,
 } from "./api/workspaceApi";
@@ -117,6 +119,16 @@ import type {
   WorldbookEntry,
   WorldbookEntryUpdate,
 } from "./domain/workspace";
+
+function conversationArchiveFilename(title: string): string {
+  const safeTitle = title
+    .trim()
+    .replace(/[\\/:*?"<>|]/gu, "-")
+    .replace(/\p{Cc}/gu, "-")
+    .replace(/\s+/gu, " ")
+    .slice(0, 80);
+  return `${safeTitle || "conversation"}.stn-chat.json`;
+}
 import {
   loadWorkspaceState,
   persistWorkspaceState,
@@ -1790,6 +1802,8 @@ export default function App() {
     async (file: File) => {
       let imported;
       let tavernHelperScriptCount = 0;
+      let importedConversationId: string | undefined;
+      let restoredVariables: ConversationVariableRestoreSummary | undefined;
       try {
         imported = await importPortableFile(file, {
           ...(state.selectedCardId
@@ -1842,10 +1856,34 @@ export default function App() {
           }
         }
       }
+      if (
+        imported.kind === "conversation" &&
+        typeof imported.result === "object" &&
+        imported.result !== null
+      ) {
+        const result = imported.result as Record<string, unknown>;
+        if (
+          typeof result.conversation === "object" &&
+          result.conversation !== null &&
+          typeof (result.conversation as Record<string, unknown>).id ===
+            "string"
+        ) {
+          importedConversationId = (
+            result.conversation as Record<string, unknown>
+          ).id as string;
+        }
+        if (
+          typeof result.restoredVariables === "object" &&
+          result.restoredVariables !== null
+        ) {
+          restoredVariables =
+            result.restoredVariables as ConversationVariableRestoreSummary;
+        }
+      }
       try {
         const payload = await loadWorkspaceFromApi(
           state.selectedPresetId,
-          state.selectedConversationId,
+          importedConversationId ?? state.selectedConversationId,
         );
         dispatch({ type: "bootstrap/api", payload });
       } catch {
@@ -1858,8 +1896,17 @@ export default function App() {
         conversation: "聊天记录",
         preset: "提示词预设",
       }[imported.kind];
+      const restoredVariableScopes = restoredVariables
+        ? Number(restoredVariables.chat) +
+          restoredVariables.messages +
+          restoredVariables.swipes
+        : 0;
       showToast(
         `${file.name} 已作为${kindLabel}导入。${
+          restoredVariableScopes > 0
+            ? ` 已恢复 ${String(restoredVariableScopes)} 份变量状态。`
+            : ""
+        }${
           tavernHelperScriptCount > 0
             ? ` 已保留 ${String(tavernHelperScriptCount)} 个 Tavern Helper 脚本，并保持禁用。`
             : ""
@@ -1867,7 +1914,35 @@ export default function App() {
         "success",
       );
     },
-    [showToast, state.selectedCardId, state.selectedPresetId],
+    [
+      showToast,
+      state.selectedCardId,
+      state.selectedConversationId,
+      state.selectedPresetId,
+    ],
+  );
+
+  const exportCurrentConversation = useCallback(
+    async (conversation: ConversationSpace) => {
+      try {
+        const archive = await exportConversationArchive(conversation.id);
+        const blob = new Blob([`${JSON.stringify(archive, null, 2)}\n`], {
+          type: "application/json;charset=utf-8",
+        });
+        const objectUrl = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = objectUrl;
+        anchor.download = conversationArchiveFilename(conversation.title);
+        document.body.append(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(objectUrl);
+        showToast("当前聊天记录与变量已导出。", "success");
+      } catch {
+        showToast("聊天记录导出失败；请检查本地服务。", "warning");
+      }
+    },
+    [showToast],
   );
 
   const handleLegacyStatus = useCallback(
@@ -2638,6 +2713,12 @@ export default function App() {
                   cardId: selectedCard!.id,
                 },
               })
+            }
+            onImportConversation={() =>
+              dispatch({ type: "modal/set", modal: { kind: "import" } })
+            }
+            onExportConversation={() =>
+              void exportCurrentConversation(conversation)
             }
             onOpenCards={() => dispatch({ type: "nav/set", open: true })}
             onOpenHelperTool={openTavernHelper}

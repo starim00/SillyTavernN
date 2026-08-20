@@ -27,6 +27,7 @@ import type {
   Participant,
   Preset,
   ProviderConnection,
+  ProviderSwipeContext,
   Swipe,
   Worldbook,
   WorldbookBinding,
@@ -321,6 +322,14 @@ export class AppStore {
           )
           .map((row) => row.id),
       );
+      const swipeIds = messageIds.flatMap((messageId) =>
+        this.database
+          .all<{ id: string }>(
+            "SELECT id FROM swipes WHERE message_id = ? ORDER BY position, id",
+            messageId,
+          )
+          .map((row) => row.id),
+      );
       const candidateWorldbookIds = Array.from(
         new Set(
           this.database
@@ -392,6 +401,13 @@ export class AppStore {
           `DELETE FROM extension_settings
            WHERE extension_id = 'stn.tavern-helper' AND key = ?`,
           `variables:message:${messageId}`,
+        );
+      }
+      for (const swipeId of swipeIds) {
+        this.database.run(
+          `DELETE FROM extension_settings
+           WHERE extension_id = 'stn.tavern-helper' AND key = ?`,
+          `variables:swipe:${swipeId}`,
         );
       }
       this.database.run("DELETE FROM conversations WHERE card_id = ?", id);
@@ -776,8 +792,15 @@ export class AppStore {
                FROM messages
                WHERE conversation_id = ?
              )
+             OR key IN (
+               SELECT 'variables:swipe:' || swipes.id
+               FROM swipes
+               JOIN messages ON messages.id = swipes.message_id
+               WHERE messages.conversation_id = ?
+             )
            )`,
         `variables:conversation:${id}`,
+        id,
         id,
       );
       this.database.run(
@@ -1099,6 +1122,11 @@ export class AppStore {
     messageId: string;
     content: string;
     selected?: boolean;
+    reasoningText?: string;
+    providerContext?: {
+      connectionId: string;
+      items: readonly JsonObject[];
+    };
   }): Swipe {
     return this.database.transaction(() => {
       const message = this.getMessage(input.messageId);
@@ -1116,16 +1144,20 @@ export class AppStore {
         );
       }
       this.database.run(
-        `INSERT INTO swipes(id, message_id, position, content, selected, revision, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+        `INSERT INTO swipes(
+           id, message_id, position, content, reasoning_text, selected,
+           revision, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`,
         id,
         input.messageId,
         position,
         input.content,
+        input.reasoningText ?? null,
         input.selected ? 1 : 0,
         now,
         now,
       );
+      this.insertProviderSwipeContext(id, input.providerContext, now);
       this.database.run(
         input.selected
           ? `UPDATE messages
@@ -1142,6 +1174,35 @@ export class AppStore {
       }
       return this.getSwipe(id);
     });
+  }
+
+  getProviderSwipeContext(swipeId: string): ProviderSwipeContext | undefined {
+    this.getSwipe(swipeId);
+    const row = this.database.get<Row>(
+      `SELECT swipe_id, provider_connection_id, context_json
+       FROM provider_swipe_contexts
+       WHERE swipe_id = ?`,
+      swipeId,
+    );
+    if (!row) return undefined;
+    return this.mapProviderSwipeContext(row);
+  }
+
+  listProviderSwipeContexts(conversationId: string): ProviderSwipeContext[] {
+    this.getConversation(conversationId);
+    return this.database
+      .all<Row>(
+        `SELECT provider_swipe_contexts.swipe_id,
+                provider_swipe_contexts.provider_connection_id,
+                provider_swipe_contexts.context_json
+         FROM provider_swipe_contexts
+         JOIN swipes ON swipes.id = provider_swipe_contexts.swipe_id
+         JOIN messages ON messages.id = swipes.message_id
+         WHERE messages.conversation_id = ?
+         ORDER BY messages.rowid, swipes.position`,
+        conversationId,
+      )
+      .map((row) => this.mapProviderSwipeContext(row));
   }
 
   persistAssistantGeneration(
@@ -2609,6 +2670,20 @@ export class AppStore {
       revision: Number(row.revision),
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),
+    };
+  }
+
+  private mapProviderSwipeContext(row: Row): ProviderSwipeContext {
+    const value = decodeValue(String(row.context_json));
+    return {
+      swipeId: String(row.swipe_id),
+      connectionId: String(row.provider_connection_id),
+      items: Array.isArray(value)
+        ? value.filter(
+            (item): item is JsonObject =>
+              item !== null && !Array.isArray(item) && typeof item === "object",
+          )
+        : [],
     };
   }
 

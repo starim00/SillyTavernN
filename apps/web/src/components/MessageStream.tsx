@@ -36,7 +36,7 @@ const FENCED_HTML_BLOCK_PATTERN =
 const FULL_HTML_DOCUMENT_PATTERN = /^\s*(?:<!doctype\b[^>]*>\s*)?<html\b/iu;
 const HIDDEN_DOCUMENT_WRAPPER_PATTERN =
   /<\/?(?:dream|thinking|reasoning|analysis|tableedit)\b[^>]*>/giu;
-const FRAME_HEIGHT_MIN = 96;
+const FRAME_HEIGHT_MIN = 20;
 const FRAME_HEIGHT_MAX = 1_000_000;
 const DIALOGUE_PATTERN =
   /“[^”\r\n]*”|「[^」\r\n]*」|『[^』\r\n]*』|〝[^〞\r\n]*〞|(?<![\p{L}\p{N}_])"[^"\r\n]{1,160}"(?![\p{L}\p{N}_])/gu;
@@ -85,7 +85,7 @@ function escapeInlineJson(value: unknown): string {
 }
 
 function frameDialogueDecorationScript(): string {
-  return `<style>html,body{background:#ffffff!important;color:#202124!important}body>p,body>p *,body>li,body>li *,body>blockquote,body>blockquote *,body>h1,body>h1 *,body>h2,body>h2 *,body>h3,body>h3 *,body>h4,body>h4 *,body>h5,body>h5 *,body>h6,body>h6 *{color:#202124!important}.stn-message-dialogue{color:#8b1e1e!important;font-weight:650}</style><script>(()=>{const pattern=new RegExp(${escapeInlineJson(DIALOGUE_PATTERN.source)},"gu");const skipped=new Set(["SCRIPT","STYLE","PRE","CODE","TEXTAREA","NOSCRIPT"]);const decorate=()=>{const root=document.body;if(!root)return;const walker=document.createTreeWalker(root,4);const nodes=[];let node=walker.nextNode();while(node){const parent=node.parentElement;if(parent&&!parent.closest(".stn-message-dialogue")&&!skipped.has(parent.tagName)){pattern.lastIndex=0;if(pattern.test(node.nodeValue??""))nodes.push(node)}node=walker.nextNode()}for(const textNode of nodes){const value=textNode.nodeValue??"";pattern.lastIndex=0;const matches=[...value.matchAll(pattern)];if(!matches.length)continue;const fragment=document.createDocumentFragment();let cursor=0;for(const match of matches){const dialogue=match[0],start=match.index;if(!dialogue||start===undefined)continue;if(start>cursor)fragment.append(document.createTextNode(value.slice(cursor,start)));const span=document.createElement("span");span.className="stn-message-dialogue";span.textContent=dialogue;fragment.append(span);cursor=start+dialogue.length}if(cursor<value.length)fragment.append(document.createTextNode(value.slice(cursor)));textNode.replaceWith(fragment)}};decorate();new MutationObserver(decorate).observe(document.body,{subtree:true,childList:true})})()</script>`;
+  return `<style>body>p,body>p *,body>li,body>li *,body>blockquote,body>blockquote *,body>h1,body>h1 *,body>h2,body>h2 *,body>h3,body>h3 *,body>h4,body>h4 *,body>h5,body>h5 *,body>h6,body>h6 *{color:#202124!important}.stn-message-dialogue{color:#8b1e1e!important;font-weight:650}</style><script>(()=>{const pattern=new RegExp(${escapeInlineJson(DIALOGUE_PATTERN.source)},"gu");const skipped=new Set(["SCRIPT","STYLE","PRE","CODE","TEXTAREA","NOSCRIPT"]);const decorate=()=>{const root=document.body;if(!root)return;const walker=document.createTreeWalker(root,4);const nodes=[];let node=walker.nextNode();while(node){const parent=node.parentElement;if(parent&&!parent.closest(".stn-message-dialogue")&&!skipped.has(parent.tagName)){pattern.lastIndex=0;if(pattern.test(node.nodeValue??""))nodes.push(node)}node=walker.nextNode()}for(const textNode of nodes){const value=textNode.nodeValue??"";pattern.lastIndex=0;const matches=[...value.matchAll(pattern)];if(!matches.length)continue;const fragment=document.createDocumentFragment();let cursor=0;for(const match of matches){const dialogue=match[0],start=match.index;if(!dialogue||start===undefined)continue;if(start>cursor)fragment.append(document.createTextNode(value.slice(cursor,start)));const span=document.createElement("span");span.className="stn-message-dialogue";span.textContent=dialogue;fragment.append(span);cursor=start+dialogue.length}if(cursor<value.length)fragment.append(document.createTextNode(value.slice(cursor)));textNode.replaceWith(fragment)}};decorate();new MutationObserver(decorate).observe(document.body,{subtree:true,childList:true})})()</script>`;
 }
 
 function trustedHostBridgeScript(frameName: string): string {
@@ -249,7 +249,7 @@ export function trustedDisplayDocument(
     <meta name="stn-frame-id" content="${escapeHtmlAttribute(frameName)}">
     <style>
       :root { color-scheme: light; }
-      html, body { margin: 0; background: #ffffff; color: #202124; overflow: visible; }
+      html, body { margin: 0; background: transparent; color: #202124; overflow: visible; }
       body { box-sizing: border-box; width: 100%; padding: 14px 16px; font: 14px/1.72 system-ui, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; overflow-wrap: anywhere; }
       img, video, svg, canvas { max-width: 100%; height: auto; }
       pre { white-space: pre-wrap; }

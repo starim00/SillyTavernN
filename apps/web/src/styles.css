@@ -3019,12 +3019,14 @@ select:focus-visible {
 
 .worldbook-stack {
   display: grid;
+  min-width: 0;
+  max-width: 100%;
   gap: 10px;
 }
 
 .worldbook-library {
   display: grid;
-  grid-template-columns: minmax(250px, 310px) minmax(0, 1fr);
+  grid-template-columns: minmax(240px, 290px) minmax(0, 1fr);
   gap: 14px;
   min-height: 0;
   padding: 14px 16px 18px;
@@ -3223,12 +3225,14 @@ select:focus-visible {
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   min-width: 0;
+  max-width: 100%;
   min-height: 0;
   overflow: hidden;
 }
 
 .worldbook-library__selection > .support-panel {
   display: flex;
+  max-width: 100%;
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
@@ -3239,6 +3243,7 @@ select:focus-visible {
 }
 
 .worldbook-library__selection > .support-panel > .support-panel__content {
+  max-width: 100%;
   min-height: 0;
   flex: 1;
   overflow: auto;
@@ -3256,6 +3261,8 @@ select:focus-visible {
 }
 
 .worldbook-item {
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   background: var(--surface-strong);
   border: 1px solid var(--border);
@@ -3307,21 +3314,28 @@ select:focus-visible {
 }
 
 .worldbook-entry-table {
+  container-type: inline-size;
+  width: 100%;
+  min-width: 0;
   max-width: 100%;
   overflow-x: auto;
   border-top: 1px solid #e3e9eb;
   scrollbar-width: thin;
 }
 
+.worldbook-entry-table:has(.worldbook-entry--editing) {
+  overflow-x: clip;
+}
+
 .worldbook-entry-table__header,
 .worldbook-entry__row {
   display: grid;
   grid-template-columns:
-    26px minmax(190px, 2.1fr) minmax(118px, 1.2fr)
-    minmax(145px, 1.4fr) 54px 54px 76px 78px;
+    26px minmax(160px, 2.2fr) minmax(104px, 1.15fr)
+    minmax(105px, 1.2fr) 42px 42px 70px 66px;
   align-items: center;
   column-gap: 6px;
-  min-width: 790px;
+  min-width: 680px;
 }
 
 .worldbook-entry-table__header {
@@ -3343,6 +3357,9 @@ select:focus-visible {
 
 .worldbook-entry-list {
   display: grid;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   gap: 0;
   margin: 0;
   padding: 0;
@@ -3350,7 +3367,7 @@ select:focus-visible {
 }
 
 .worldbook-entry {
-  min-width: 790px;
+  min-width: 680px;
   padding: 0;
   background: #fbfcfc;
   border: 0;
@@ -3364,8 +3381,14 @@ select:focus-visible {
 }
 
 .worldbook-entry--editing {
+  position: sticky;
+  z-index: 1;
+  left: 0;
+  width: 100cqw;
   min-width: 0;
+  max-width: 100cqw;
   padding: 9px;
+  overflow: hidden;
   border: 1px solid #e2e8ea;
   border-radius: 8px;
 }
@@ -3606,6 +3629,8 @@ select:focus-visible {
 
 .worldbook-entry-editor {
   display: grid;
+  min-width: 0;
+  max-width: 100%;
   gap: 9px;
   margin-top: 10px;
 }
@@ -3692,6 +3717,8 @@ select:focus-visible {
 .worldbook-entry-editor__grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 0;
+  max-width: 100%;
   gap: 8px;
 }
 
@@ -3818,7 +3845,7 @@ select:focus-visible {
   height: min(90dvh, 820px);
   flex-direction: column;
   overflow: hidden;
-  width: min(100%, 1040px);
+  width: min(100%, 1200px);
 }
 
 .modal-card--wide > .modal-card__header {
@@ -3826,6 +3853,9 @@ select:focus-visible {
 }
 
 .modal-card--wide > .worldbook-library {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   flex: 1;
 }
 

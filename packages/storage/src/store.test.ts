@@ -926,10 +926,7 @@ describe("AppStore", () => {
         store.selectedProviderContexts(conversation.id, "responses-1"),
       ).toEqual(
         new Map([
-          [
-            persisted.message.id,
-            [{ type: "reasoning", id: "reasoning-1" }],
-          ],
+          [persisted.message.id, [{ type: "reasoning", id: "reasoning-1" }]],
         ]),
       );
       expect(

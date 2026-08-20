@@ -923,13 +923,11 @@ export async function registerProviderRoutes(
         ];
         accumulatedProviderContextItems = [
           ...persistedProviderContextItems,
-          ...readToolMessages.map(
-            (message): JsonObject => ({
-              type: "function_call_output",
-              call_id: message.toolCallId ?? message.name ?? "unknown-call",
-              output: message.content,
-            }),
-          ),
+          ...readToolMessages.map((message): JsonObject => ({
+            type: "function_call_output",
+            call_id: message.toolCallId ?? message.name ?? "unknown-call",
+            output: message.content,
+          })),
         ];
         persistedProviderContextItems = accumulatedProviderContextItems;
         const current = context.agents.getRun(toolRun.run.id);

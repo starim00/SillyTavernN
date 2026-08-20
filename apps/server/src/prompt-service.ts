@@ -823,34 +823,30 @@ export async function prepareConversationPrompt(
   const renderedMessages = renderChatPrompt(assembled.segments, {
     mergeAdjacent: false,
     mergeWorldbookAtDepth: true,
-  }).map(
-    (message): ProviderMessage => {
-      const sourceSegments = message.sourceSegmentIds
-        .map((id) => segmentsById.get(id))
-        .filter((segment): segment is PromptSegment => segment !== undefined);
-      const sourceMessageId =
-        sourceSegments.length === 1 &&
-        sourceSegments[0]?.source.kind === "message"
-          ? sourceSegments[0].source.id
-          : undefined;
-      const providerContextItems =
-        message.role === "assistant" && sourceMessageId !== undefined
-          ? providerContexts.get(sourceMessageId)
-          : undefined;
-      const reasoningContent =
-        message.role === "assistant" && sourceMessageId !== undefined
-          ? reasoningByMessageId.get(sourceMessageId)
-          : undefined;
-      return {
-        role: message.role,
-        content: message.content,
-        ...(reasoningContent === undefined ? {} : { reasoningContent }),
-        ...(providerContextItems === undefined
-          ? {}
-          : { providerContextItems }),
-      };
-    },
-  );
+  }).map((message): ProviderMessage => {
+    const sourceSegments = message.sourceSegmentIds
+      .map((id) => segmentsById.get(id))
+      .filter((segment): segment is PromptSegment => segment !== undefined);
+    const sourceMessageId =
+      sourceSegments.length === 1 &&
+      sourceSegments[0]?.source.kind === "message"
+        ? sourceSegments[0].source.id
+        : undefined;
+    const providerContextItems =
+      message.role === "assistant" && sourceMessageId !== undefined
+        ? providerContexts.get(sourceMessageId)
+        : undefined;
+    const reasoningContent =
+      message.role === "assistant" && sourceMessageId !== undefined
+        ? reasoningByMessageId.get(sourceMessageId)
+        : undefined;
+    return {
+      role: message.role,
+      content: message.content,
+      ...(reasoningContent === undefined ? {} : { reasoningContent }),
+      ...(providerContextItems === undefined ? {} : { providerContextItems }),
+    };
+  });
 
   return {
     ...(preset === undefined ? {} : { presetId: preset.id }),

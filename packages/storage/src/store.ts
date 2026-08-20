@@ -1289,11 +1289,7 @@ export class AppStore {
             : {}),
         });
         if (index === 0) {
-          this.insertProviderSwipeContext(
-            swipeId,
-            input.providerContext,
-            now,
-          );
+          this.insertProviderSwipeContext(swipeId, input.providerContext, now);
         }
       });
       this.touchConversation(conversation.id, now);
@@ -2549,9 +2545,7 @@ export class AppStore {
 
   private insertProviderSwipeContext(
     swipeId: string,
-    context:
-      | { connectionId: string; items: readonly JsonObject[] }
-      | undefined,
+    context: { connectionId: string; items: readonly JsonObject[] } | undefined,
     now: string,
   ): void {
     if (context === undefined || context.items.length === 0) {

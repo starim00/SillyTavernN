@@ -104,6 +104,12 @@ export type ProviderConnectionInput = {
   apiKey?: string;
 };
 
+export type PortableProviderConnection = {
+  format: "sillytavern-n.provider-connection";
+  version: 1;
+  connection: ProviderConnectionInput;
+};
+
 export type GenerationMode = "send" | "continue" | "regenerate";
 
 export type GenerationState = {

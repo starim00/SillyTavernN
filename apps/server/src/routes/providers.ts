@@ -60,6 +60,10 @@ const connectionSchema = z
   })
   .strict();
 
+const providerExportSchema = z
+  .object({ includeApiKey: z.boolean().default(false) })
+  .strict();
+
 const promptRequestSchema = z
   .object({
     connectionId: z.string().trim().min(1).default("fake"),
@@ -383,6 +387,31 @@ export async function registerProviderRoutes(
         await context.vault.delete(current.apiKeyRef);
       }
       return envelope(await context.providers.dto(updated));
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    "/api/providers/connections/:id/export",
+    async (request, reply) => {
+      const input = providerExportSchema.parse(request.body);
+      const connection = context.store.getProviderConnection(request.params.id);
+      const apiKey = input.includeApiKey
+        ? await context.vault.get(connection.apiKeyRef)
+        : undefined;
+      reply.header("Cache-Control", "no-store");
+      return envelope({
+        format: "sillytavern-n.provider-connection" as const,
+        version: 1 as const,
+        connection: {
+          name: connection.name,
+          protocol: connection.protocol,
+          baseUrl: connection.baseUrl,
+          model: connection.model,
+          headers: connection.headers,
+          nativeToolCalling: connection.nativeToolCalling,
+          ...(apiKey === undefined ? {} : { apiKey }),
+        },
+      });
     },
   );
 

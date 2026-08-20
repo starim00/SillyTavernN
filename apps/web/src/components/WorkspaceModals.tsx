@@ -5,6 +5,7 @@ import {
   Books,
   CheckCircle,
   ClockCounterClockwise,
+  FileArrowDown,
   FileArrowUp,
   Lock,
   LockOpen,
@@ -34,6 +35,7 @@ import type {
   ModalState,
   PanelId,
   Persona,
+  PortableProviderConnection,
   PromptPreset,
   ProviderConnection,
   ProviderConnectionInput,
@@ -45,6 +47,11 @@ import type {
   WorldbookEntry,
   WorldbookEntryUpdate,
 } from "../domain/workspace";
+import {
+  parsePortableProviderConnection,
+  providerConnectionExportFilename,
+  serializePortableProviderConnection,
+} from "../providerConnectionPortability";
 import { RegexRail, WorldbookRail } from "./ContextRail";
 import { IconButton, SurfaceStatus } from "./WorkspacePrimitives";
 
@@ -481,6 +488,7 @@ function ProvidersModal({
   onClose,
   onSelect,
   onSave,
+  onExport,
   onLoadModels,
 }: {
   online: boolean;
@@ -492,6 +500,10 @@ function ProvidersModal({
     input: ProviderConnectionInput,
     current?: ProviderConnection,
   ) => Promise<ProviderConnection>;
+  onExport: (
+    connectionId: string,
+    includeApiKey: boolean,
+  ) => Promise<PortableProviderConnection>;
   onLoadModels: (connectionId: string) => Promise<ProviderModel[]>;
 }) {
   const [editingId, setEditingId] = useState<string>(() =>
@@ -500,10 +512,17 @@ function ProvidersModal({
       ? selectedProviderId
       : (connections[0]?.id ?? "new"),
   );
+  const [includeApiKey, setIncludeApiKey] = useState(false);
+  const [transferring, setTransferring] = useState<"import" | "export" | null>(
+    null,
+  );
+  const [transferError, setTransferError] = useState<string | null>(null);
   const current = connections.find((connection) => connection.id === editingId);
   const selectProvider = (providerId: string) => {
     onSelect(providerId);
     setEditingId(providerId);
+    setIncludeApiKey(false);
+    setTransferError(null);
   };
   const saveProvider = async (
     input: ProviderConnectionInput,
@@ -512,6 +531,55 @@ function ProvidersModal({
     const saved = await onSave(input, provider);
     setEditingId(saved.id);
     return saved;
+  };
+  const importProvider = async (file: File) => {
+    if (!online || transferring) return;
+    setTransferring("import");
+    setTransferError(null);
+    try {
+      const input = parsePortableProviderConnection(
+        JSON.parse(await file.text()) as unknown,
+      );
+      const saved = await saveProvider(input);
+      onSelect(saved.id);
+      setIncludeApiKey(false);
+    } catch (reason) {
+      setTransferError(
+        reason instanceof Error ? reason.message : "Provider 导入失败。",
+      );
+    } finally {
+      setTransferring(null);
+    }
+  };
+  const exportProvider = async () => {
+    if (!current || !online || transferring) return;
+    setTransferring("export");
+    setTransferError(null);
+    try {
+      const portable = await onExport(
+        current.id,
+        includeApiKey && current.hasApiKey,
+      );
+      const url = URL.createObjectURL(
+        new Blob([serializePortableProviderConnection(portable)], {
+          type: "application/json",
+        }),
+      );
+      try {
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = providerConnectionExportFilename(current.name);
+        anchor.click();
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    } catch (reason) {
+      setTransferError(
+        reason instanceof Error ? reason.message : "Provider 导出失败。",
+      );
+    } finally {
+      setTransferring(null);
+    }
   };
 
   return (
@@ -567,11 +635,67 @@ function ProvidersModal({
           <button
             className="button button--secondary button--full"
             type="button"
-            onClick={() => setEditingId("new")}
+            onClick={() => {
+              setEditingId("new");
+              setIncludeApiKey(false);
+              setTransferError(null);
+            }}
           >
             <Plus size={17} />
             新增连接
           </button>
+          <div className="provider-transfer">
+            <div className="provider-transfer__actions">
+              <label
+                className={`button button--quiet${
+                  !online || transferring ? " is-disabled" : ""
+                }`}
+              >
+                <FileArrowUp size={16} />
+                {transferring === "import" ? "正在导入" : "导入"}
+                <input
+                  className="sr-only"
+                  type="file"
+                  accept=".json,application/json"
+                  disabled={!online || transferring !== null}
+                  onChange={(event) => {
+                    const input = event.currentTarget;
+                    const file = input.files?.[0];
+                    input.value = "";
+                    if (file) void importProvider(file);
+                  }}
+                />
+              </label>
+              <button
+                className="button button--quiet"
+                type="button"
+                disabled={!online || !current || transferring !== null}
+                onClick={() => void exportProvider()}
+              >
+                <FileArrowDown size={16} />
+                {transferring === "export" ? "正在导出" : "导出"}
+              </button>
+            </div>
+            <label className="check-row provider-transfer__secret">
+              <input
+                type="checkbox"
+                checked={includeApiKey}
+                disabled={!current?.hasApiKey || transferring !== null}
+                onChange={(event) => setIncludeApiKey(event.target.checked)}
+              />
+              <span>导出时包含 API Key</span>
+            </label>
+            <small>
+              {includeApiKey && current?.hasApiKey
+                ? "导出文件将包含明文 API Key，请自行安全保管。"
+                : "默认不导出已保存的 API Key。"}
+            </small>
+            {transferError ? (
+              <p className="form-error" role="alert">
+                {transferError}
+              </p>
+            ) : null}
+          </div>
         </div>
         {editingId === "fake" ? (
           <BuiltInProviderDetails />
@@ -1230,6 +1354,10 @@ type WorkspaceModalsProps = {
     input: ProviderConnectionInput,
     current?: ProviderConnection,
   ) => Promise<ProviderConnection>;
+  onExportProvider: (
+    connectionId: string,
+    includeApiKey: boolean,
+  ) => Promise<PortableProviderConnection>;
   onLoadProviderModels: (connectionId: string) => Promise<ProviderModel[]>;
 };
 
@@ -1270,6 +1398,7 @@ export function WorkspaceModals({
   onUndoToolProposal = () => undefined,
   onSelectProvider,
   onSaveProvider,
+  onExportProvider,
   onLoadProviderModels,
 }: WorkspaceModalsProps) {
   if (modal.kind === "closed") return null;
@@ -1351,6 +1480,7 @@ export function WorkspaceModals({
         onClose={onClose}
         onSelect={onSelectProvider}
         onSave={onSaveProvider}
+        onExport={onExportProvider}
         onLoadModels={onLoadProviderModels}
       />
     );

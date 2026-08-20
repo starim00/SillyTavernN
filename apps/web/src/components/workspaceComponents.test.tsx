@@ -88,6 +88,7 @@ describe("workspace components", () => {
           onPermission={vi.fn()}
           onSelectProvider={vi.fn()}
           onSaveProvider={vi.fn()}
+          onExportProvider={vi.fn()}
           onLoadProviderModels={vi.fn()}
         />,
       );
@@ -98,6 +99,9 @@ describe("workspace components", () => {
     expect(selectedHtml).toContain('value="second-model"');
     expect(selectedHtml).toContain("获取模型列表");
     expect(selectedHtml).toContain("可从已保存连接的接口获取模型列表。");
+    expect(selectedHtml).toContain("导入");
+    expect(selectedHtml).toContain("导出时包含 API Key");
+    expect(selectedHtml).toContain("默认不导出已保存的 API Key。");
     expect(selectedHtml).not.toContain('value="第一个连接"');
 
     const builtInHtml = renderProviderModal("fake");

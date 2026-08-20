@@ -1300,6 +1300,55 @@ describe("SillyTavern N server", () => {
     expect((await stat(file)).mode & 0o777).toBe(0o600);
   });
 
+  it("exports Provider connections without secrets by default and includes them only on request", async () => {
+    const { app } = await application(false);
+    const createdResponse = await app.inject({
+      method: "POST",
+      url: "/api/providers/connections",
+      payload: {
+        name: "Portable endpoint",
+        protocol: "openai-responses",
+        baseUrl: "https://example.test",
+        model: "portable-model",
+        headers: { "X-Provider": "portable" },
+        apiKey: "portable-secret",
+        nativeToolCalling: true,
+      },
+    });
+    const created = createdResponse.json() as { data: { id: string } };
+
+    const safeExport = await app.inject({
+      method: "POST",
+      url: `/api/providers/connections/${created.data.id}/export`,
+      payload: { includeApiKey: false },
+    });
+    expect(safeExport.statusCode).toBe(200);
+    expect(safeExport.headers["cache-control"]).toBe("no-store");
+    expect(safeExport.body).not.toContain("portable-secret");
+    expect(safeExport.json()).toMatchObject({
+      data: {
+        format: "sillytavern-n.provider-connection",
+        version: 1,
+        connection: {
+          name: "Portable endpoint",
+          protocol: "openai-responses",
+          headers: { "X-Provider": "portable" },
+        },
+      },
+    });
+
+    const secretExport = await app.inject({
+      method: "POST",
+      url: `/api/providers/connections/${created.data.id}/export`,
+      payload: { includeApiKey: true },
+    });
+    expect(secretExport.statusCode).toBe(200);
+    expect(secretExport.headers["cache-control"]).toBe("no-store");
+    expect(secretExport.json()).toMatchObject({
+      data: { connection: { apiKey: "portable-secret" } },
+    });
+  });
+
   it("creates OpenAI Responses connections with native tools enabled by default", async () => {
     const { app, context } = await application(false);
     const response = await app.inject({

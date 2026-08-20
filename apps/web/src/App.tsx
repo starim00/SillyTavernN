@@ -36,6 +36,7 @@ import {
   deleteRoleCard,
   deletePersona,
   deleteWorkspaceMessage,
+  exportProviderConnection,
   generateConversation,
   generateWithTavernHelper,
   GenerationInterruptedError,
@@ -2382,6 +2383,7 @@ export default function App() {
         onUndoToolProposal={() => void undoAppliedToolProposal()}
         onSelectProvider={(id) => dispatch({ type: "provider/select", id })}
         onSaveProvider={saveProvider}
+        onExportProvider={exportProviderConnection}
         onLoadProviderModels={loadProviderModels}
       />
       {state.toast ? (

@@ -3798,6 +3798,45 @@ select:focus-visible {
   font-size: 10px;
 }
 
+.provider-transfer {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.provider-transfer__actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.provider-transfer__actions .button {
+  width: 100%;
+}
+
+.provider-transfer .button.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.provider-transfer__secret {
+  gap: 6px;
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
+.provider-transfer > small {
+  color: var(--text-faint);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.provider-transfer > .form-error {
+  font-size: 11px;
+}
+
 .provider-editor {
   align-content: start;
 }
@@ -3806,6 +3845,20 @@ select:focus-visible {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.provider-editor__grid > .field {
+  align-content: start;
+}
+
+.provider-editor__grid > .field > span,
+.provider-editor__grid .field__heading {
+  min-height: 28px;
+}
+
+.provider-editor__grid > .field > span {
+  display: flex;
+  align-items: center;
 }
 
 .provider-editor__wide {

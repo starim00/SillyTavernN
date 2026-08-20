@@ -91,6 +91,18 @@ function renderRailFixture(
         onPermission={async () => undefined}
         onSelectProvider={noop}
         onSaveProvider={async () => state.providerConnections[0]!}
+        onExportProvider={async () => ({
+          format: "sillytavern-n.provider-connection",
+          version: 1,
+          connection: {
+            name: "test",
+            protocol: "openai-compatible",
+            baseUrl: "http://example.test/v1",
+            model: "test-model",
+            headers: {},
+            nativeToolCalling: false,
+          },
+        })}
         onLoadProviderModels={async () => []}
         onConfirmToolProposal={noop}
         onRejectToolProposal={noop}

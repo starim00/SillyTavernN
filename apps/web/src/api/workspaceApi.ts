@@ -10,6 +10,7 @@ import type {
   ConversationSpace,
   Participant,
   Persona,
+  PortableProviderConnection,
   PromptPreset,
   PromptPresetEntry,
   ProviderConnection,
@@ -1628,6 +1629,21 @@ export async function saveProviderConnection(
         ...input,
         ...(current ? { expectedRevision: current.revision } : {}),
       }),
+      timeoutMs: 10_000,
+    },
+  );
+  return result.data;
+}
+
+export async function exportProviderConnection(
+  connectionId: string,
+  includeApiKey: boolean,
+): Promise<PortableProviderConnection> {
+  const result = await request<ApiEnvelope<PortableProviderConnection>>(
+    `/providers/connections/${encodeURIComponent(connectionId)}/export`,
+    {
+      method: "POST",
+      body: JSON.stringify({ includeApiKey }),
       timeoutMs: 10_000,
     },
   );

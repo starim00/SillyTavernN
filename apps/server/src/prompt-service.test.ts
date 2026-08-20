@@ -238,6 +238,49 @@ afterEach(async () => {
 });
 
 describe("server prompt integration", () => {
+  it("assembles history beyond the Web message page into the provider prompt", async () => {
+    const created = await application();
+    const card = created.context.store.createCard({
+      id: "card-complete-history",
+      kind: "character",
+      name: "Complete history",
+    }).card;
+    const conversation = created.context.store.createConversation({
+      id: "conversation-complete-history",
+      title: "Complete history",
+      cardId: card.id,
+    });
+
+    for (let index = 0; index < 60; index += 1) {
+      const content =
+        index === 0
+          ? "EARLIEST_HISTORY_MARKER"
+          : index === 59
+            ? "LATEST_HISTORY_MARKER"
+            : `history-${String(index)}`;
+      if (index % 2 === 0) {
+        created.context.store.addUserMessage({
+          conversationId: conversation.id,
+          content,
+        });
+      } else {
+        created.context.store.addAssistantMessage({
+          conversationId: conversation.id,
+          content,
+        });
+      }
+    }
+
+    const prompt = await prepareConversationPrompt(created.context.store, {
+      conversationId: conversation.id,
+      maxContextTokens: 32_768,
+    });
+    const history = prompt.messages.map((message) => message.content);
+
+    expect(history).toContain("EARLIEST_HISTORY_MARKER");
+    expect(history).toContain("LATEST_HISTORY_MARKER");
+  });
+
   it("preserves adjacent preset entries as separate provider messages", async () => {
     const created = await application();
     const card = created.context.store.createCard({

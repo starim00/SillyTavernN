@@ -550,6 +550,20 @@ function tavernHelperContext(
   };
 }
 
+function tavernHelperMessageHistory(
+  context: ServerContext,
+  conversationId: string,
+) {
+  return context.store.listChatMessages(conversationId).map((message) => {
+    const { generationStatus, ...rest } = message;
+    return {
+      ...rest,
+      state: generationStatus,
+      swipes: context.store.listSwipes(message.id),
+    };
+  });
+}
+
 function injectCompatibilityMessages(
   messages: readonly ProviderMessage[],
   injects: readonly {
@@ -646,6 +660,11 @@ export async function registerCompatibilityRoutes(
   app.get("/api/compatibility/tavern-helper", (request) => {
     const input = tavernHelperContextQuerySchema.parse(request.query);
     return envelope(tavernHelperContext(context, input));
+  });
+
+  app.get("/api/compatibility/tavern-helper/history", (request) => {
+    const input = tavernHelperContextQuerySchema.parse(request.query);
+    return envelope(tavernHelperMessageHistory(context, input.conversationId));
   });
 
   app.put("/api/compatibility/tavern-helper/settings", (request) => {

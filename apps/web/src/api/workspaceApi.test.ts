@@ -15,6 +15,7 @@ import {
   importPortableFile,
   installLegacyPlugin,
   loadConversationMessages,
+  loadTavernHelperMessageHistory,
   loadLegacyGrants,
   loadLegacyHostHealth,
   loadPendingAgentToolProposal,
@@ -701,10 +702,52 @@ describe("workspace API client", () => {
       }),
     ]);
     expect(fetch).toHaveBeenCalledWith(
-      "/api/conversations/conversation-1/messages?limit=100&presetId=preset+display%2F1",
+      "/api/conversations/conversation-1/messages?limit=50&presetId=preset+display%2F1",
       expect.any(Object),
     );
     expect(messages[0]?.content).toBe("Hello.");
+  });
+
+  it("loads the complete Tavern Helper history without internal messages", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        data: [
+          {
+            id: "message-21",
+            conversationId: "conversation-long",
+            role: "user",
+            content: "Visible floor 21",
+            revision: 2,
+          },
+          {
+            id: "message-system",
+            conversationId: "conversation-long",
+            role: "system",
+            content: "Internal context",
+          },
+          {
+            id: "message-70",
+            conversationId: "conversation-long",
+            role: "assistant",
+            content: "Visible floor 70",
+            state: "complete",
+            revision: 4,
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const history = await loadTavernHelperMessageHistory("conversation-long");
+
+    expect(history.map((message) => message.id)).toEqual([
+      "message-21",
+      "message-70",
+    ]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/compatibility/tavern-helper/history?conversationId=conversation-long",
+      expect.any(Object),
+    );
   });
 
   it("submits an API key but never adds it to the returned connection", async () => {

@@ -49,6 +49,7 @@ import {
   loadPendingAgentToolProposal,
   loadProviderModels,
   loadTavernHelperContext,
+  loadTavernHelperMessageHistory,
   loadWorkspaceFromApi,
   preparePromptTemplate,
   proposalFromGenerationToolEvent,
@@ -119,6 +120,11 @@ import type {
   WorldbookEntry,
   WorldbookEntryUpdate,
 } from "./domain/workspace";
+import {
+  loadWorkspaceState,
+  persistWorkspaceState,
+  workspaceReducer,
+} from "./store/workspaceReducer";
 
 function conversationArchiveFilename(title: string): string {
   const safeTitle = title
@@ -129,11 +135,14 @@ function conversationArchiveFilename(title: string): string {
     .slice(0, 80);
   return `${safeTitle || "conversation"}.stn-chat.json`;
 }
-import {
-  loadWorkspaceState,
-  persistWorkspaceState,
-  workspaceReducer,
-} from "./store/workspaceReducer";
+
+function messageFloorById(
+  messages: readonly WorkspaceMessage[],
+): Record<string, number> {
+  return Object.fromEntries(
+    messages.map((message, index) => [message.id, index]),
+  );
+}
 
 const LazyTavernHelperWorkbench = lazy(() =>
   import("./components/TavernHelperWorkbench").then((module) => ({
@@ -227,6 +236,9 @@ export default function App() {
   const tavernHelperEpochRef = useRef(0);
   const [tavernHelperContext, setTavernHelperContext] =
     useState<TavernHelperContext | null>(null);
+  const [tavernHelperMessageFloors, setTavernHelperMessageFloors] = useState<
+    Record<string, number>
+  >({});
   const [tavernHelperButtons, setTavernHelperButtons] = useState<
     TavernHelperRuntimeButton[]
   >([]);
@@ -674,6 +686,7 @@ export default function App() {
     tavernHelperLoadPromiseRef.current = null;
     setTavernHelperButtons([]);
     setTavernHelperContext(null);
+    setTavernHelperMessageFloors({});
     setTavernHelperStatus({
       loading: false,
       loadedScriptIds: [],
@@ -713,46 +726,62 @@ export default function App() {
           errors: [],
         }));
         try {
-          const [context, runtimeModule] = await Promise.all([
-            loadTavernHelperContext({
-              conversationId,
-              presetId: selectedPresetId,
-            }),
-            loadTavernHelperRuntime(),
-          ]);
+          const [context, runtimeModule, initialRuntimeMessages] =
+            await Promise.all([
+              loadTavernHelperContext({
+                conversationId,
+                presetId: selectedPresetId,
+              }),
+              loadTavernHelperRuntime(),
+              loadTavernHelperMessageHistory(conversationId),
+            ]);
           if (epoch !== tavernHelperEpochRef.current) return null;
+          let runtimeMessages = initialRuntimeMessages;
           tavernHelperContextRef.current = context;
           setTavernHelperContext(context);
+          setTavernHelperMessageFloors(messageFloorById(runtimeMessages));
           await new Promise<void>((resolve) =>
             window.requestAnimationFrame(() => resolve()),
           );
           if (epoch !== tavernHelperEpochRef.current) return null;
           const active = () => epoch === tavernHelperEpochRef.current;
+          const refreshRuntimeMessages = async () => {
+            const [history] = await Promise.all([
+              loadTavernHelperMessageHistory(context.conversation.id),
+              refreshMessages(context.conversation.id),
+            ]);
+            runtimeMessages = history;
+            if (active()) {
+              setTavernHelperMessageFloors(messageFloorById(history));
+            }
+            return history;
+          };
           const adapter: TavernHelperRuntimeAdapter = {
             connectionId: selectedProviderId,
-            getMessages: () =>
-              workspaceStateRef.current.messagesByConversation[
-                context.conversation.id
-              ] ?? [],
+            getMessages: () => runtimeMessages,
             createMessage: async (input) => {
               const created = await createTavernHelperMessage(
                 context.conversation.id,
                 input,
               );
-              await refreshMessages(context.conversation.id);
+              await refreshRuntimeMessages();
               return created;
             },
             deleteMessage: async (message) => {
               await deleteWorkspaceMessage(message.id, message.revision);
-              await refreshMessages(context.conversation.id);
+              await refreshRuntimeMessages();
             },
             updateMessage: async (message, content) => {
               const updated = await updateWorkspaceMessage(message, content);
-              if (active())
+              runtimeMessages = runtimeMessages.map((candidate) =>
+                candidate.id === updated.id ? updated : candidate,
+              );
+              if (active()) {
                 dispatch({ type: "message/replace", message: updated });
+              }
               return updated;
             },
-            refreshMessages: () => refreshMessages(context.conversation.id),
+            refreshMessages: refreshRuntimeMessages,
             generate: async (input) => {
               const prepared = await preparePromptTemplate({
                 conversationId: context.conversation.id,
@@ -2657,6 +2686,7 @@ export default function App() {
           <MessageStream
             conversationId={conversation.id}
             messages={messages}
+            messageFloorById={tavernHelperMessageFloors}
             hasMore={Boolean(
               state.messageNextCursorByConversation[conversation.id],
             )}

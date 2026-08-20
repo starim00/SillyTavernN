@@ -336,6 +336,53 @@ describe("native Tavern Helper compatibility routes", () => {
     ).toEqual({});
   });
 
+  it("returns the complete ordered message history for compatibility scripts", async () => {
+    const server = await application();
+    const card = server.context.store.createCard({
+      id: "card-complete-helper-history",
+      kind: "character",
+      name: "Complete helper history card",
+    }).card;
+    const conversation = server.context.store.createConversation({
+      id: "conversation-complete-helper-history",
+      title: "Complete helper history",
+      cardId: card.id,
+    });
+    const messageIds = Array.from({ length: 61 }, (_, index) => {
+      const input = {
+        id: `message-complete-helper-${String(index).padStart(2, "0")}`,
+        conversationId: conversation.id,
+        content: `Message ${String(index)}`,
+        createdAt: new Date(Date.UTC(2026, 7, 20, 0, index)).toISOString(),
+      };
+      return index % 2 === 0
+        ? server.context.store.addAssistantMessage(input).id
+        : server.context.store.addUserMessage(input).id;
+    });
+
+    const response = await server.app.inject({
+      method: "GET",
+      url: `/api/compatibility/tavern-helper/history?conversationId=${conversation.id}`,
+    });
+
+    expect(response.statusCode).toBe(200);
+    const history = (
+      response.json() as {
+        data: { id: string; role: string; content: string }[];
+      }
+    ).data;
+    expect(history).toHaveLength(61);
+    expect(history.map((message) => message.id)).toEqual(messageIds);
+    expect(history[0]).toMatchObject({
+      role: "assistant",
+      content: "Message 0",
+    });
+    expect(history.at(-1)).toMatchObject({
+      role: "assistant",
+      content: "Message 60",
+    });
+  });
+
   it("rejects message-variable writes outside the active conversation", async () => {
     const server = await application();
     const card = server.context.store.createCard({

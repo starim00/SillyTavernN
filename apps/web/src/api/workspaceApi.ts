@@ -977,7 +977,7 @@ export async function loadConversationMessagePage(
   presetId?: string,
   cursor?: string,
 ): Promise<{ items: WorkspaceMessage[]; nextCursor: string | null }> {
-  const query = new URLSearchParams({ limit: "100" });
+  const query = new URLSearchParams({ limit: "50" });
   if (presetId) query.set("presetId", presetId);
   if (cursor) query.set("cursor", cursor);
   const result = await request<ApiEnvelope<ApiPage<ApiMessage>>>(
@@ -1003,6 +1003,20 @@ export async function loadTavernHelperContext(input: {
     `/compatibility/tavern-helper?${query.toString()}`,
   );
   return result.data;
+}
+
+export async function loadTavernHelperMessageHistory(
+  conversationId: string,
+): Promise<WorkspaceMessage[]> {
+  const query = new URLSearchParams({ conversationId });
+  const result = await request<ApiEnvelope<ApiMessage[]>>(
+    `/compatibility/tavern-helper/history?${query.toString()}`,
+  );
+  return result.data
+    .filter(
+      (message) => message.role === "user" || message.role === "assistant",
+    )
+    .map(normalizeMessage);
 }
 
 export async function updateTavernHelperGrant(input: {

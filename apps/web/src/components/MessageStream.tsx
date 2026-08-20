@@ -608,6 +608,7 @@ export const MessageCard = memo(function MessageCard({
 type MessageStreamProps = {
   conversationId: string;
   messages: WorkspaceMessage[];
+  messageFloorById?: Readonly<Record<string, number>>;
   hasMore?: boolean;
   loadingOlder?: boolean;
   onLoadOlder?: (() => Promise<void>) | undefined;
@@ -634,6 +635,7 @@ type MessageStreamProps = {
 export function MessageStream({
   conversationId,
   messages,
+  messageFloorById,
   hasMore = false,
   loadingOlder = false,
   onLoadOlder,
@@ -746,7 +748,7 @@ export function MessageStream({
             <MessageCard
               key={message.id}
               message={message}
-              messageIndex={index}
+              messageIndex={messageFloorById?.[message.id] ?? index}
               isLast={index === messages.length - 1}
               helperHostReady={helperHostReady}
               renderRichContent={

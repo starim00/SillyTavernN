@@ -320,6 +320,46 @@ describe("workspace components", () => {
     expect(html).not.toMatch(/aria-hidden="true" style="height:[^"]+"/);
   });
 
+  it("keeps trusted frame names on their complete-history message floors", () => {
+    const message: WorkspaceMessage = {
+      id: "message-visible-floor-21",
+      conversationId: "conversation-long",
+      role: "assistant",
+      content: "Raw status",
+      displayContent: "<section>Floor 21 status</section>",
+      appliedRegexScriptIds: ["card-status"],
+      createdLabel: "10:30",
+      revision: 1,
+    };
+    const noop = vi.fn();
+    const html = renderToStaticMarkup(
+      <MessageStream
+        conversationId="conversation-long"
+        messages={[message]}
+        messageFloorById={{ [message.id]: 21 }}
+        generation={{
+          status: "idle",
+          mode: null,
+          conversationId: null,
+          generationId: null,
+          targetMessageId: null,
+          preview: "",
+          reasoningPreview: "",
+        }}
+        onCopy={noop}
+        onUpdate={noop}
+        onDelete={noop}
+        onRegenerate={noop}
+        onContinue={noop}
+        onSelectSwipe={noop}
+      />,
+    );
+
+    expect(html).toContain('id="TH-message--21--0"');
+    expect(html).toContain('mesid="21"');
+    expect(html).not.toContain('id="TH-message--0--0"');
+  });
+
   it("does not create an inner scrollbar for ordinary message content", () => {
     for (const selector of [".message-item", ".message-item__content"]) {
       const block = cssBlocks(selector)[0] ?? "";

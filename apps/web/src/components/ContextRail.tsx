@@ -1335,6 +1335,8 @@ export function RegexRail({
 
 type WorldbookRailProps = {
   worldbooks: Worldbook[];
+  title?: string;
+  emptyText?: string;
   expanded: boolean;
   onToggle: () => void;
   onPermission: (worldbookId: string, entryId: string) => void;
@@ -1347,6 +1349,8 @@ type WorldbookRailProps = {
 
 export function WorldbookRail({
   worldbooks,
+  title,
+  emptyText = "此会话暂未绑定世界书。",
   expanded,
   onToggle,
   onPermission,
@@ -1355,7 +1359,7 @@ export function WorldbookRail({
   return (
     <SupportPanel
       id="worldbook-panel"
-      title={`当前会话 · ${worldbooks.length} 本`}
+      title={title ?? `当前会话 · ${worldbooks.length} 本`}
       icon={<BookOpenText size={18} />}
       expanded={expanded}
       onToggle={onToggle}
@@ -1405,7 +1409,7 @@ export function WorldbookRail({
           </article>
         ))}
         {worldbooks.length === 0 ? (
-          <p className="support-empty">此会话暂未绑定世界书。</p>
+          <p className="support-empty">{emptyText}</p>
         ) : null}
       </div>
     </SupportPanel>

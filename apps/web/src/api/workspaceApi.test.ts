@@ -31,6 +31,7 @@ import {
   updatePresetPrompt,
   updatePresetGeneration,
   updateRegexGrant,
+  updateCardWorldbooks,
   updateWorldbookEntry,
   updateWorldbookEntryPermission,
 } from "./workspaceApi";
@@ -1161,11 +1162,18 @@ describe("workspace API client", () => {
         file: new File(
           [
             JSON.stringify({
-              name: "Harbor lore",
-              entries: [{ keys: ["bell"], content: "The bell rings late." }],
+              entries: {
+                0: {
+                  uid: 0,
+                  key: ["bell"],
+                  keysecondary: ["harbor"],
+                  comment: "Clean-room standalone entry",
+                  content: "The bell rings late.",
+                },
+              },
             }),
           ],
-          "lore.json",
+          "standalone-lore.json",
         ),
         kind: "worldbook",
         route: "/api/worldbooks/import",
@@ -1244,6 +1252,43 @@ describe("workspace API client", () => {
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(
       cases.map(({ route }) => route),
     );
+  });
+
+  it("replaces the selected card's worldbook combination", async () => {
+    const state = createDemoWorkspace();
+    const card = state.cards[0]!;
+    const nextWorldbookIds = state.worldbooks.slice(0, 2).map(({ id }) => id);
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        data: {
+          card: { ...card, worldbookIds: nextWorldbookIds },
+          conversations: [
+            {
+              id: "conversation-card-worldbooks",
+              title: "Updated combination",
+              cardId: card.id,
+              worldbookIds: nextWorldbookIds,
+            },
+          ],
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const updated = await updateCardWorldbooks(card, nextWorldbookIds);
+
+    expect(updated.card.worldbookIds).toEqual(nextWorldbookIds);
+    expect(updated.conversations[0]?.worldbookIds).toEqual(nextWorldbookIds);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/cards/${encodeURIComponent(card.id)}/worldbooks`,
+      expect.objectContaining({ method: "PUT" }),
+    );
+    expect(
+      parseRequestBody((fetchMock.mock.calls[0]?.[1] as RequestInit).body),
+    ).toEqual({
+      expectedWorldbookIds: card.worldbookIds,
+      worldbookIds: nextWorldbookIds,
+    });
   });
 
   it("blocks chat import until a role card is selected", async () => {

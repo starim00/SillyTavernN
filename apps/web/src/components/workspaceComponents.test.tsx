@@ -46,6 +46,46 @@ function cssBlocks(selector: string): string[] {
 }
 
 describe("workspace components", () => {
+  it("shows the complete worldbook library beside the current card combination", () => {
+    const state = createDemoWorkspace();
+    const card = state.cards[0]!;
+    const activeWorldbooks = state.worldbooks.filter((worldbook) =>
+      card.worldbookIds.includes(worldbook.id),
+    );
+    const html = renderToStaticMarkup(
+      <WorkspaceModals
+        modal={{ kind: "worldbooks" }}
+        apiOnline
+        cards={state.cards}
+        selectedCard={card}
+        plugins={state.plugins}
+        legacyHostPlugins={{}}
+        worldbooks={state.worldbooks}
+        activeWorldbooks={activeWorldbooks}
+        providerConnections={state.providerConnections}
+        selectedProviderId={state.selectedProviderId}
+        onClose={vi.fn()}
+        onCreateConversation={vi.fn()}
+        onImport={vi.fn()}
+        onInstallPlugin={vi.fn()}
+        onTogglePlugin={vi.fn()}
+        onPermission={vi.fn()}
+        onSaveCardWorldbooks={vi.fn()}
+        onSelectProvider={vi.fn()}
+        onSaveProvider={vi.fn()}
+        onExportProvider={vi.fn()}
+        onLoadProviderModels={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain("全部世界书");
+    expect(html).toContain("当前角色卡组合");
+    expect(html).toContain("保存组合");
+    for (const worldbook of state.worldbooks) {
+      expect(html).toContain(worldbook.name);
+    }
+  });
+
   it("keeps the Provider editor aligned with the selected connection", () => {
     const first: ProviderConnection = {
       id: "provider-first",

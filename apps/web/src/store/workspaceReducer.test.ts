@@ -175,6 +175,33 @@ describe("workspaceReducer", () => {
     expect(loading.cards).toBe(selected.cards);
   });
 
+  it("refreshes a card and all returned conversations after its worldbook combination changes", () => {
+    const state = createDemoWorkspace();
+    const card = state.cards[0]!;
+    const cardConversations = state.conversations.filter(
+      (conversation) => conversation.cardId === card.id,
+    );
+    const worldbookIds = state.worldbooks.slice(0, 2).map(({ id }) => id);
+    const next = workspaceReducer(state, {
+      type: "card/worldbooks",
+      card: { ...card, worldbookIds },
+      conversations: cardConversations.map((conversation) => ({
+        ...conversation,
+        worldbookIds,
+      })),
+    });
+
+    expect(next.cards.find((candidate) => candidate.id === card.id)).toEqual({
+      ...card,
+      worldbookIds,
+    });
+    expect(
+      next.conversations
+        .filter((conversation) => conversation.cardId === card.id)
+        .every((conversation) => conversation.worldbookIds === worldbookIds),
+    ).toBe(true);
+  });
+
   it("replaces a preset after one prompt is enabled or edited", () => {
     const state = createDemoWorkspace();
     const preset = state.presets[0]!;

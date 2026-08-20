@@ -1138,6 +1138,25 @@ export async function loadWorldbooksFromApi(): Promise<Worldbook[]> {
   return result.data.map(normalizeWorldbook);
 }
 
+export async function updateCardWorldbooks(
+  card: RoleCard,
+  worldbookIds: string[],
+): Promise<{ card: RoleCard; conversations: ConversationSpace[] }> {
+  const result = await request<
+    ApiEnvelope<{ card: ApiCard; conversations: ApiConversation[] }>
+  >(`/cards/${encodeURIComponent(card.id)}/worldbooks`, {
+    method: "PUT",
+    body: JSON.stringify({
+      expectedWorldbookIds: card.worldbookIds,
+      worldbookIds,
+    }),
+  });
+  return {
+    card: normalizeCard(result.data.card, result.data.conversations),
+    conversations: result.data.conversations.map(normalizeConversation),
+  };
+}
+
 export async function loadWorkspaceFromApi(
   selectedPresetId?: string,
   selectedConversationId?: string,

@@ -7,6 +7,55 @@ import { importWorldbookJson } from "./worldbook.js";
 const now = "2026-07-29T00:00:00.000Z";
 
 describe("SillyTavern worldbook compatibility", () => {
+  it("imports a standalone object-keyed entry collection without book metadata", () => {
+    const imported = importWorldbookJson(
+      {
+        entries: {
+          0: {
+            uid: 0,
+            key: ["silver latch"],
+            keysecondary: ["workbench"],
+            comment: "Clean-room object entry",
+            content: "A compact reference entry.",
+            selective: true,
+            selectiveLogic: 1,
+            order: 42,
+            position: 0,
+            disable: false,
+            probability: 75,
+            useProbability: true,
+            scanDepth: 3,
+            caseSensitive: true,
+            matchWholeWords: true,
+          },
+        },
+      },
+      {
+        filename: "standalone-tools.json",
+        idFactory: (kind) => `${kind}-standalone`,
+        now: () => now,
+      },
+    );
+
+    expect(imported.value.name).toBe("standalone-tools");
+    expect(imported.value.entries).toEqual([
+      expect.objectContaining({
+        label: "Clean-room object entry",
+        primaryKeys: ["silver latch"],
+        secondaryKeys: ["workbench"],
+        content: "A compact reference entry.",
+        disabled: false,
+        extensions: {
+          probability: 75,
+        },
+        scanDepth: 3,
+        caseSensitive: true,
+        matchWholeWords: true,
+        agentEditable: false,
+      }),
+    ]);
+  });
+
   it("normalizes Character Card extension placement and recursion metadata", () => {
     const imported = importWorldbookJson(
       {

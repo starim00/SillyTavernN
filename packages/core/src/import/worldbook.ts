@@ -73,6 +73,9 @@ const knownEntryFields = [
   "order",
   "insertion_order",
   "priority",
+  "probability",
+  "useProbability",
+  "use_probability",
   "use_regex",
   "useRegex",
   "extensions",
@@ -214,6 +217,16 @@ function normalizeEntry(
     readString(raw, "outletName", "outlet_name") ??
     readString(extensions, "outletName", "outlet_name");
   const insertionRole = insertionRoleOf(extensions.role ?? raw.role);
+  const useProbability =
+    readBoolean(raw, "useProbability", "use_probability") ??
+    readBoolean(extensions, "useProbability", "use_probability") ??
+    true;
+  const importedProbability =
+    readNumber(raw, "probability") ?? readNumber(extensions, "probability");
+  const probability =
+    useProbability && importedProbability !== undefined
+      ? Math.max(0, Math.min(100, importedProbability))
+      : 100;
 
   return {
     // Entry ids in portable worldbooks are local to that book and commonly
@@ -280,7 +293,10 @@ function normalizeEntry(
     position: positionOf(raw.position),
     order: insertionOrder,
     priority: readNumber(raw, "priority") ?? insertionOrder,
-    extensions,
+    extensions: {
+      ...extensions,
+      probability,
+    },
     compatibility: {
       sourceFormat: "sillytavern-worldbook-entry",
       unknownFields: {

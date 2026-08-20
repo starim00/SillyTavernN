@@ -543,6 +543,38 @@ export async function registerWorkspaceRoutes(
     );
   });
 
+  app.put<{ Params: { id: string } }>(
+    "/api/cards/:id/worldbooks",
+    async (request) => {
+      const input = z
+        .object({
+          expectedWorldbookIds: z.array(entityId).max(10_000),
+          worldbookIds: z.array(entityId).max(10_000),
+        })
+        .strict()
+        .superRefine((value, refinement) => {
+          for (const key of ["expectedWorldbookIds", "worldbookIds"] as const) {
+            if (new Set(value[key]).size !== value[key].length) {
+              refinement.addIssue({
+                code: "custom",
+                path: [key],
+                message: "Worldbook ids must be unique.",
+              });
+            }
+          }
+        })
+        .parse(request.body);
+      const cardId = entityId.parse(request.params.id);
+      context.store.replaceCardWorldbooks({ cardId, ...input });
+      return envelope({
+        card: cardDto(context, cardId),
+        conversations: context.store
+          .listCardConversations(cardId)
+          .map((conversation) => conversationDto(context, conversation.id)),
+      });
+    },
+  );
+
   app.delete<{ Params: { id: string } }>("/api/cards/:id", async (request) => {
     const input = z
       .object({ expectedRevision: z.number().int().nonnegative() })

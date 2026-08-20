@@ -425,6 +425,55 @@ describe("AppStore", () => {
     }
   });
 
+  it("atomically replaces a card's worldbook combination", () => {
+    const store = new AppStore();
+    try {
+      const card = store.createCard({
+        id: "card-worldbook-combination",
+        kind: "character",
+        name: "Combination card",
+      }).card;
+      const first = store.createWorldbook({
+        id: "worldbook-combination-first",
+        name: "First lore",
+      });
+      const second = store.createWorldbook({
+        id: "worldbook-combination-second",
+        name: "Second lore",
+      });
+      store.bindWorldbook({
+        worldbookId: first.id,
+        scopeType: "card",
+        scopeId: card.id,
+      });
+
+      expect(
+        store
+          .replaceCardWorldbooks({
+            cardId: card.id,
+            expectedWorldbookIds: [first.id],
+            worldbookIds: [second.id],
+          })
+          .map((binding) => binding.worldbookId),
+      ).toEqual([second.id]);
+      expect(
+        store
+          .listWorldbooks()
+          .map((worldbook) => worldbook.id)
+          .sort(),
+      ).toEqual([first.id, second.id].sort());
+      expect(() =>
+        store.replaceCardWorldbooks({
+          cardId: card.id,
+          expectedWorldbookIds: [first.id],
+          worldbookIds: [first.id, second.id],
+        }),
+      ).toThrow(/changed concurrently/u);
+    } finally {
+      store.close();
+    }
+  });
+
   it("deletes a preset with its regex, scripts, variables and artifacts", () => {
     const store = new AppStore();
     try {

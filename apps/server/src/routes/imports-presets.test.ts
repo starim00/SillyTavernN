@@ -492,6 +492,8 @@ describe("portable import routes", () => {
               uid: 0,
               key: ["moon"],
               content: "The moon gate opens at low tide.",
+              probability: 75,
+              useProbability: true,
               agentEditable: true,
             },
           },
@@ -507,6 +509,16 @@ describe("portable import routes", () => {
         },
         diagnostics: [{ code: "IMPORTED_AGENT_PERMISSION_IGNORED" }],
       },
+    });
+    const listed = await app.inject({ method: "GET", url: "/api/worldbooks" });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json()).toMatchObject({
+      data: [
+        expect.objectContaining({
+          id: "worldbook-portable",
+          entries: [expect.objectContaining({ probability: 75 })],
+        }),
+      ],
     });
     expect(context.store.listWorldbookEntries("worldbook-portable")).toEqual([
       expect.objectContaining({

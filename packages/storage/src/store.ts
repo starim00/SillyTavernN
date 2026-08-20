@@ -1615,6 +1615,77 @@ export class AppStore {
     });
   }
 
+  replaceCardWorldbooks(input: {
+    cardId: string;
+    expectedWorldbookIds: readonly string[];
+    worldbookIds: readonly string[];
+  }): WorldbookBinding[] {
+    return this.database.transaction(() => {
+      this.getCard(input.cardId);
+      const desiredIds = [...new Set(input.worldbookIds)];
+      desiredIds.forEach((worldbookId) => this.getWorldbook(worldbookId));
+
+      const currentBindings = this.database
+        .all<Row>(
+          `SELECT * FROM worldbook_bindings
+           WHERE scope_type = 'card' AND scope_id = ?
+           ORDER BY created_at, id`,
+          input.cardId,
+        )
+        .map((row) => this.mapWorldbookBinding(row));
+      const currentIds = currentBindings.map((binding) => binding.worldbookId);
+      const expectedIds = [...new Set(input.expectedWorldbookIds)];
+      const normalizedCurrent = [...currentIds].sort();
+      const normalizedExpected = [...expectedIds].sort();
+      if (
+        normalizedCurrent.length !== normalizedExpected.length ||
+        normalizedCurrent.some(
+          (worldbookId, index) => worldbookId !== normalizedExpected[index],
+        )
+      ) {
+        throw new ConflictError(
+          `Card '${input.cardId}' worldbook bindings changed concurrently.`,
+          {
+            cardId: input.cardId,
+            expectedWorldbookIds: expectedIds,
+            actualWorldbookIds: currentIds,
+          },
+        );
+      }
+
+      const desiredSet = new Set(desiredIds);
+      for (const binding of currentBindings) {
+        if (desiredSet.has(binding.worldbookId)) continue;
+        this.database.run(
+          "DELETE FROM worldbook_bindings WHERE id = ?",
+          binding.id,
+        );
+      }
+
+      const currentSet = new Set(currentIds);
+      for (const worldbookId of desiredIds) {
+        if (currentSet.has(worldbookId)) continue;
+        this.database.run(
+          `INSERT INTO worldbook_bindings(id, worldbook_id, scope_type, scope_id, created_at)
+           VALUES (?, ?, 'card', ?, ?)`,
+          identifier(),
+          worldbookId,
+          input.cardId,
+          timestamp(),
+        );
+      }
+
+      return this.database
+        .all<Row>(
+          `SELECT * FROM worldbook_bindings
+           WHERE scope_type = 'card' AND scope_id = ?
+           ORDER BY created_at, id`,
+          input.cardId,
+        )
+        .map((row) => this.mapWorldbookBinding(row));
+    });
+  }
+
   listWorldbookBindings(worldbookId: string): WorldbookBinding[] {
     this.getWorldbook(worldbookId);
     return this.database

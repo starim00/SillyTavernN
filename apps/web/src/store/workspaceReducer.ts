@@ -14,6 +14,7 @@ import type {
   PromptPreset,
   ProviderConnection,
   RegexScope,
+  RoleCard,
   WorkspaceMessage,
   WorkspaceState,
   Worldbook,
@@ -31,6 +32,11 @@ type WorkspaceAction =
   | { type: "bootstrap/error"; error: string }
   | { type: "bootstrap/demo" }
   | { type: "card/select"; id: string }
+  | {
+      type: "card/worldbooks";
+      card: RoleCard;
+      conversations: ConversationSpace[];
+    }
   | { type: "conversation/create"; conversation: ConversationSpace }
   | { type: "conversation/delete"; id: string }
   | { type: "conversation/select"; id: string }
@@ -273,6 +279,23 @@ export function workspaceReducer(
         modal: { kind: "closed" },
         agentProposal: null,
         agentRun: null,
+      };
+    }
+    case "card/worldbooks": {
+      const conversations = new Map(
+        action.conversations.map((conversation) => [
+          conversation.id,
+          conversation,
+        ]),
+      );
+      return {
+        ...state,
+        cards: state.cards.map((card) =>
+          card.id === action.card.id ? action.card : card,
+        ),
+        conversations: state.conversations.map(
+          (conversation) => conversations.get(conversation.id) ?? conversation,
+        ),
       };
     }
     case "conversation/create": {

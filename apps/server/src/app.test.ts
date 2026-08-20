@@ -159,6 +159,56 @@ describe("SillyTavern N server", () => {
     expect(context.store.listPresets()).toEqual([]);
   });
 
+  it("replaces one card's worldbook combination without deleting library books", async () => {
+    const { app, context } = await application(false);
+    const card = context.store.createCard({
+      id: "card-worldbook-route",
+      kind: "character",
+      name: "Worldbook route card",
+    }).card;
+    const conversation = context.store.createConversation({
+      id: "conversation-worldbook-route",
+      title: "Worldbook route conversation",
+      cardId: card.id,
+    });
+    const first = context.store.createWorldbook({
+      id: "worldbook-route-first",
+      name: "First route lore",
+    });
+    const second = context.store.createWorldbook({
+      id: "worldbook-route-second",
+      name: "Second route lore",
+    });
+    context.store.bindWorldbook({
+      worldbookId: first.id,
+      scopeType: "card",
+      scopeId: card.id,
+    });
+
+    const response = await app.inject({
+      method: "PUT",
+      url: `/api/cards/${card.id}/worldbooks`,
+      payload: {
+        expectedWorldbookIds: [first.id],
+        worldbookIds: [second.id],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      data: {
+        card: { id: card.id, worldbookIds: [second.id] },
+        conversations: [
+          {
+            id: conversation.id,
+            worldbookIds: [second.id],
+          },
+        ],
+      },
+    });
+    expect(context.store.listWorldbooks()).toHaveLength(2);
+  });
+
   it("deletes a conversation and its conversation-scoped state through its public route", async () => {
     const { app, context } = await application(false);
     const card = context.store.createCard({

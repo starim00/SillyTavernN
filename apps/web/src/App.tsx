@@ -66,6 +66,7 @@ import {
   updatePresetPrompt,
   updatePresetGeneration,
   updateRegexGrant,
+  updateCardWorldbooks,
   updateTavernHelperGrant,
   updateWorldbookEntry,
   updateWorkspaceMessage,
@@ -2086,6 +2087,40 @@ export default function App() {
     [showToast],
   );
 
+  const saveCardWorldbookCombination = useCallback(
+    async (worldbookIds: string[]) => {
+      const card = workspaceStateRef.current.cards.find(
+        (candidate) =>
+          candidate.id === workspaceStateRef.current.selectedCardId,
+      );
+      if (!card || !apiOnline) {
+        showToast("连接本地服务后才能保存角色卡的世界书组合。", "warning");
+        throw new Error("Card worldbook combination requires the API");
+      }
+      try {
+        const updated = await updateCardWorldbooks(card, worldbookIds);
+        dispatch({
+          type: "card/worldbooks",
+          card: updated.card,
+          conversations: updated.conversations,
+        });
+        showToast(
+          `已为“${updated.card.name}”保存 ${String(worldbookIds.length)} 本世界书。`,
+          "success",
+        );
+      } catch (error) {
+        showToast(
+          error instanceof WorkspaceApiError && error.status === 409
+            ? "世界书组合已在其他位置发生变化，请重新打开后再保存。"
+            : "世界书组合保存失败；角色卡绑定没有改变。",
+          "warning",
+        );
+        throw error;
+      }
+    },
+    [apiOnline, showToast],
+  );
+
   const changePresetPrompt = useCallback(
     async (
       promptId: string,
@@ -2479,6 +2514,7 @@ export default function App() {
         onTogglePanel={(panel) => dispatch({ type: "panel/toggle", panel })}
         onSaveRegexScope={changeRegexScope}
         onSaveWorldbookEntry={saveWorldbookEntry}
+        onSaveCardWorldbooks={saveCardWorldbookCombination}
         onOpenPlugins={() =>
           dispatch({ type: "modal/set", modal: { kind: "plugins" } })
         }

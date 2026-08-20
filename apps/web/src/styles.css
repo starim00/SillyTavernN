@@ -3227,18 +3227,18 @@ select:focus-visible {
   overflow: hidden;
 }
 
-.worldbook-library__selection #worldbook-panel {
+.worldbook-library__selection > .support-panel {
   display: flex;
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
 }
 
-.worldbook-library__selection #worldbook-panel .support-panel__toggle {
+.worldbook-library__selection > .support-panel > .support-panel__toggle {
   flex: 0 0 auto;
 }
 
-.worldbook-library__selection #worldbook-panel .support-panel__content {
+.worldbook-library__selection > .support-panel > .support-panel__content {
   min-height: 0;
   flex: 1;
   overflow: auto;

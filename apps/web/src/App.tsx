@@ -2422,13 +2422,19 @@ export default function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <div className="topbar__brand">
-          <span className="brand-mark" aria-hidden="true">
-            <ChatCircleDots size={21} weight="fill" />
-          </span>
-          <div>
+        <div className="topbar__leading">
+          <div className="topbar__brand" aria-label="SillyTavern N">
+            <span className="brand-mark" aria-hidden="true">
+              <ChatCircleDots size={19} weight="fill" />
+            </span>
             <strong>SillyTavern N</strong>
-            <span>Conversation workspace</span>
+          </div>
+          <div className="topbar__conversation">
+            <h1 title={conversation.title}>{conversation.title}</h1>
+            <p>
+              角色卡 · {selectedCard?.name}
+              {activePersona ? ` · 你是${activePersona.name}` : ""}
+            </p>
           </div>
         </div>
         <nav className="topbar__actions" aria-label="工作区操作">
@@ -2571,18 +2577,6 @@ export default function App() {
             onRetry={bootstrapWorkspace}
             onEnterDemo={enterDemoWorkspace}
           />
-          <header className="conversation-header">
-            <div className="conversation-header__identity">
-              <div>
-                <h1>{conversation.title}</h1>
-                <p>
-                  角色卡 · {selectedCard?.name}
-                  {activePersona ? ` · 你是${activePersona.name}` : ""}
-                </p>
-              </div>
-            </div>
-          </header>
-
           <MessageStream
             conversationId={conversation.id}
             messages={messages}

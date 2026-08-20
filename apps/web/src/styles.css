@@ -124,17 +124,17 @@ select:focus-visible {
   align-items: center;
   justify-content: space-between;
   min-width: 0;
-  padding: 0 20px;
+  padding: 0 16px;
   background: rgba(255, 254, 250, 0.96);
   border-bottom: 1px solid var(--border);
 }
 
+.topbar__leading,
 .topbar__brand,
 .topbar__actions,
 .topbar-button,
 .surface-status,
 .participant-chip,
-.conversation-header__participants,
 .composer__toolbar,
 .composer__selectors,
 .composer__send,
@@ -168,43 +168,69 @@ select:focus-visible {
 }
 
 .topbar__brand {
+  flex: none;
   min-width: 0;
-  gap: 11px;
+  gap: 8px;
 }
 
 .brand-mark {
   display: grid;
-  flex: 0 0 36px;
-  width: 36px;
-  height: 36px;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
   place-items: center;
   color: #fff;
   background: var(--coral);
-  border-radius: 11px;
+  border-radius: 10px;
 }
 
-.topbar__brand > div {
-  display: grid;
-  gap: 1px;
+.topbar__leading {
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 0;
 }
 
 .topbar__brand strong {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 720;
   letter-spacing: -0.01em;
+  white-space: nowrap;
 }
 
-.topbar__brand span {
+.topbar__conversation {
+  display: grid;
+  min-width: 120px;
+  max-width: 320px;
+  gap: 1px;
+  padding-left: 14px;
+  margin-left: 14px;
+  border-left: 1px solid var(--border);
+}
+
+.topbar__conversation h1,
+.topbar__conversation p {
+  overflow: hidden;
+  margin: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbar__conversation h1 {
+  font-size: 13px;
+  font-weight: 730;
+  letter-spacing: -0.015em;
+}
+
+.topbar__conversation p {
   color: var(--text-soft);
   font-size: 10px;
-  font-weight: 620;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  line-height: 1.35;
 }
 
 .topbar__actions {
+  flex: none;
   min-width: 0;
-  gap: 10px;
+  gap: 7px;
 }
 
 .topbar-action-group,
@@ -219,7 +245,7 @@ select:focus-visible {
 }
 
 .topbar-action-group + .topbar-action-group {
-  padding-left: 11px;
+  padding-left: 9px;
 }
 
 .topbar-action-group + .topbar-action-group::before {
@@ -240,7 +266,7 @@ select:focus-visible {
 .topbar-button {
   min-height: 36px;
   gap: 7px;
-  padding: 0 10px;
+  padding: 0 8px;
   color: var(--text-soft);
   background: transparent;
   border-radius: var(--radius-sm);
@@ -672,14 +698,14 @@ select:focus-visible {
 .conversation-workspace {
   display: grid;
   flex: 1 1 auto;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) auto;
   min-width: 0;
   min-height: 0;
   background: var(--surface);
 }
 
 .conversation-workspace:has(> .workspace-connection-banner) {
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
 .workspace-connection-banner {
@@ -857,65 +883,6 @@ select:focus-visible {
   box-shadow: 0 0 0 2px rgba(143, 183, 202, 0.2);
 }
 
-.conversation-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 82px;
-  gap: 20px;
-  padding: 12px 22px;
-  background: rgba(255, 254, 250, 0.98);
-  border-bottom: 1px solid var(--border);
-}
-
-.conversation-header__identity {
-  display: flex;
-  align-items: flex-start;
-  min-width: 0;
-  gap: 12px;
-}
-
-.conversation-mode {
-  flex: none;
-  margin-top: 2px;
-  padding: 4px 7px;
-  color: #55768a;
-  background: var(--pale-blue);
-  border-radius: 6px;
-  font-size: 10px;
-  font-weight: 760;
-}
-
-.conversation-header__identity > div {
-  min-width: 0;
-}
-
-.conversation-header h1 {
-  overflow: hidden;
-  margin: 0;
-  font-size: clamp(17px, 1.55vw, 21px);
-  font-weight: 740;
-  letter-spacing: -0.025em;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.conversation-header p {
-  overflow: hidden;
-  max-width: 620px;
-  margin: 4px 0 0;
-  color: var(--text-soft);
-  font-size: 12px;
-  line-height: 1.45;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.conversation-header__participants {
-  min-width: 0;
-  gap: 10px;
-}
-
 .context-toggle {
   flex: none;
 }
@@ -1043,7 +1010,7 @@ select:focus-visible {
 }
 
 .message-window {
-  width: min(820px, calc(100% - 44px));
+  width: min(1080px, calc(100% - 44px));
   min-height: 100%;
   margin: 0 auto;
   padding: 18px 0 22px;
@@ -4501,6 +4468,14 @@ select:focus-visible {
 }
 
 @media (max-width: 1180px) {
+  .topbar__conversation {
+    max-width: 240px;
+  }
+
+  .topbar__conversation p {
+    display: none;
+  }
+
   .preset-settings-rail {
     position: fixed;
     z-index: 65;
@@ -4551,8 +4526,20 @@ select:focus-visible {
     gap: 5px;
   }
 
-  .topbar__brand span {
+  .topbar__brand strong {
     display: none;
+  }
+
+  .topbar__conversation {
+    min-width: 0;
+    max-width: clamp(56px, 20vw, 110px);
+    padding-left: 0;
+    margin-left: 0;
+    border-left: 0;
+  }
+
+  .topbar__conversation h1 {
+    font-size: 12px;
   }
 
   .topbar__actions {
@@ -4611,32 +4598,6 @@ select:focus-visible {
     background: rgba(32, 47, 56, 0.24);
   }
 
-  .conversation-header {
-    min-height: 74px;
-    padding: 10px 12px;
-  }
-
-  .conversation-header__identity {
-    gap: 8px;
-  }
-
-  .conversation-mode {
-    display: none;
-  }
-
-  .conversation-header h1 {
-    font-size: 16px;
-  }
-
-  .conversation-header p {
-    max-width: 65vw;
-    font-size: 10px;
-  }
-
-  .conversation-header__participants > .participant-chips {
-    display: none;
-  }
-
   .message-window {
     width: calc(100% - 22px);
     padding-top: 8px;
@@ -4673,10 +4634,6 @@ select:focus-visible {
 }
 
 @media (max-width: 560px) {
-  .conversation-header p {
-    max-width: 58vw;
-  }
-
   .composer__primary-action {
     width: 38px;
     padding: 0;

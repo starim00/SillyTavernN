@@ -675,11 +675,7 @@ export class TavernHelperRuntime {
     const baseline = this.previousMessageVariables(messageIndex, messages);
 
     try {
-      await this.emit(
-        tavernEvents.MESSAGE_RECEIVED,
-        messageIndex,
-        "assistant",
-      );
+      await this.emit(tavernEvents.MESSAGE_RECEIVED, messageIndex, "assistant");
       const variables = this.context.variables.messages[message.id] ?? {};
       if (
         this.hasMessageVariableSchema(messageIndex) &&

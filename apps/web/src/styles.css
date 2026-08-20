@@ -309,12 +309,12 @@ select:focus-visible {
 }
 
 .rail-title strong {
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .rail-title span {
   color: var(--text-soft);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .card-back-button,
@@ -325,7 +325,7 @@ select:focus-visible {
   gap: 6px;
   color: #557b8f;
   background: transparent;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 690;
 }
 
@@ -377,7 +377,7 @@ select:focus-visible {
 
 .selected-card-summary strong {
   overflow: hidden;
-  font-size: 13px;
+  font-size: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -386,7 +386,7 @@ select:focus-visible {
   display: -webkit-box;
   overflow: hidden;
   color: var(--text-soft);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.4;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -411,7 +411,7 @@ select:focus-visible {
   color: var(--text-soft);
   background: transparent;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 670;
 }
 
@@ -447,7 +447,7 @@ select:focus-visible {
   background: transparent;
   border: 0;
   outline: 0;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .rail-search input::placeholder {
@@ -461,7 +461,7 @@ select:focus-visible {
   min-height: 34px;
   padding: 0 5px;
   color: var(--text-soft);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 690;
   letter-spacing: 0.02em;
 }
@@ -507,7 +507,7 @@ select:focus-visible {
 .conversation-row__header strong {
   min-width: 0;
   overflow: hidden;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 710;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -517,14 +517,14 @@ select:focus-visible {
   flex: none;
   margin-left: 8px;
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .conversation-row__subtitle {
   display: -webkit-box;
   overflow: hidden;
   color: var(--text-soft);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.45;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -532,7 +532,7 @@ select:focus-visible {
 
 .conversation-row__unread {
   color: var(--coral);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 690;
 }
 
@@ -545,7 +545,7 @@ select:focus-visible {
   color: #fff;
   background: var(--coral);
   border-radius: 999px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 750;
 }
 
@@ -638,7 +638,7 @@ select:focus-visible {
 
 .world-row strong {
   overflow: hidden;
-  font-size: 12px;
+  font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -646,14 +646,14 @@ select:focus-visible {
 .world-row small {
   overflow: hidden;
   color: var(--text-soft);
-  font-size: 10px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .world-row__count {
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .rail-empty {
@@ -666,7 +666,7 @@ select:focus-visible {
 }
 
 .rail-empty strong {
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .conversation-workspace {
@@ -787,12 +787,12 @@ select:focus-visible {
 }
 
 .preset-settings-rail__header strong {
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .preset-settings-rail__header small {
   color: var(--text-faint);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .preset-settings-rail__close {
@@ -819,7 +819,7 @@ select:focus-visible {
   align-items: center;
   gap: 6px;
   color: var(--text-soft);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 720;
 }
 
@@ -832,7 +832,7 @@ select:focus-visible {
   border: 1px solid var(--border);
   border-radius: 9px;
   outline: 0;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 650;
 }
 
@@ -2059,14 +2059,14 @@ select:focus-visible {
   align-items: center;
   gap: 6px;
   color: #466c7d;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 720;
 }
 
 .preset-generation__heading small,
 .preset-generation__check small {
   color: var(--text-faint);
-  font-size: 8px;
+  font-size: 10px;
   line-height: 1.4;
 }
 
@@ -2084,7 +2084,7 @@ select:focus-visible {
 
 .preset-generation__check > span {
   color: var(--text);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 650;
 }
 
@@ -2107,7 +2107,7 @@ select:focus-visible {
 
 .preset-generation__field--number > span {
   color: var(--text-soft);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.35;
 }
 
@@ -2117,7 +2117,7 @@ select:focus-visible {
   justify-content: space-between;
   gap: 8px;
   color: var(--text-soft);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.35;
 }
 
@@ -2129,7 +2129,7 @@ select:focus-visible {
   text-align: right;
   background: #edf1f2;
   border-radius: 6px;
-  font-size: 10px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -2158,7 +2158,7 @@ select:focus-visible {
   border-radius: 6px;
   outline: 0;
   font: inherit;
-  font-size: 10px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -2185,7 +2185,7 @@ select:focus-visible {
   color: #466c7d;
   cursor: pointer;
   list-style: none;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -2214,7 +2214,7 @@ select:focus-visible {
 .preset-generation__details > div {
   padding: 1px 2px 4px 19px;
   color: var(--text-faint);
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.45;
 }
 
@@ -2236,13 +2236,13 @@ select:focus-visible {
 }
 
 .preset-detail__summary strong {
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .preset-detail__summary span,
 .preset-prompt__editor > span {
   color: var(--text-faint);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .preset-insert {
@@ -2264,7 +2264,7 @@ select:focus-visible {
 .preset-insert label > span,
 .preset-insert small {
   color: var(--text-faint);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .preset-insert select {
@@ -2278,7 +2278,7 @@ select:focus-visible {
   border-radius: 7px;
   outline: none;
   font: inherit;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .preset-insert select:focus {
@@ -2290,7 +2290,7 @@ select:focus-visible {
   align-self: end;
   min-height: 32px;
   padding: 0 9px;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .preset-insert small {
@@ -2324,7 +2324,7 @@ select:focus-visible {
   border: 0;
   outline: 0;
   font-family: inherit;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .preset-filters {
@@ -2340,7 +2340,7 @@ select:focus-visible {
   background: #eef1f2;
   border: 1px solid transparent;
   border-radius: 6px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 650;
 }
 
@@ -2436,7 +2436,7 @@ select:focus-visible {
 .preset-prompt__identity strong {
   overflow: hidden;
   color: var(--text);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2453,7 +2453,7 @@ select:focus-visible {
   color: #806b42;
   background: #f8f1df;
   border-radius: 4px;
-  font-size: 7px;
+  font-size: 9px;
   font-weight: 700;
 }
 
@@ -2543,7 +2543,7 @@ select:focus-visible {
 
 .preset-prompt__editor label > span {
   color: var(--text-faint);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .preset-prompt__editor textarea,
@@ -2556,7 +2556,7 @@ select:focus-visible {
   border-radius: 7px;
   outline: none;
   font-family: inherit;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
@@ -2576,7 +2576,7 @@ select:focus-visible {
   color: #745f3e;
   background: #f8f1df;
   border-radius: 6px;
-  font-size: 8px;
+  font-size: 10px;
   line-height: 1.45;
 }
 
@@ -2596,7 +2596,7 @@ select:focus-visible {
 .preset-prompt__editor-actions .button {
   min-height: 30px;
   padding: 0 8px;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .regex-manager {
@@ -2622,14 +2622,14 @@ select:focus-visible {
   background: transparent;
   border: 1px solid transparent;
   border-radius: 6px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 680;
   place-items: center;
 }
 
 .regex-scope-tabs button span {
   color: var(--text-faint);
-  font-size: 8px;
+  font-size: 10px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -2655,19 +2655,19 @@ select:focus-visible {
 }
 
 .regex-source-summary strong {
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .regex-source-summary span {
   color: var(--text-faint);
-  font-size: 8px;
+  font-size: 10px;
   line-height: 1.4;
 }
 
 .regex-source-note {
   margin: -2px 0 0;
   color: var(--text-soft);
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.5;
 }
 
@@ -2690,7 +2690,7 @@ select:focus-visible {
 
 .regex-diagnostics strong,
 .regex-diagnostics span {
-  font-size: 8px;
+  font-size: 10px;
   line-height: 1.4;
 }
 
@@ -2703,7 +2703,7 @@ select:focus-visible {
 .regex-toolbar .button {
   min-height: 32px;
   padding: 0 8px;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .regex-search {
@@ -2733,7 +2733,7 @@ select:focus-visible {
   border: 0;
   outline: 0;
   font-family: inherit;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .regex-filters {
@@ -2749,7 +2749,7 @@ select:focus-visible {
   background: #eef1f2;
   border: 1px solid transparent;
   border-radius: 6px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 650;
 }
 
@@ -2844,7 +2844,7 @@ select:focus-visible {
 .regex-script__identity strong {
   overflow: hidden;
   color: var(--text);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2928,7 +2928,7 @@ select:focus-visible {
   display: grid;
   gap: 4px;
   color: var(--text-soft);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 680;
 }
 
@@ -2942,7 +2942,7 @@ select:focus-visible {
   border-radius: 7px;
   outline: 0;
   font-family: inherit;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .regex-editor input:not([type="checkbox"]),
@@ -2980,7 +2980,7 @@ select:focus-visible {
 .regex-editor__placements legend {
   margin-bottom: 5px;
   color: var(--text-soft);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 680;
 }
 
@@ -2990,7 +2990,7 @@ select:focus-visible {
   align-items: center;
   gap: 5px;
   color: var(--text-soft);
-  font-size: 8px;
+  font-size: 10px;
   line-height: 1.35;
 }
 
@@ -3020,7 +3020,7 @@ select:focus-visible {
 .regex-editor__actions .button {
   min-height: 30px;
   padding: 0 8px;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .worldbook-stack {
@@ -3048,20 +3048,20 @@ select:focus-visible {
 }
 
 .worldbook-item strong {
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .worldbook-item__header > div > span,
 .worldbook-item small {
   color: var(--text-faint);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .worldbook-item p,
 .tool-proposal p {
   margin: 8px 0;
   color: var(--text-soft);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
@@ -3076,7 +3076,7 @@ select:focus-visible {
   color: #587489;
   background: var(--pale-blue);
   border-radius: 5px;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .worldbook-entry-table {
@@ -3103,7 +3103,7 @@ select:focus-visible {
   color: var(--text-faint);
   background: #f4f7f8;
   border-bottom: 1px solid #e3e9eb;
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 720;
   letter-spacing: 0.01em;
 }
@@ -3177,7 +3177,7 @@ select:focus-visible {
   background: var(--slate-soft);
   border: 1px solid #e0e5e8;
   border-radius: 999px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -3259,7 +3259,7 @@ select:focus-visible {
   background: #e6f0fc;
   border: 1px solid #c8ddf2;
   border-radius: 6px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 720;
   white-space: nowrap;
 }
@@ -3299,7 +3299,7 @@ select:focus-visible {
 }
 
 .worldbook-entry__title strong {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 670;
 }
 
@@ -3310,7 +3310,7 @@ select:focus-visible {
 
 .worldbook-entry__title span {
   color: var(--text-faint);
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .worldbook-entry__title:hover strong {
@@ -3321,12 +3321,12 @@ select:focus-visible {
 .worldbook-entry__placement {
   min-width: 0;
   color: var(--text-soft);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .worldbook-entry__number {
   color: var(--text-soft);
-  font-size: 10px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   text-align: center;
 }
@@ -3358,7 +3358,7 @@ select:focus-visible {
 
 .worldbook-entry__header > div > span {
   color: var(--text-faint);
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .worldbook-entry__actions {
@@ -3398,7 +3398,7 @@ select:focus-visible {
   border-radius: 7px;
   outline: 0;
   font-family: inherit;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .worldbook-entry-editor .field input,
@@ -3435,7 +3435,7 @@ select:focus-visible {
 .keyword-list-editor legend {
   margin-bottom: 4px;
   color: var(--text-soft);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 720;
 }
 
@@ -3478,7 +3478,7 @@ select:focus-visible {
 .worldbook-entry-editor__advanced summary {
   color: var(--text-soft);
   cursor: pointer;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -3491,7 +3491,7 @@ select:focus-visible {
   padding: 0;
   color: #4d7b93;
   background: transparent;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 690;
 }
 
@@ -3503,7 +3503,7 @@ select:focus-visible {
 .support-empty {
   margin: 0;
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .tool-proposal {
@@ -3529,7 +3529,7 @@ select:focus-visible {
 }
 
 .tool-proposal__header strong {
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.4;
 }
 
@@ -3542,7 +3542,7 @@ select:focus-visible {
   background: #eff6f2;
   border-radius: 7px;
   font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.55;
   white-space: pre-wrap;
 }
@@ -3556,7 +3556,7 @@ select:focus-visible {
   display: block;
   margin-top: 9px;
   color: var(--text-faint);
-  font-size: 8px;
+  font-size: 10px;
   line-height: 1.4;
 }
 
@@ -3622,14 +3622,14 @@ select:focus-visible {
 
 .modal-card h2 {
   margin: 1px 0 0;
-  font-size: 17px;
+  font-size: 18px;
   letter-spacing: -0.015em;
 }
 
 .modal-card__header p {
   margin: 5px 0 0;
   color: var(--text-soft);
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.5;
 }
 
@@ -3659,13 +3659,13 @@ select:focus-visible {
 .file-drop strong {
   margin-top: 10px;
   color: var(--text);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .file-drop span {
   margin-top: 5px;
   color: var(--text-soft);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .file-drop input {
@@ -3683,7 +3683,7 @@ select:focus-visible {
   color: #5c6e79;
   background: #f2f4f4;
   border-radius: 9px;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -3695,7 +3695,7 @@ select:focus-visible {
 .offline-note {
   margin: 0;
   color: #9a665e;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .modal-actions {
@@ -3715,7 +3715,7 @@ select:focus-visible {
 
 .modal-actions--split > span {
   color: var(--text-faint);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .plugin-list {
@@ -3747,24 +3747,24 @@ select:focus-visible {
 }
 
 .plugin-row__heading strong {
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .plugin-row__heading > span:not(.surface-status) {
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .plugin-row p {
   margin: 5px 0 3px;
   color: var(--text-soft);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
 .plugin-row small {
   color: var(--text-faint);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .plugin-list + .modal-note {
@@ -3823,12 +3823,12 @@ select:focus-visible {
 }
 
 .provider-row strong {
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .provider-row small {
   color: var(--text-faint);
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .provider-editor {
@@ -3919,12 +3919,12 @@ select:focus-visible {
 }
 
 .persona-row__select strong {
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .persona-row__select small {
   color: var(--text-faint);
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .persona-row__actions {
@@ -3962,7 +3962,7 @@ select:focus-visible {
 .check-row {
   gap: 7px;
   color: var(--text-soft);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .check-row input {
@@ -3972,7 +3972,7 @@ select:focus-visible {
 .form-error {
   margin: 0;
   color: #a55247;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .field {
@@ -3991,13 +3991,13 @@ select:focus-visible {
 .field > span,
 .participant-picker legend {
   color: var(--text-soft);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 710;
 }
 
 .field-hint {
   color: var(--text-faint);
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.45;
 }
 
@@ -4005,7 +4005,7 @@ select:focus-visible {
   min-height: 28px;
   gap: 4px;
   padding: 0 8px;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .field input,
@@ -4013,7 +4013,7 @@ select:focus-visible {
 .field textarea {
   height: 40px;
   padding: 0 11px;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .field textarea {
@@ -4068,12 +4068,12 @@ select:focus-visible {
 }
 
 .participant-option strong {
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .participant-option small {
   color: var(--text-faint);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .permission-summary {
@@ -4085,7 +4085,7 @@ select:focus-visible {
 .permission-summary > p {
   margin: 0;
   color: var(--text-soft);
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.65;
 }
 

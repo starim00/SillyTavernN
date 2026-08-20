@@ -696,6 +696,8 @@ select:focus-visible {
 }
 
 .conversation-workspace {
+  --conversation-content-width: 1080px;
+
   display: grid;
   flex: 1 1 auto;
   grid-template-rows: minmax(0, 1fr) auto;
@@ -1009,7 +1011,7 @@ select:focus-visible {
 }
 
 .message-window {
-  width: min(1080px, calc(100% - 44px));
+  width: min(var(--conversation-content-width), calc(100% - 44px));
   min-height: 100%;
   margin: 0 auto;
   padding: 18px 0 22px;
@@ -1589,6 +1591,11 @@ select:focus-visible {
 
 .composer__input-row {
   position: relative;
+  display: grid;
+  grid-template-columns:
+    78px minmax(0, var(--conversation-content-width))
+    78px;
+  justify-content: center;
   align-items: end;
   gap: 8px;
 }

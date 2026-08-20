@@ -58,3 +58,9 @@
   add per-capability grants or treat an iframe as a security boundary. Provider
   secrets and direct database handles remain server-only.
 - Legacy script actor and Agent actor are distinct. One permission must never imply the other.
+
+## Git workflow
+
+- This repository uses `main` for routine changes; do not create feature branches.
+- After reviewing the scoped staged changes and running relevant checks, commit and push directly to `origin/main`.
+- Do not create or push another branch unless the user explicitly requests it.

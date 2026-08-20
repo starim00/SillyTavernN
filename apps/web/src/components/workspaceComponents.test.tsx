@@ -377,6 +377,22 @@ describe("workspace components", () => {
     expect(streamBlock).not.toMatch(/scroll-behavior:\s*smooth/);
   });
 
+  it("centers the composer input on the same maximum width as message content", () => {
+    const workspaceBlock = cssBlocks(".conversation-workspace")[0] ?? "";
+    const messageWindowBlock = cssBlocks(".message-window")[0] ?? "";
+    const inputRowBlock = cssBlocks(".composer__input-row")[0] ?? "";
+
+    expect(workspaceBlock).toMatch(/--conversation-content-width:\s*1080px/);
+    expect(messageWindowBlock).toMatch(
+      /width:\s*min\(var\(--conversation-content-width\),\s*calc\(100% - 44px\)\)/,
+    );
+    expect(inputRowBlock).toMatch(/display:\s*grid/);
+    expect(inputRowBlock).toMatch(
+      /grid-template-columns:\s*78px\s+minmax\(0,\s*var\(--conversation-content-width\)\)\s+78px/,
+    );
+    expect(inputRowBlock).toMatch(/justify-content:\s*center/);
+  });
+
   it("renders trusted display frames as one seamless message surface", () => {
     const frameBlock = cssBlocks(".message-item__display-frame")[0] ?? "";
     const richContentBlock = cssBlocks(".message-item__rich-content")[0] ?? "";

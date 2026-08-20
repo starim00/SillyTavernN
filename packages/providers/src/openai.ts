@@ -52,9 +52,6 @@ function generationPayload(
   toolNameAliases: ToolNameAliases,
 ): JsonObject {
   const generation = request.settings ?? {};
-  const includeEmptyAssistantReasoningContent = connection.model
-    .toLowerCase()
-    .startsWith("deepseek");
   const payload: JsonObject = {
     model: connection.model,
     messages: request.messages.map((message) => {
@@ -87,10 +84,7 @@ function generationPayload(
           : { tool_call_id: message.toolCallId }),
         ...(message.reasoningContent !== undefined
           ? { reasoning_content: message.reasoningContent }
-          : includeEmptyAssistantReasoningContent &&
-              message.role === "assistant"
-            ? { reasoning_content: "" }
-            : {}),
+          : {}),
         ...(toolCalls === undefined ? {} : { tool_calls: toolCalls }),
       };
     }),

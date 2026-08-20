@@ -581,7 +581,6 @@ describe("providers", () => {
         {
           role: "assistant",
           content: "Imported greeting.",
-          reasoning_content: "",
         },
         { role: "user", content: "What lore is available?" },
         {

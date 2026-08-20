@@ -36,5 +36,10 @@
   entry's `agentEditable` value (when a target entry exists), revision,
   confirmation, and run cancellation inside the write transaction.
 - Model tool code cannot toggle an entry's `agentEditable` value.
-- Legacy plugins run in a separate-origin realm and never receive Provider secrets, direct database handles, or the main React DOM.
+- Imported executable content is controlled by whole-source user trust. Once a
+  card, preset, or legacy script source is trusted, run it with the old
+  SillyTavern execution model: same-origin access to the main DOM, browser
+  storage, Tavern Helper/MVU globals, and ordinary browser networking. Do not
+  add per-capability grants or treat an iframe as a security boundary. Provider
+  secrets and direct database handles remain server-only.
 - Legacy script actor and Agent actor are distinct. One permission must never imply the other.

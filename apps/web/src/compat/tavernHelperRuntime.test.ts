@@ -6,9 +6,9 @@ import {
   appendAssistantStatusPlaceholder,
   createTavernHelperMessageView,
   resolveTavernHelperMessageVariables,
+  resolveTavernHelperFrameMessageId,
   shouldEnsureAssistantStatusPlaceholder,
   shouldReconcileOpeningMessageVariables,
-  shouldSeedOpeningMessageVariables,
   TavernHelperRuntime,
   type TavernHelperRuntimeAdapter,
 } from "./tavernHelperRuntime";
@@ -28,6 +28,14 @@ const assistantMessage: WorkspaceMessage = {
 };
 
 describe("Tavern Helper message compatibility", () => {
+  it("resolves the old Tavern Helper iframe floor contract", () => {
+    expect(resolveTavernHelperFrameMessageId("TH-message--12--0", -1)).toBe(12);
+    expect(resolveTavernHelperFrameMessageId("TH-message--7--2_1", -1)).toBe(7);
+    expect(resolveTavernHelperFrameMessageId("TH-script--card--state", 4)).toBe(
+      4,
+    );
+  });
+
   it("exposes the assistant name and aligns variables with the active swipe", () => {
     const variables = { stat_data: { favor: 3 } };
     const view = createTavernHelperMessageView(
@@ -79,24 +87,44 @@ describe("Tavern Helper message compatibility", () => {
     );
   });
 
-  it("adds the status placeholder only to MVU assistant messages", () => {
+  it("does not add the status placeholder to the opening assistant message", () => {
     expect(
       shouldEnsureAssistantStatusPlaceholder(
+        0,
         { role: "assistant", content: "[开始创建]" },
+        { stat_data: { world: { day: 1 } } },
+      ),
+    ).toBe(false);
+    expect(
+      shouldEnsureAssistantStatusPlaceholder(
+        0,
+        { role: "assistant", content: "A regular opening message" },
+        { stat_data: { world: { day: 1 } } },
+      ),
+    ).toBe(false);
+  });
+
+  it("adds the status placeholder only to later MVU assistant messages", () => {
+    expect(
+      shouldEnsureAssistantStatusPlaceholder(
+        2,
+        { role: "assistant", content: "Active response" },
         { stat_data: { world: { day: 1 } } },
       ),
     ).toBe(true);
     expect(
       shouldEnsureAssistantStatusPlaceholder(
+        1,
         { role: "user", content: "Continue" },
         { stat_data: { world: { day: 1 } } },
       ),
     ).toBe(false);
     expect(
       shouldEnsureAssistantStatusPlaceholder(
+        2,
         {
           role: "assistant",
-          content: "[开始创建]\n\n<StatusPlaceHolderImpl/>",
+          content: "Active response\n\n<StatusPlaceHolderImpl/>",
         },
         { stat_data: { world: { day: 1 } } },
       ),
@@ -109,36 +137,6 @@ describe("Tavern Helper message compatibility", () => {
         "[开始创建]\n\n<StatusPlaceHolderImpl/>",
       ),
     ).toBe("[开始创建]\n\n<StatusPlaceHolderImpl/>");
-  });
-
-  it("seeds a new conversation opening from the card's inherited MVU state", () => {
-    expect(
-      shouldSeedOpeningMessageVariables({ role: "assistant" }, undefined, {
-        stat_data: { world: { day: 12 } },
-      }),
-    ).toBe(true);
-    expect(
-      shouldSeedOpeningMessageVariables(
-        { role: "assistant" },
-        {},
-        {
-          initialized_lorebooks: { "Fixture lorebook": [] },
-          stat_data: {},
-        },
-      ),
-    ).toBe(true);
-    expect(
-      shouldSeedOpeningMessageVariables(
-        { role: "assistant" },
-        { stat_data: { world: { day: 1 } } },
-        { stat_data: { world: { day: 12 } } },
-      ),
-    ).toBe(false);
-    expect(
-      shouldSeedOpeningMessageVariables({ role: "assistant" }, undefined, {
-        unrelated: true,
-      }),
-    ).toBe(false);
   });
 
   it("rolls a Swipe back to the previous floor before applying its update", async () => {

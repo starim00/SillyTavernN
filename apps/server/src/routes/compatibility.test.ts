@@ -290,7 +290,7 @@ describe("native Tavern Helper compatibility routes", () => {
     });
   });
 
-  it("inherits the latest MVU message state across conversations on one card", async () => {
+  it("keeps MVU message state isolated between conversations on one card", async () => {
     const server = await application();
     const card = server.context.store.createCard({
       id: "card-cross-conversation-state",
@@ -333,10 +333,7 @@ describe("native Tavern Helper compatibility routes", () => {
           data: { variables: { character: unknown } };
         }
       ).data.variables.character,
-    ).toEqual({
-      initialized_lorebooks: { "Cross-conversation state card": [] },
-      stat_data: { world: { day: 12 }, system: { created: true } },
-    });
+    ).toEqual({});
   });
 
   it("rejects message-variable writes outside the active conversation", async () => {

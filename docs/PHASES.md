@@ -62,16 +62,18 @@ empty interrupted output does not create a message.
 Exit: fixture round-trips preserve optional-entry state and order, and an
 applied preset changes the trace predictably.
 
-## Phase 6 — Extension microkernel and legacy realm
+## Phase 6 — Extension microkernel and trusted legacy runtime
 
 - Native manifest/capability API.
-- Separate-origin realm, RPC broker, CSP, safe mode, and crash isolation.
+- Whole-source trust for card/preset scripts plus old-style same-origin DOM,
+  storage, network, Tavern Helper/MVU, and rich-message iframe execution.
 - Exact URL-tree ESM facade contracts for:
   - JS-Slash-Runner `49efcca50809be8d48bfb1776bacf952ef16991b`;
   - ST-Prompt-Template `c80a572839f99a2aaf3d91cf9b7ebfc202c4ef0b`.
 - User-installed plugin bundles only; no vendoring.
 
-Exit: pinned smoke fixtures load in the realm, settings persist, prompt events are ordered, and forbidden capabilities are rejected.
+Exit: pinned smoke fixtures load, settings persist, prompt events are ordered,
+and trusted sources can use the old browser capability surface.
 
 ## Phase 7 — In-conversation model tools
 

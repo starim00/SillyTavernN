@@ -558,7 +558,7 @@ export function TavernHelperWorkbench({
         <header className="helper-workbench__header">
           <div>
             <strong>酒馆助手</strong>
-            <span>原生兼容工作台 · 4.8.19 API</span>
+            <span>旧版直连运行时 · 4.8.19 API</span>
           </div>
           <button type="button" aria-label="关闭酒馆助手" onClick={onClose}>
             <X size={20} />
@@ -672,7 +672,9 @@ export function TavernHelperWorkbench({
               <div className="helper-page-intro">
                 <div>
                   <strong>脚本管理</strong>
-                  <span>全局、角色卡和预设脚本按来源独立生效。</span>
+                  <span>
+                    全局、角色卡和预设脚本按来源独立生效；可信脚本拥有当前页面权限。
+                  </span>
                 </div>
                 <Info size={18} />
               </div>

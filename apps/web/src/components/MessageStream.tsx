@@ -17,9 +17,7 @@ import {
   memo,
   useCallback,
   useEffect,
-  useId,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -38,14 +36,8 @@ const FENCED_HTML_BLOCK_PATTERN =
 const FULL_HTML_DOCUMENT_PATTERN = /^\s*(?:<!doctype\b[^>]*>\s*)?<html\b/iu;
 const HIDDEN_DOCUMENT_WRAPPER_PATTERN =
   /<\/?(?:dream|thinking|reasoning|analysis|tableedit)\b[^>]*>/giu;
-const FRAME_HEIGHT_MESSAGE_TYPE = "stn:message-frame-height";
-const FRAME_STORAGE_MESSAGE_TYPE = "stn:message-frame-storage";
-const FRAME_SEND_MESSAGE_TYPE = "stn:message-frame-send";
-const FRAME_MVU_UPDATE_MESSAGE_TYPE = "stn:message-frame-mvu-update";
 const FRAME_HEIGHT_MIN = 96;
 const FRAME_HEIGHT_MAX = 1_000_000;
-const FRAME_STORAGE_PREFIX = "sillytavern-n.message-frame-storage.v1:";
-const FRAME_STORAGE_MAX_LENGTH = 512_000;
 const DIALOGUE_PATTERN =
   /“[^”\r\n]*”|「[^」\r\n]*」|『[^』\r\n]*』|〝[^〞\r\n]*〞|(?<![\p{L}\p{N}_])"[^"\r\n]{1,160}"(?![\p{L}\p{N}_])/gu;
 const MARKDOWN_OPTIONS = {
@@ -59,7 +51,6 @@ const MARKDOWN_OPTIONS = {
   },
   wrapper: null,
 } as const;
-const FRAME_RESIZE_SCRIPT = `(()=>{const meta=document.querySelector('meta[name="stn-frame-id"]');if(!meta)return;const frameId=meta.content;let queued=false;const report=()=>{queued=false;const body=document.body;if(!body)return;const height=Math.ceil(Math.max(body.scrollHeight,body.offsetHeight,body.getBoundingClientRect().height));parent.postMessage({type:"stn:message-frame-height",frameId,height},"*")};const queue=()=>{if(queued)return;queued=true;requestAnimationFrame(report)};new ResizeObserver(queue).observe(document.body);addEventListener("load",queue);queue()})();`;
 
 export function highlightDialogueText(text: string): ReactNode {
   const matches = [...text.matchAll(DIALOGUE_PATTERN)];
@@ -86,104 +77,6 @@ export function highlightDialogueText(text: string): ReactNode {
   return parts;
 }
 
-function sandboxContentSecurityPolicy(): string {
-  return [
-    "default-src 'none'",
-    "base-uri 'none'",
-    "object-src 'none'",
-    "script-src 'unsafe-inline' http: https:",
-    "connect-src http: https:",
-    "frame-src http: https:",
-    "child-src http: https: blob:",
-    "worker-src http: https: blob:",
-    "form-action 'none'",
-    "navigate-to 'none'",
-    "img-src http: https: data: blob:",
-    "media-src http: https: data: blob:",
-    "font-src http: https: data:",
-    "style-src 'unsafe-inline' http: https:",
-  ].join("; ");
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function frameStorageKey(namespace: string): string {
-  return `${FRAME_STORAGE_PREFIX}${namespace}`;
-}
-
-export function clearMessageFrameStorage(conversationId: string): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.removeItem(
-      frameStorageKey(`conversation:${conversationId}`),
-    );
-  } catch {
-    // Storage is optional; an unavailable browser store must not block chat.
-  }
-}
-
-function loadFrameStorage(namespace: string): Record<string, string> {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = window.localStorage.getItem(frameStorageKey(namespace));
-    if (!raw || raw.length > FRAME_STORAGE_MAX_LENGTH) return {};
-    const parsed: unknown = JSON.parse(raw);
-    if (!isRecord(parsed)) return {};
-    return Object.fromEntries(
-      Object.entries(parsed).flatMap(([key, value]) =>
-        typeof value === "string" ? [[key, value]] : [],
-      ),
-    );
-  } catch {
-    return {};
-  }
-}
-
-function loadFrameStorageWithFallbacks(
-  namespace: string,
-  fallbackNamespaces: readonly string[],
-): Record<string, string> {
-  const primary = loadFrameStorage(namespace);
-  if (fallbackNamespaces.length === 0) return primary;
-
-  const merged = { ...primary };
-  for (const fallbackNamespace of fallbackNamespaces) {
-    const fallback = loadFrameStorage(fallbackNamespace);
-    for (const [key, value] of Object.entries(fallback)) {
-      if (!Object.hasOwn(merged, key)) merged[key] = value;
-    }
-  }
-
-  try {
-    if (JSON.stringify(merged).length > FRAME_STORAGE_MAX_LENGTH) {
-      return primary;
-    }
-  } catch {
-    return primary;
-  }
-
-  if (Object.keys(merged).length !== Object.keys(primary).length) {
-    saveFrameStorage(namespace, merged);
-  }
-  return merged;
-}
-
-function saveFrameStorage(
-  namespace: string,
-  values: Record<string, string>,
-): void {
-  if (typeof window === "undefined") return;
-  try {
-    const serialized = JSON.stringify(values);
-    if (serialized.length > FRAME_STORAGE_MAX_LENGTH) return;
-    window.localStorage.setItem(frameStorageKey(namespace), serialized);
-  } catch {
-    // Storage is optional; the frame keeps its in-memory copy for this visit.
-  }
-}
-
 function escapeInlineJson(value: unknown): string {
   return JSON.stringify(value)
     .replaceAll("<", "\\u003c")
@@ -195,38 +88,8 @@ function frameDialogueDecorationScript(): string {
   return `<style>html,body{background:#ffffff!important;color:#202124!important}body>p,body>p *,body>li,body>li *,body>blockquote,body>blockquote *,body>h1,body>h1 *,body>h2,body>h2 *,body>h3,body>h3 *,body>h4,body>h4 *,body>h5,body>h5 *,body>h6,body>h6 *{color:#202124!important}.stn-message-dialogue{color:#8b1e1e!important;font-weight:650}</style><script>(()=>{const pattern=new RegExp(${escapeInlineJson(DIALOGUE_PATTERN.source)},"gu");const skipped=new Set(["SCRIPT","STYLE","PRE","CODE","TEXTAREA","NOSCRIPT"]);const decorate=()=>{const root=document.body;if(!root)return;const walker=document.createTreeWalker(root,4);const nodes=[];let node=walker.nextNode();while(node){const parent=node.parentElement;if(parent&&!parent.closest(".stn-message-dialogue")&&!skipped.has(parent.tagName)){pattern.lastIndex=0;if(pattern.test(node.nodeValue??""))nodes.push(node)}node=walker.nextNode()}for(const textNode of nodes){const value=textNode.nodeValue??"";pattern.lastIndex=0;const matches=[...value.matchAll(pattern)];if(!matches.length)continue;const fragment=document.createDocumentFragment();let cursor=0;for(const match of matches){const dialogue=match[0],start=match.index;if(!dialogue||start===undefined)continue;if(start>cursor)fragment.append(document.createTextNode(value.slice(cursor,start)));const span=document.createElement("span");span.className="stn-message-dialogue";span.textContent=dialogue;fragment.append(span);cursor=start+dialogue.length}if(cursor<value.length)fragment.append(document.createTextNode(value.slice(cursor)));textNode.replaceWith(fragment)}};decorate();new MutationObserver(decorate).observe(document.body,{subtree:true,childList:true})})()</script>`;
 }
 
-function frameCompatibilityScript(
-  frameId: string,
-  storage: Record<string, string>,
-  messageVariables: Record<string, unknown>,
-): string {
-  return `const __stnFrameId=${escapeInlineJson(frameId)};const __stnValues=new Map(Object.entries(${escapeInlineJson(storage)}));const __stnNotify=(operation,key,value)=>parent.postMessage({type:"${FRAME_STORAGE_MESSAGE_TYPE}",frameId:__stnFrameId,operation,key,value},"*");const __stnLocalStorage={get length(){return __stnValues.size},key(index){return Array.from(__stnValues.keys())[Number(index)]??null},getItem(key){key=String(key);return __stnValues.has(key)?__stnValues.get(key):null},setItem(key,value){key=String(key);value=String(value);__stnValues.set(key,value);__stnNotify("set",key,value)},removeItem(key){key=String(key);__stnValues.delete(key);__stnNotify("remove",key,null)},clear(){__stnValues.clear();__stnNotify("clear","",null)}};const __stnPrompt=(message,defaultValue="")=>typeof window.prompt==="function"?window.prompt(message,defaultValue):(navigator.userActivation?.isActive?String(defaultValue??""):null);const __stnConfirm=(message)=>typeof window.confirm==="function"?window.confirm(message):navigator.userActivation?.isActive===true;const __stnAlert=(message)=>{if(typeof window.alert==="function")window.alert(message)};let __stnPendingInput="";const __stnInputProxy={get value(){return __stnPendingInput},set value(value){__stnPendingInput=String(value)},dispatchEvent(){return true}};const __stnSendProxy={click(){const content=__stnPendingInput.trim();if(content)parent.postMessage({type:"${FRAME_SEND_MESSAGE_TYPE}",frameId:__stnFrameId,content},"*")}};const __stnParentDocument=Object.freeze({querySelector(selector){if(selector==="#send_textarea")return __stnInputProxy;if(selector==="#send_but")return __stnSendProxy;return null}});const __stnClone=value=>value===undefined?undefined:JSON.parse(JSON.stringify(value));let __stnMvuData=__stnClone(${escapeInlineJson(messageVariables)});const __stnPath=path=>String(path).split(".").filter(Boolean);const __stnGet=(value,path,fallback)=>{let cursor=value;for(const key of __stnPath(path)){if(cursor==null||!Object.prototype.hasOwnProperty.call(Object(cursor),key))return fallback;cursor=cursor[key]}return cursor};const __stnSet=(value,path,next)=>{const parts=__stnPath(path);let cursor=value;parts.forEach((key,index)=>{if(index===parts.length-1){cursor[key]=next;return}if(!cursor[key]||typeof cursor[key]!=="object")cursor[key]={};cursor=cursor[key]});return value};const __stnUnset=(value,path)=>{const parts=__stnPath(path);const key=parts.pop();const parentValue=parts.length?__stnGet(value,parts.join(".")):value;if(parentValue&&key)delete parentValue[key];return value};window._=window._||{get:__stnGet,set:__stnSet,unset:__stnUnset,cloneDeep:__stnClone,isArray:Array.isArray,isEmpty:value=>value==null||(Array.isArray(value)?value.length===0:typeof value==="object"?Object.keys(value).length===0:false)};const __stnMvuEvent="mag_variable_update_ended";window.Mvu={events:{VARIABLE_UPDATE_ENDED:__stnMvuEvent,VARIABLE_INITIALIZED:"mag_variable_initialized"},getMvuData(){return __stnMvuData},async replaceMvuData(value){__stnMvuData=__stnClone(value)||{};parent.postMessage({type:"${FRAME_MVU_UPDATE_MESSAGE_TYPE}",frameId:__stnFrameId,variables:__stnMvuData},"*");document.dispatchEvent(new CustomEvent(__stnMvuEvent,{detail:__stnMvuData,bubbles:true}));return __stnMvuData}};window.getChatMessages=async()=>[{message_id:-1,data:__stnMvuData,swipes_data:[__stnMvuData]}];window.getCurrentMessageId=()=>-1;window.getLastMessageId=()=>-1;`;
-}
-
-function adaptLegacyScriptApis(content: string): string {
-  return content.replace(
-    /(<script\b[^>]*>)([\s\S]*?)(<\/script>)/giu,
-    (_match, opening: string, code: string, closing: string) => {
-      const adapted = code
-        .replaceAll("window.parent?.Mvu", "window.Mvu")
-        .replaceAll("window.parent.Mvu", "window.Mvu")
-        .replaceAll("window.top?.Mvu", "window.Mvu")
-        .replaceAll("window.top.Mvu", "window.Mvu")
-        .replaceAll("window.parent && window.Mvu", "window.Mvu")
-        .replaceAll("window.top && window.Mvu", "window.Mvu")
-        .replaceAll("window.parent.document", "__stnParentDocument")
-        .replaceAll("parent.document", "__stnParentDocument")
-        .replaceAll("window.localStorage", "__stnLocalStorage")
-        .replace(/\blocalStorage\b/gu, "__stnLocalStorage")
-        .replaceAll("window.prompt", "__stnPrompt")
-        .replace(/\bprompt(?=\s*\()/gu, "__stnPrompt")
-        .replaceAll("window.confirm", "__stnConfirm")
-        .replace(/\bconfirm(?=\s*\()/gu, "__stnConfirm")
-        .replaceAll("window.alert", "__stnAlert")
-        .replace(/\balert(?=\s*\()/gu, "__stnAlert");
-      return `${opening}${adapted}${closing}`;
-    },
-  );
+function trustedHostBridgeScript(frameName: string): string {
+  return `(()=>{const host=window.parent;const frameName=${escapeInlineJson(frameName)};window.__TH_IFRAME_ID=frameName;if(!window.name)window.name=frameName;const expose=name=>{try{Object.defineProperty(window,name,{configurable:true,enumerable:true,get:()=>host[name],set:value=>{host[name]=value}})}catch{}};["_","$","jQuery","Vue","YAML","showdown","toastr","z","EjsTemplate","Mvu"].forEach(expose);const helper=host.TavernHelper;if(helper){Object.defineProperty(window,"TavernHelper",{configurable:true,enumerable:true,get:()=>host.TavernHelper});for(const name of Object.keys(helper)){if(name==="_bind")continue;try{Object.defineProperty(window,name,{configurable:true,enumerable:true,get:()=>host.TavernHelper?.[name]})}catch{}}for(const [name,value] of Object.entries(helper._bind??{})){const publicName=name.startsWith("_")?name.slice(1):name;try{Object.defineProperty(window,publicName,{configurable:true,enumerable:true,writable:true,value:typeof value==="function"?value.bind(window):value})}catch{}}}const directParentDom=host.document===window.frameElement?.ownerDocument;document.documentElement.dataset.stnHostBridge=helper?"ready":"missing";document.documentElement.dataset.stnParentDom=directParentDom?"direct":"blocked";document.documentElement.dataset.stnOrigin=directParentDom?"same-origin-access":"isolated";Object.defineProperty(window,"SillyTavern",{configurable:true,enumerable:true,get:()=>{const api=host.SillyTavern;const getContext=()=>api?.getContext?.()??api??{};return {...getContext(),getContext}}});void host.TavernHelper?.eventEmit?.("message_iframe_render_started",frameName);addEventListener("pagehide",()=>{void host.TavernHelper?.eventEmit?.("message_iframe_render_ended",frameName)},{once:true})})();`;
 }
 
 function escapeHtmlAttribute(value: string): string {
@@ -342,11 +205,6 @@ export function mixedDisplayContent(value: string): string {
 }
 
 export function displayContentSegments(value: string): DisplayContentSegment[] {
-  const fenced = FENCED_HTML_PATTERN.exec(value)?.[1];
-  if (fenced !== undefined && HTML_MARKUP_PATTERN.test(fenced)) {
-    return [{ kind: "html", content: fenced }];
-  }
-
   const segments: DisplayContentSegment[] = [];
   let cursor = 0;
   for (const match of value.matchAll(FENCED_HTML_BLOCK_PATTERN)) {
@@ -372,34 +230,23 @@ export function displayContentSegments(value: string): DisplayContentSegment[] {
   return segments;
 }
 
-export function sandboxedDisplayDocument(
+export function trustedDisplayDocument(
   content: string,
-  resizeFrameId?: string,
-  frameStorage: Record<string, string> = {},
-  messageVariables: Record<string, unknown> = {},
+  frameName = "TH-message--0--0",
+  hostRuntimeReady = true,
 ): string {
-  const displayContent = adaptLegacyScriptApis(htmlDisplayContent(content));
-  const withResizeReporter = resizeFrameId !== undefined;
-  const resizeMetadata = withResizeReporter
-    ? `<meta name="stn-frame-id" content="${escapeHtmlAttribute(resizeFrameId)}">`
-    : "";
-  const resizeScript = withResizeReporter
-    ? `<script>${FRAME_RESIZE_SCRIPT}</script>`
-    : "";
-  const compatibilityScript = withResizeReporter
-    ? `<script>${frameCompatibilityScript(
-        resizeFrameId,
-        frameStorage,
-        messageVariables,
-      )}</script>`
+  const displayContent = hostRuntimeReady
+    ? htmlDisplayContent(content)
+    : '<p class="stn-trusted-frame-loading">正在加载可信脚本运行时…</p>';
+  const compatibilityScript = hostRuntimeReady
+    ? `<script>${trustedHostBridgeScript(frameName)}</script>`
     : "";
   return `<!doctype html>
 <html>
   <head>
     <meta charset="utf-8">
-    <meta http-equiv="Content-Security-Policy" content="${sandboxContentSecurityPolicy()}">
-    <meta name="referrer" content="no-referrer">
-    ${resizeMetadata}
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="stn-frame-id" content="${escapeHtmlAttribute(frameName)}">
     <style>
       :root { color-scheme: light; }
       html, body { margin: 0; background: #ffffff; color: #202124; overflow: visible; }
@@ -407,172 +254,92 @@ export function sandboxedDisplayDocument(
       img, video, svg, canvas { max-width: 100%; height: auto; }
       pre { white-space: pre-wrap; }
       a { color: #416f88; }
+      .stn-trusted-frame-loading { color: #667681; }
     </style>
   </head>
-  <body>${compatibilityScript}${displayContent}${frameDialogueDecorationScript()}${resizeScript}</body>
+  <body>${compatibilityScript}${displayContent}${frameDialogueDecorationScript()}</body>
 </html>`;
 }
 
-type FrameHeightMessage = {
-  type: typeof FRAME_HEIGHT_MESSAGE_TYPE;
-  frameId: string;
-  height: number;
-};
-
-function isFrameHeightMessage(value: unknown): value is FrameHeightMessage {
-  if (typeof value !== "object" || value === null) return false;
-  const candidate = value as Record<string, unknown>;
-  return (
-    candidate.type === FRAME_HEIGHT_MESSAGE_TYPE &&
-    typeof candidate.frameId === "string" &&
-    typeof candidate.height === "number" &&
-    Number.isFinite(candidate.height)
-  );
-}
-
-type SandboxedDisplayFrameProps = {
+type TrustedDisplayFrameProps = {
   title: string;
   content: string;
+  frameName: string;
+  hostRuntimeReady: boolean;
   displayKind?: "html" | "mixed";
   appliedRegexScriptIds: string[];
-  storageNamespace: string;
-  storageFallbackNamespaces?: readonly string[] | undefined;
-  messageVariables?: Record<string, unknown> | undefined;
-  onSendMessage?: ((content: string) => void) | undefined;
-  onVariablesChange?:
-    ((variables: Record<string, unknown>) => void) | undefined;
   onHeightChange?: (() => void) | undefined;
 };
 
-function SandboxedDisplayFrame({
+function TrustedDisplayFrame({
   title,
   content,
+  frameName,
+  hostRuntimeReady,
   displayKind = "html",
   appliedRegexScriptIds,
-  storageNamespace,
-  storageFallbackNamespaces = [],
-  messageVariables = {},
-  onSendMessage,
-  onVariablesChange,
   onHeightChange,
-}: SandboxedDisplayFrameProps) {
+}: TrustedDisplayFrameProps) {
   const frameRef = useRef<HTMLIFrameElement>(null);
-  const frameId = useId();
-  const initialStorage = useMemo(
-    () =>
-      loadFrameStorageWithFallbacks(
-        storageNamespace,
-        storageFallbackNamespaces,
-      ),
-    [storageFallbackNamespaces, storageNamespace],
-  );
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
 
-  const handleFrameMessage = useCallback(
-    (event: MessageEvent<unknown>) => {
-      const frame = frameRef.current;
-      if (
-        !frame ||
-        event.source !== frame.contentWindow ||
-        !isRecord(event.data) ||
-        event.data.frameId !== frameId
-      ) {
-        return;
-      }
+  useEffect(() => {
+    return () => resizeObserverRef.current?.disconnect();
+  }, []);
 
-      if (isFrameHeightMessage(event.data)) {
-        if (event.data.height <= 0 || event.data.height > FRAME_HEIGHT_MAX) {
-          return;
-        }
-        const nextHeight = Math.max(
-          FRAME_HEIGHT_MIN,
-          Math.ceil(event.data.height),
+  const handleLoad = useCallback(() => {
+    const frame = frameRef.current;
+    resizeObserverRef.current?.disconnect();
+    if (!frame) return;
+    try {
+      const body = frame.contentDocument?.body;
+      if (!body) return;
+      const resize = () => {
+        const height = Math.ceil(
+          Math.max(
+            body.scrollHeight,
+            body.offsetHeight,
+            body.getBoundingClientRect().height,
+          ),
         );
+        if (height <= 0 || height > FRAME_HEIGHT_MAX) return;
+        const nextHeight = Math.max(FRAME_HEIGHT_MIN, height);
         if (Math.abs(frame.offsetHeight - nextHeight) < 1) return;
         frame.style.height = `${String(nextHeight)}px`;
         onHeightChange?.();
-        return;
+      };
+      resize();
+      if (typeof ResizeObserver !== "undefined") {
+        const observer = new ResizeObserver(resize);
+        observer.observe(body);
+        resizeObserverRef.current = observer;
       }
-
-      if (event.data.type === FRAME_STORAGE_MESSAGE_TYPE) {
-        const operation = event.data.operation;
-        const key = event.data.key;
-        const value = event.data.value;
-        if (
-          !["set", "remove", "clear"].includes(String(operation)) ||
-          typeof key !== "string" ||
-          key.length > 1_024 ||
-          (operation === "set" &&
-            (typeof value !== "string" ||
-              value.length > FRAME_STORAGE_MAX_LENGTH))
-        ) {
-          return;
+      void (
+        window as unknown as {
+          TavernHelper?: { eventEmit?: (event: string, id: string) => unknown };
         }
-        const current = loadFrameStorage(storageNamespace);
-        if (operation === "clear") {
-          saveFrameStorage(storageNamespace, {});
-        } else if (operation === "remove") {
-          delete current[key];
-          saveFrameStorage(storageNamespace, current);
-        } else if (typeof value === "string") {
-          current[key] = value;
-          saveFrameStorage(storageNamespace, current);
-        }
-        return;
-      }
-
-      if (
-        event.data.type === FRAME_SEND_MESSAGE_TYPE &&
-        typeof event.data.content === "string" &&
-        event.data.content.trim().length > 0 &&
-        event.data.content.length <= 100_000
-      ) {
-        onSendMessage?.(event.data.content.trim());
-        return;
-      }
-
-      if (
-        event.data.type === FRAME_MVU_UPDATE_MESSAGE_TYPE &&
-        isRecord(event.data.variables)
-      ) {
-        try {
-          if (JSON.stringify(event.data.variables).length > 2_000_000) return;
-          onVariablesChange?.(event.data.variables);
-        } catch {
-          // Ignore non-serializable or oversized frame updates.
-        }
-      }
-    },
-    [
-      frameId,
-      onHeightChange,
-      onSendMessage,
-      onVariablesChange,
-      storageNamespace,
-    ],
-  );
-
-  useEffect(() => {
-    window.addEventListener("message", handleFrameMessage);
-    return () => window.removeEventListener("message", handleFrameMessage);
-  }, [handleFrameMessage]);
+      ).TavernHelper?.eventEmit?.("message_iframe_render_ended", frameName);
+    } catch {
+      // Trusted content may navigate the frame away from the app origin.
+    }
+  }, [frameName, onHeightChange]);
 
   return (
     <iframe
       ref={frameRef}
+      id={frameName}
+      name={frameName}
       className="message-item__display-frame"
       title={title}
-      sandbox="allow-scripts allow-downloads allow-modals"
+      loading="lazy"
+      frameBorder={0}
       scrolling="no"
-      referrerPolicy="no-referrer"
-      srcDoc={sandboxedDisplayDocument(
-        content,
-        frameId,
-        initialStorage,
-        messageVariables,
-      )}
+      srcDoc={trustedDisplayDocument(content, frameName, hostRuntimeReady)}
+      onLoad={handleLoad}
       data-display-kind={displayKind}
       data-applied-regex={appliedRegexScriptIds.join(" ")}
       data-auto-height="true"
+      data-execution-model="trusted-same-origin"
     />
   );
 }
@@ -598,7 +365,9 @@ function MarkdownMessageContent({
 
 type MessageCardProps = {
   message: WorkspaceMessage;
+  messageIndex?: number;
   isLast: boolean;
+  helperHostReady?: boolean;
   renderRichContent?: boolean;
   collapseCodeBlocks?: "all" | "frontend" | "none";
   onCopy: (message: WorkspaceMessage) => void;
@@ -610,19 +379,14 @@ type MessageCardProps = {
     message: WorkspaceMessage,
     index: number,
   ) => Promise<void> | void;
-  onEmbeddedSend?: ((content: string) => void) | undefined;
-  storageNamespace?: string;
-  storageFallbackNamespaces?: readonly string[] | undefined;
-  messageVariables?: Record<string, unknown> | undefined;
-  onVariablesChange?:
-    | ((message: WorkspaceMessage, variables: Record<string, unknown>) => void)
-    | undefined;
   onContentResize?: (() => void) | undefined;
 };
 
 export const MessageCard = memo(function MessageCard({
   message,
+  messageIndex = 0,
   isLast,
+  helperHostReady = true,
   renderRichContent = true,
   collapseCodeBlocks = "none",
   onCopy,
@@ -631,11 +395,6 @@ export const MessageCard = memo(function MessageCard({
   onRegenerate,
   onContinue,
   onSelectSwipe,
-  onEmbeddedSend,
-  storageNamespace = `conversation:${message.conversationId}`,
-  storageFallbackNamespaces,
-  messageVariables,
-  onVariablesChange,
   onContentResize,
 }: MessageCardProps) {
   const [editing, setEditing] = useState(false);
@@ -674,8 +433,13 @@ export const MessageCard = memo(function MessageCard({
 
   return (
     <article
-      className={`message-item message-item--${message.role}`}
+      className={`message-item message-item--${message.role} mes`}
       data-message-id={message.id}
+      {...{
+        mesid: String(messageIndex),
+        is_user: message.role === "user" ? "true" : "false",
+        is_system: "false",
+      }}
     >
       <header className="message-item__header">
         <span className="speaker-mark" aria-hidden="true" />
@@ -727,18 +491,20 @@ export const MessageCard = memo(function MessageCard({
           </div>
         </div>
       ) : message.role === "user" || !renderRichContent ? (
-        <div data-collapse-code={collapseCodeBlocks}>
+        <div className="mes_text" data-collapse-code={collapseCodeBlocks}>
           <MarkdownMessageContent
             content={displayContent}
             appliedRegexScriptIds={appliedRegexScriptIds}
           />
         </div>
       ) : displaysHtml ? (
-        <div className="message-item__rich-content">
+        <div className="message-item__rich-content mes_text">
           {displaySegments.map((segment, index) =>
             segment.kind === "html" || segment.kind === "mixed" ? (
-              <SandboxedDisplayFrame
-                key={`html-${String(index)}`}
+              <TrustedDisplayFrame
+                key={`html-${String(index)}-${String(helperHostReady)}`}
+                frameName={`TH-message--${String(messageIndex)}--${String(index)}`}
+                hostRuntimeReady={helperHostReady}
                 title={
                   segment.kind === "mixed"
                     ? `${actorLabel}的混合 Markdown 与 HTML 内容`
@@ -751,13 +517,6 @@ export const MessageCard = memo(function MessageCard({
                 }
                 displayKind={segment.kind}
                 appliedRegexScriptIds={appliedRegexScriptIds}
-                storageNamespace={storageNamespace}
-                storageFallbackNamespaces={storageFallbackNamespaces}
-                messageVariables={messageVariables}
-                onSendMessage={onEmbeddedSend}
-                onVariablesChange={(variables) =>
-                  onVariablesChange?.(message, variables)
-                }
                 onHeightChange={onContentResize}
               />
             ) : (
@@ -774,7 +533,7 @@ export const MessageCard = memo(function MessageCard({
           )}
         </div>
       ) : (
-        <div data-collapse-code={collapseCodeBlocks}>
+        <div className="mes_text" data-collapse-code={collapseCodeBlocks}>
           <MarkdownMessageContent
             content={displayContent}
             appliedRegexScriptIds={appliedRegexScriptIds}
@@ -848,8 +607,6 @@ export const MessageCard = memo(function MessageCard({
 
 type MessageStreamProps = {
   conversationId: string;
-  cardId?: string | undefined;
-  storageConversationIds?: readonly string[] | undefined;
   messages: WorkspaceMessage[];
   hasMore?: boolean;
   loadingOlder?: boolean;
@@ -864,11 +621,7 @@ type MessageStreamProps = {
     message: WorkspaceMessage,
     index: number,
   ) => Promise<void> | void;
-  onEmbeddedSend?: ((content: string) => void) | undefined;
-  variablesByMessage?: Record<string, Record<string, unknown>> | undefined;
-  onVariablesChange?:
-    | ((message: WorkspaceMessage, variables: Record<string, unknown>) => void)
-    | undefined;
+  helperHostReady?: boolean;
   helperRenderSettings?:
     | {
         enabled: boolean;
@@ -880,8 +633,6 @@ type MessageStreamProps = {
 
 export function MessageStream({
   conversationId,
-  cardId,
-  storageConversationIds,
   messages,
   hasMore = false,
   loadingOlder = false,
@@ -893,9 +644,7 @@ export function MessageStream({
   onRegenerate,
   onContinue,
   onSelectSwipe,
-  onEmbeddedSend,
-  variablesByMessage,
-  onVariablesChange,
+  helperHostReady = true,
   helperRenderSettings,
 }: MessageStreamProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -909,16 +658,6 @@ export function MessageStream({
   const showsGeneration =
     generation.status !== "idle" &&
     generation.conversationId === conversationId;
-  const storageConversationKey = (storageConversationIds ?? []).join("\u001f");
-  const storageNamespace = cardId
-    ? `card:${cardId}`
-    : `conversation:${conversationId}`;
-  const storageFallbackNamespaces = useMemo(() => {
-    if (!cardId) return [];
-    const conversationIds = [conversationId, ...(storageConversationIds ?? [])];
-    return [...new Set(conversationIds)].map((id) => `conversation:${id}`);
-  }, [cardId, conversationId, storageConversationKey]);
-
   const scrollToBottom = useCallback(() => {
     const element = viewportRef.current;
     if (!element) return;
@@ -1002,12 +741,14 @@ export function MessageStream({
           detail="输入一条消息，模型会结合当前角色卡的内容生成回复。"
         />
       ) : (
-        <div className="message-window">
+        <div className="message-window" id="chat">
           {messages.map((message, index) => (
             <MessageCard
               key={message.id}
               message={message}
+              messageIndex={index}
               isLast={index === messages.length - 1}
+              helperHostReady={helperHostReady}
               renderRichContent={
                 (helperRenderSettings?.enabled ?? true) &&
                 (!(helperRenderSettings?.depth ?? 0) ||
@@ -1022,11 +763,6 @@ export function MessageStream({
               onRegenerate={onRegenerate}
               onContinue={onContinue}
               onSelectSwipe={onSelectSwipe}
-              onEmbeddedSend={onEmbeddedSend}
-              storageNamespace={storageNamespace}
-              storageFallbackNamespaces={storageFallbackNamespaces}
-              messageVariables={variablesByMessage?.[message.id]}
-              onVariablesChange={onVariablesChange}
               onContentResize={handleMessageContentResize}
             />
           ))}

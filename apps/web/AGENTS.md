@@ -23,14 +23,15 @@ When implementing from a selected generated mock, treat that image as the source
   one compact line and grows with the user's draft, up to a practical cap.
 - The user explicitly stopped further image generation for this implementation. Use code-native layout and Phosphor icons; do not add generated character art or decorative placeholder artwork.
 - Tavern Helper and Prompt Template compatibility is a native product
-  capability. Preserve and execute the card/preset data contracts they target,
-  but do not make the ordinary chat flow depend on either third-party plugin's
-  iframe, settings panel, modal layout, or generated DOM. Imported script
-  buttons belong below the native composer, and prompt processing belongs in
-  the native request pipeline. After the user trusts the whole card or preset
-  script source, execute it through the first-party Tavern Helper-compatible
-  browser API; do not infer per-capability grants or route card/preset scripts
-  through the legacy plugin sandbox. Provider secrets and direct database
-  handles remain server-only.
+  capability. Preserve and execute the card/preset data contracts they target.
+  Imported script buttons belong below the native composer, and prompt
+  processing belongs in the native request pipeline. After the user trusts the
+  whole card, preset, or script source, use the old SillyTavern execution model:
+  background scripts run in the main page and regex-generated frontend
+  documents run in unsandboxed same-origin iframes with direct `window.parent`,
+  main DOM, browser storage, Tavern Helper/MVU globals, and ordinary browser
+  networking. Do not infer per-capability grants, rewrite script source, proxy
+  DOM/storage access, or present those iframes as security boundaries. Provider
+  secrets and direct database handles remain server-only.
 
 Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts/prepare-sites-build.mjs`, and `tests/sites-worker.test.mjs` intact so the same local prototype can be handed to Sites. Before a Sites handoff, run `npm run build` and `npm run test:sites`; the build must leave `dist/client/index.html`, `dist/server/index.js`, and `dist/.openai/hosting.json`.

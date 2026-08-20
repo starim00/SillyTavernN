@@ -25,7 +25,7 @@ import {
   mixedDisplayContent,
   MessageCard,
   MessageStream,
-  sandboxedDisplayDocument,
+  trustedDisplayDocument,
 } from "./MessageStream";
 import { LegacyManagementModal } from "./LegacyManagementModal";
 import { ParticipantChips } from "./WorkspacePrimitives";
@@ -198,6 +198,8 @@ describe("workspace components", () => {
 
     expect(html).toContain('placeholder="输入消息…"');
     expect(html).toContain('rows="1"');
+    expect(html).toContain('id="send_textarea"');
+    expect(html).toContain('id="send_but"');
     expect(html).not.toContain("发言者");
     expect(html).not.toContain("世界叙事");
   });
@@ -279,9 +281,9 @@ describe("workspace components", () => {
           mode: null,
           conversationId: null,
           generationId: null,
-        targetMessageId: null,
-        preview: "",
-        reasoningPreview: "",
+          targetMessageId: null,
+          preview: "",
+          reasoningPreview: "",
         }}
         onCopy={noop}
         onUpdate={noop}
@@ -293,6 +295,9 @@ describe("workspace components", () => {
     );
 
     expect(html.match(/data-message-id=/g)).toHaveLength(messages.length);
+    expect(html).toContain('id="chat"');
+    expect(html).toContain('class="message-item message-item--assistant mes"');
+    expect(html).toContain('mesid="0"');
     expect(html).toContain("长回复起点");
     expect(html).toContain("长回复终点");
     expect(html).not.toContain('data-virtualized="true"');
@@ -489,7 +494,7 @@ describe("workspace components", () => {
     }
   });
 
-  it("runs interactive regex HTML only inside its isolated frame", () => {
+  it("runs trusted regex HTML in an unsandboxed same-origin frame", () => {
     const message: WorkspaceMessage = {
       id: "message-regex-html",
       conversationId: "conversation-test",
@@ -514,10 +519,11 @@ describe("workspace components", () => {
         onSelectSwipe={noop}
       />,
     );
-    const sourceDocument = sandboxedDisplayDocument(
+    const sourceDocument = trustedDisplayDocument(
       message.displayContent ?? "",
+      "TH-message--3--0",
     );
-    const resizableSourceDocument = sandboxedDisplayDocument(
+    const trustedSourceDocument = trustedDisplayDocument(
       `${message.displayContent ?? ""}
         <script>
           localStorage.setItem("profile", "saved");
@@ -527,71 +533,52 @@ describe("workspace components", () => {
           const Mvu = window.parent?.Mvu || window.top?.Mvu;
           await Mvu.replaceMvuData({ stat_data: { favor: 4 } });
         </script>`,
-      "frame-test",
-      { existing: "profile" },
-      { stat_data: { favor: 3 } },
+      "TH-message--3--0",
+    );
+    const pendingSourceDocument = trustedDisplayDocument(
+      message.displayContent ?? "",
+      "TH-message--3--0",
+      false,
     );
 
     expect(html).toContain("<iframe");
-    expect(html).toContain(
-      'sandbox="allow-scripts allow-downloads allow-modals"',
-    );
+    expect(html).not.toContain("sandbox=");
+    expect(html).toContain('id="TH-message--0--0"');
     expect(html).toContain('scrolling="no"');
-    expect(html).not.toContain("allow-same-origin");
+    expect(html).toContain('data-execution-model="trusted-same-origin"');
     expect(html).toContain('data-auto-height="true"');
     expect(html).toContain('data-applied-regex="card-display"');
-    expect(sourceDocument).toContain("default-src 'none'");
-    expect(sourceDocument).toContain("script-src 'unsafe-inline' http: https:");
-    expect(sourceDocument).toContain("connect-src http: https:");
-    expect(sourceDocument).toContain("frame-src http: https:");
-    expect(sourceDocument).toContain("navigate-to 'none'");
-    expect(sourceDocument).toContain("media-src http: https: data: blob:");
-    expect(sourceDocument).toContain("style-src 'unsafe-inline' http: https:");
+    expect(sourceDocument).not.toContain("Content-Security-Policy");
+    expect(sourceDocument).toContain('content="TH-message--3--0"');
+    expect(sourceDocument).toContain("const host=window.parent");
+    expect(sourceDocument).toContain(
+      'Object.defineProperty(window,"SillyTavern"',
+    );
+    expect(sourceDocument).toContain("helper._bind??{}");
     expect(sourceDocument).toContain("body>p");
     expect(sourceDocument).toContain("color:#202124!important");
     expect(sourceDocument).toContain("stn-message-dialogue");
     expect(sourceDocument).not.toContain("background:#fff1f0");
     expect(sourceDocument).toContain("new MutationObserver(decorate)");
-    expect(resizableSourceDocument).toContain(
-      '<meta name="stn-frame-id" content="frame-test">',
+    expect(trustedSourceDocument).toContain(
+      'window.parent.document.querySelector("#send_textarea")',
     );
-    expect(resizableSourceDocument).toContain(
-      'parent.postMessage({type:"stn:message-frame-height"',
-    );
-    expect(resizableSourceDocument).toContain(
-      'type:"stn:message-frame-storage"',
-    );
-    expect(resizableSourceDocument).toContain('type:"stn:message-frame-send"');
-    expect(resizableSourceDocument).toContain(
-      'type:"stn:message-frame-mvu-update"',
-    );
-    expect(resizableSourceDocument).toContain(
-      '__stnParentDocument.querySelector("#send_textarea")',
-    );
-    expect(resizableSourceDocument).not.toContain("window.parent.document");
-    expect(resizableSourceDocument).not.toContain("window.parent?.Mvu");
-    expect(resizableSourceDocument).toContain(
-      "const Mvu = window.Mvu || window.Mvu",
-    );
-    expect(resizableSourceDocument).toContain('"stat_data":{"favor":3}');
-    expect(resizableSourceDocument).toContain(
-      '__stnLocalStorage.setItem("profile", "saved")',
-    );
-    expect(resizableSourceDocument).not.toContain(
+    expect(trustedSourceDocument).toContain("window.parent?.Mvu");
+    expect(trustedSourceDocument).toContain(
       'localStorage.setItem("profile", "saved")',
     );
-    expect(resizableSourceDocument).toContain(
-      '__stnPrompt("方案名称", "默认方案")',
-    );
-    expect(resizableSourceDocument).toContain('__stnConfirm("清除方案？")');
-    expect(resizableSourceDocument).toContain("__stnAlert(profileName)");
-    expect(resizableSourceDocument).toContain('"existing":"profile"');
-    expect(resizableSourceDocument).not.toContain("data-stn-icon-fallback");
+    expect(trustedSourceDocument).toContain('prompt("方案名称", "默认方案")');
+    expect(trustedSourceDocument).toContain('confirm("清除方案？")');
+    expect(trustedSourceDocument).toContain("alert(profileName)");
+    expect(trustedSourceDocument).not.toContain("__stnParentDocument");
+    expect(trustedSourceDocument).not.toContain("__stnLocalStorage");
+    expect(pendingSourceDocument).toContain("正在加载可信脚本运行时");
+    expect(pendingSourceDocument).not.toContain("globalThis.compromised");
     expect(message.content).toBe("raw content for edit and copy");
     expect(isHtmlDisplayContent(message.displayContent ?? "")).toBe(true);
   });
 
-  it("isolates an injected fenced HTML status bar from message Markdown", () => {
+  it("keeps an injected fenced HTML status bar separate from message Markdown", () => {
     const displayContent = `<dream>
 ## 正文标题
 
@@ -640,6 +627,53 @@ describe("workspace components", () => {
     expect(html).toContain(">正文标题</h2>");
   });
 
+  it("keeps consecutive fenced HTML documents in separate trusted frames", () => {
+    const displayContent = `\`\`\`html
+<!DOCTYPE html>
+<html><body><main class="opening-form">开场表单</main></body></html>
+\`\`\`
+
+\`\`\`html
+<!DOCTYPE html>
+<html><body><aside class="status-panel">状态栏</aside></body></html>
+\`\`\``;
+    const segments = displayContentSegments(displayContent);
+    const message: WorkspaceMessage = {
+      id: "message-consecutive-regex-html",
+      conversationId: "conversation-test",
+      role: "assistant",
+      content: "[开始创建]\n\n<StatusPlaceHolderImpl/>",
+      displayContent,
+      appliedRegexScriptIds: ["card-opening", "card-status"],
+      createdLabel: "10:31",
+      revision: 1,
+    };
+    const noop = vi.fn();
+    const html = renderToStaticMarkup(
+      <MessageCard
+        message={message}
+        isLast
+        onCopy={noop}
+        onUpdate={noop}
+        onDelete={noop}
+        onRegenerate={noop}
+        onContinue={noop}
+        onSelectSwipe={noop}
+      />,
+    );
+
+    expect(segments).toHaveLength(2);
+    expect(segments[0]).toMatchObject({ kind: "html" });
+    expect(segments[1]).toMatchObject({ kind: "html" });
+    expect(segments[0]?.content).toContain(
+      '<main class="opening-form">开场表单</main>',
+    );
+    expect(segments[1]?.content).toContain(
+      '<aside class="status-panel">状态栏</aside>',
+    );
+    expect(html.match(/<iframe/gu)).toHaveLength(2);
+  });
+
   it("keeps a Tavern Helper full document body style away from prose", () => {
     const displayContent = `正文段落。
 
@@ -658,10 +692,10 @@ describe("workspace components", () => {
     expect(segments[0]).toMatchObject({ kind: "mixed" });
     expect(segments[1]).toMatchObject({ kind: "html" });
 
-    const proseDocument = sandboxedDisplayDocument(
+    const proseDocument = trustedDisplayDocument(
       mixedDisplayContent(segments[0]!.content),
     );
-    const calendarDocument = sandboxedDisplayDocument(segments[1]!.content);
+    const calendarDocument = trustedDisplayDocument(segments[1]!.content);
     expect(proseDocument).toContain("正文段落。");
     expect(proseDocument).not.toContain("body { display: flex; }");
     expect(proseDocument).not.toContain("calendar-container");
@@ -747,10 +781,12 @@ describe("workspace components", () => {
     const raw =
       "```\r\n<!DOCTYPE html><html><body>Greeting</body></html>\r\n```";
     const display = htmlDisplayContent(raw);
-    const document = sandboxedDisplayDocument(raw);
+    const document = trustedDisplayDocument(raw);
 
     expect(display).toBe("<!DOCTYPE html><html><body>Greeting</body></html>");
-    expect(document).toContain("<body><!DOCTYPE html>");
+    expect(document).toContain(
+      "<!DOCTYPE html><html><body>Greeting</body></html>",
+    );
     expect(document).not.toContain("```");
     expect(raw.startsWith("```")).toBe(true);
   });
@@ -781,8 +817,6 @@ describe("workspace components", () => {
     expect(html).toContain("思考过程");
     expect(html).toContain("先检查上下文，再组织回复。");
     expect(html).toContain('<details class="message-reasoning">');
-    expect(html).not.toContain(
-      '<details class="message-reasoning" open="">',
-    );
+    expect(html).not.toContain('<details class="message-reasoning" open="">');
   });
 });

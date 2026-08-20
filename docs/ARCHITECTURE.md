@@ -16,10 +16,9 @@ Fastify application
       │
 SQLite/WAL + file assets
 
-Separate origin
-Legacy extension realm
-      │ typed postMessage/RPC
-      └─ capability broker in Fastify
+Trusted browser compatibility runtime
+      ├─ card/preset scripts in the main page
+      └─ unsandboxed same-origin message iframes
 ```
 
 This is a greenfield implementation. The upstream repository is not a source dependency.
@@ -112,9 +111,16 @@ requires a Worker transport. Requests and responses are structured-cloned and
 limited to 2 MiB. Hook and lifecycle timeouts terminate and quarantine the
 failed extension for the application session without blocking later extensions.
 The inline adapter is reserved for tests and built-in trusted implementations.
-Legacy extensions run on another origin with an old-DOM shell and exact-path
-ESM facades. The realm cannot access the main DOM, storage, database, or
-Provider secrets.
+
+Imported card, preset, and Tavern Helper script sources have a separate trust
+model. They start disabled. Trust is granted to the entire source rather than
+to individual capabilities. Once trusted, background JavaScript executes in the
+main page. Regex-generated frontend documents execute in unsandboxed,
+same-origin `srcdoc` iframes and receive direct `window.parent`, main DOM,
+browser storage, `TavernHelper`, `Mvu`, and `SillyTavern` access. This is an
+old-SillyTavern compatibility contract, not a security boundary. Provider
+credentials and direct database handles remain server-only because they are
+never placed in the browser runtime.
 
 ## Data placement
 
@@ -126,4 +132,5 @@ Provider secrets.
 
 - `4173`: Vite web development.
 - `4710`: main Fastify API.
-- `4711`: isolated legacy extension realm.
+- `4711`: optional pinned legacy plugin host; not used by trusted card/preset
+  scripts or regex frontends.

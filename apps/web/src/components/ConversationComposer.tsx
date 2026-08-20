@@ -328,6 +328,7 @@ export function ConversationComposer({
         </div>
         <textarea
           ref={textareaRef}
+          id="send_textarea"
           value={draft}
           rows={1}
           placeholder="输入消息…"
@@ -361,6 +362,7 @@ export function ConversationComposer({
           </button>
         ) : (
           <button
+            id="send_but"
             className="send-button composer__primary-action"
             type="button"
             disabled={!canSend}

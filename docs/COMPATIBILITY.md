@@ -2,10 +2,13 @@
 
 ## Principles
 
-- Compatibility means accepting portable content and running explicitly trusted extensions, not reproducing the upstream internal architecture.
+- Compatibility means accepting portable content and reproducing the old
+  browser execution path for sources the user explicitly trusts.
 - Old JSON shapes terminate at adapters. Internal code uses normalized types.
 - Executable templates and scripts are detected during import and remain disabled until explicitly trusted.
-- Legacy plugin writes are capability-authorized and use a distinct actor from conversation model-tool runs.
+- Trust is source-wide for card, preset, regex, and Tavern Helper scripts; there
+  are no per-capability grants inside a trusted source. Conversation model-tool
+  writes remain a distinct server-authorized actor.
 
 ## JS-Slash-Runner
 
@@ -20,11 +23,9 @@
 The workspace can install this exact revision from the plugin panel. The
 server-side installer fetches the pinned commit into a staging directory,
 verifies every locked asset and reviewed external ESM surface, writes a local
-installation receipt, and only then atomically publishes the directory. The
-bundle imports a broad old-SillyTavern ESM surface and executes trusted
-JavaScript. It therefore runs only in the legacy realm and starts disabled.
-Host enablement is stored separately from discovery, survives restarts, and can
-only be changed by a request from the configured main-app origin.
+installation receipt, and only then atomically publishes the directory. Card
+and preset Tavern Helper envelopes are executed by the first-party compatible
+runtime in the main web page; they do not pass through a capability broker.
 
 Portable cards and presets keep JS-Slash-Runner data in the original Tavern
 Helper envelopes:
@@ -35,19 +36,19 @@ Helper envelopes:
   typo are accepted on import but are not invented during export.
 
 Folders and script records are preserved as data. Import reports their counts
-and creates a separate, disabled `stn.tavern-helper` source setting. Installing
-or trusting JS-Slash-Runner never grants imported scripts permission to execute.
-When the plugin is explicitly enabled, its isolated realm may receive a minimal,
-host-scoped read projection of the current card/preset extension fields. That
-projection recursively removes Tavern Helper envelopes and legacy script
-aliases, so stored script source is not handed to the `legacy-plugin` actor.
-The full source remains available for round-trip export; any future execution
-path must use the distinct `embedded-script` actor and its own authorization.
+and creates a separate, disabled `stn.tavern-helper` source setting. The user
+may trust the whole card or preset source. Once trusted, enabled background
+scripts execute in the main page with Tavern Helper/MVU globals, DOM and browser
+storage access, and ordinary browser networking. Revoking source trust disposes
+that source on the next runtime reload.
 
 Tavern Regex data remains a separate `regex_scripts` array. It is never merged
 with executable Tavern Helper scripts. Imported card- and preset-scoped regexes
-start disabled and can only transform prompt/display copies after an explicit
-scope grant; stored message bodies are unchanged.
+start disabled and transform prompt/display copies only after an explicit
+source grant; stored message bodies are unchanged. Full HTML documents produced
+for display run as trusted, unsandboxed same-origin iframes. Their source is not
+rewritten and can directly access `window.parent`, main DOM, local storage,
+Tavern Helper/MVU globals, and external networks.
 
 ## ST-Prompt-Template
 
@@ -60,22 +61,21 @@ scope grant; stored message bodies are unchanged.
 
 The compatibility contract covers EJS 3.1.9 syntax, variable scopes, prompt lifecycle events, lorebook decorators, stable imported object references, and its exact worker/chunk paths.
 
-## Security posture
+## Trust posture
 
-Legacy “sandbox” settings in either plugin are not treated as security boundaries. The NG realm:
+Imported executable content is unsafe by design until the user trusts its
+source. After trust, the application intentionally provides old-project
+compatibility rather than isolation:
 
-- uses a separate origin;
-- exposes stable in-memory mirrors through ESM facades;
-- sends mutations through typed RPC;
-- enforces per-plugin capabilities;
-- exposes no network-egress broker in the current vertical slice; any future
-  domain access must require an explicit per-plugin grant;
-- never exposes Provider secrets or main-origin storage;
-- can be terminated without losing the main chat draft.
+- background scripts run in the main page;
+- rich message iframes are same-origin and have no `sandbox` attribute;
+- scripts can read and mutate the main DOM and browser storage;
+- scripts can use ordinary browser networking and load remote modules;
+- Tavern Helper, MVU, SillyTavern, jQuery, lodash, Vue, YAML, Zod, and toast
+  globals are bridged directly where available;
+- no script text rewriting, fake local storage, DOM proxy, or per-capability RPC
+  is inserted between a trusted source and the browser.
 
-Installing a verified bundle only marks it loadable by the compatibility host.
-The main workspace does not create the realm until the user separately trusts
-and enables the plugin, and imported executable content still requires its own
-actor-specific authorization. Plugin assets are served only from the exact
-required-asset lock and are re-read, containment-checked, and SHA-256 verified
-for the response bytes.
+Provider secrets and direct SQLite/database handles remain server-only and are
+not browser globals. That server-side data placement is not presented as a
+sandbox for trusted browser code.

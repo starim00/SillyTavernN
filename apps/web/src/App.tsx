@@ -91,10 +91,7 @@ import type {
 import { CardConversationEntry } from "./components/CardConversationEntry";
 import { ConversationComposer } from "./components/ConversationComposer";
 import type { LegacyRealmStatus } from "./components/LegacyRealmBridge";
-import {
-  clearMessageFrameStorage,
-  MessageStream,
-} from "./components/MessageStream";
+import { MessageStream } from "./components/MessageStream";
 import { NavigationRail } from "./components/NavigationRail";
 import { PresetSettingsRail } from "./components/PresetSettingsRail";
 import type { PresetGenerationPatch } from "./components/PresetGenerationControls";
@@ -1413,7 +1410,6 @@ export default function App() {
         }
       }
 
-      clearMessageFrameStorage(target.id);
       dispatch({ type: "conversation/delete", id: target.id });
 
       if (apiOnline) {
@@ -1713,7 +1709,7 @@ export default function App() {
       const accepted = window.confirm(
         source.trusted
           ? `停止并撤销“${source.name}”中的全部脚本？`
-          : `“${source.name}”包含 ${String(source.bundle.scripts.length)} 个可执行脚本。启用后，脚本可以通过酒馆助手兼容接口读写当前对话、变量、快捷按钮并访问外部网络。仅应信任来源明确的角色卡或预设。是否信任并启用？`,
+          : `“${source.name}”包含 ${String(source.bundle.scripts.length)} 个可执行脚本。启用后，脚本将按旧酒馆助手的受信任模式在当前页面直接运行，可以访问和修改页面 DOM、聊天、变量、浏览器存储，并可向外部网络发送请求。应用不会再隔离或逐项拦截这些行为；请自行确认脚本来源。是否信任并启用？`,
       );
       if (!accepted) return;
       try {
@@ -1732,7 +1728,7 @@ export default function App() {
         showToast(
           source.trusted
             ? `${scopeLabel}脚本已停止。`
-            : `${scopeLabel}脚本已由原生酒馆助手兼容层加载。`,
+            : `${scopeLabel}脚本已按旧版受信任模式直接加载。`,
           "success",
         );
       } catch {
@@ -1773,36 +1769,6 @@ export default function App() {
       showToast("脚本来源已保存并重新加载。", "success");
     },
     [showToast],
-  );
-
-  const saveRenderedMessageVariables = useCallback(
-    (message: WorkspaceMessage, variables: Record<string, unknown>) => {
-      const snapshot = structuredClone(variables);
-      setTavernHelperContext((current) =>
-        current
-          ? {
-              ...current,
-              variables: {
-                ...current.variables,
-                messages: {
-                  ...current.variables.messages,
-                  [message.id]: snapshot,
-                },
-              },
-            }
-          : current,
-      );
-      void saveTavernHelperState({
-        conversationId: message.conversationId,
-        ...(state.selectedPresetId ? { presetId: state.selectedPresetId } : {}),
-        namespace: "message",
-        messageId: message.id,
-        variables: snapshot,
-      }).catch(() => {
-        showToast("状态栏变量保存失败；本次修改没有持久化。", "warning");
-      });
-    },
-    [showToast, state.selectedPresetId],
   );
 
   const runTavernHelperButton = useCallback(
@@ -1859,7 +1825,7 @@ export default function App() {
           count > 0
         ) {
           const accepted = window.confirm(
-            `${file.name} 携带 ${String(count)} 条文本正则。是否允许它们处理消息显示副本和发送给模型的提示词副本？原始消息保持不变；正则替换中包含的脚本及 Tavern Helper 脚本仍不会被执行。`,
+            `${file.name} 携带 ${String(count)} 条正则。启用后，它们可以处理消息显示副本和发送给模型的提示词副本；显示替换中包含的 HTML/JavaScript 会按旧酒馆助手模式直接运行，并可访问当前页面、浏览器存储和外部网络。请自行确认来源。是否信任并启用？`,
           );
           if (accepted) {
             try {
@@ -2207,6 +2173,15 @@ export default function App() {
       scope: RegexScope,
       patch: { enabled?: boolean; scripts?: RegexScriptDefinition[] },
     ) => {
+      if (
+        patch.enabled === true &&
+        !scope.enabled &&
+        !window.confirm(
+          `启用“${scope.name}”的正则？其显示替换中包含的 HTML/JavaScript 将按旧酒馆助手模式直接运行，可访问当前页面、浏览器存储和外部网络。应用不会隔离这些行为。`,
+        )
+      ) {
+        return;
+      }
       const currentState = workspaceStateRef.current;
       if (currentState.availability === "api") {
         try {
@@ -2612,10 +2587,6 @@ export default function App() {
 
           <MessageStream
             conversationId={conversation.id}
-            cardId={selectedCard?.id}
-            storageConversationIds={state.conversations
-              .filter((candidate) => candidate.cardId === selectedCard?.id)
-              .map((candidate) => candidate.id)}
             messages={messages}
             hasMore={Boolean(
               state.messageNextCursorByConversation[conversation.id],
@@ -2624,15 +2595,15 @@ export default function App() {
             onLoadOlder={() => loadOlderMessages(conversation.id)}
             generation={state.generation}
             helperRenderSettings={tavernHelperContext?.settings?.render}
-            variablesByMessage={tavernHelperContext?.variables.messages}
+            helperHostReady={
+              tavernHelperContext !== null && !tavernHelperStatus.loading
+            }
             onCopy={copyMessage}
             onUpdate={updateMessage}
             onDelete={deleteMessage}
             onRegenerate={regenerateMessage}
             onContinue={continueFromMessage}
             onSelectSwipe={selectSwipe}
-            onEmbeddedSend={(content) => void sendMessageContent(content)}
-            onVariablesChange={saveRenderedMessageVariables}
           />
 
           <ConversationComposer

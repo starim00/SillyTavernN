@@ -2191,27 +2191,6 @@ export class AppStore {
     return this.mapExtensionSetting(row);
   }
 
-  getLatestMessageExtensionSettingForCard(
-    extensionId: string,
-    cardId: string,
-  ): ExtensionSetting | undefined {
-    const row = this.database.get<Row>(
-      `SELECT settings.*
-       FROM extension_settings AS settings
-       JOIN messages AS message
-         ON settings.key = 'variables:message:' || message.id
-       JOIN conversations AS conversation
-         ON conversation.id = message.conversation_id
-       WHERE settings.extension_id = ?
-         AND conversation.card_id = ?
-       ORDER BY settings.updated_at DESC, message.updated_at DESC, message.id DESC
-       LIMIT 1`,
-      extensionId,
-      cardId,
-    );
-    return row ? this.mapExtensionSetting(row) : undefined;
-  }
-
   insertAudit(input: {
     id?: string;
     runId?: string | null;

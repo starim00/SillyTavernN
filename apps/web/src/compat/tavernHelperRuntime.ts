@@ -332,33 +332,13 @@ export function shouldReconcileOpeningMessageVariables(
   );
 }
 
-function isCrossConversationMvuState(
-  variables: Record<string, unknown> | undefined,
-): variables is Record<string, unknown> {
-  return (
-    variables !== undefined &&
-    (Object.hasOwn(variables, "stat_data") ||
-      Object.hasOwn(variables, "initialized_lorebooks"))
-  );
-}
-
-export function shouldSeedOpeningMessageVariables(
-  message: Pick<WorkspaceMessage, "role"> | undefined,
-  messageVariables: Record<string, unknown> | undefined,
-  characterVariables: Record<string, unknown>,
-): boolean {
-  return (
-    message?.role === "assistant" &&
-    (messageVariables === undefined || _.isEmpty(messageVariables)) &&
-    isCrossConversationMvuState(characterVariables)
-  );
-}
-
 export function shouldEnsureAssistantStatusPlaceholder(
+  messageIndex: number,
   message: Pick<WorkspaceMessage, "role" | "content">,
   variables: Record<string, unknown>,
 ): boolean {
   return (
+    messageIndex > 0 &&
     message.role === "assistant" &&
     _.has(variables, "stat_data") &&
     _.isPlainObject(variables.stat_data) &&
@@ -369,6 +349,14 @@ export function shouldEnsureAssistantStatusPlaceholder(
 export function appendAssistantStatusPlaceholder(content: string): string {
   if (content.includes("<StatusPlaceHolderImpl/>")) return content;
   return `${content.trimEnd()}\n\n<StatusPlaceHolderImpl/>`;
+}
+
+export function resolveTavernHelperFrameMessageId(
+  frameName: string,
+  fallback: number,
+): number {
+  const match = /^TH-message--(\d+)--\d+(?:_\d+)?$/u.exec(frameName);
+  return match?.[1] === undefined ? fallback : Number(match[1]);
 }
 
 export function createTavernHelperMessageView(
@@ -530,7 +518,6 @@ export class TavernHelperRuntime {
       errors: [],
     });
     this.globalsCleanup = this.installGlobals();
-    this.seedOpeningMessageVariables();
     for (const source of this.context.sources) {
       if (!source.trusted) continue;
       for (const script of source.bundle.scripts) {
@@ -861,7 +848,11 @@ export class TavernHelperRuntime {
       }
     }
 
-    if (!shouldEnsureAssistantStatusPlaceholder(message, variables)) return;
+    if (
+      !shouldEnsureAssistantStatusPlaceholder(messageIndex, message, variables)
+    ) {
+      return;
+    }
     const content = appendAssistantStatusPlaceholder(message.content);
     try {
       await this.adapter.updateMessage(message, content);
@@ -870,7 +861,11 @@ export class TavernHelperRuntime {
       message = messages[messageIndex];
       if (
         !message ||
-        !shouldEnsureAssistantStatusPlaceholder(message, variables)
+        !shouldEnsureAssistantStatusPlaceholder(
+          messageIndex,
+          message,
+          variables,
+        )
       ) {
         return;
       }
@@ -1107,23 +1102,6 @@ export class TavernHelperRuntime {
     );
     Object.assign(target.variables, clone(variables));
     target.persist();
-  }
-
-  private seedOpeningMessageVariables(): void {
-    const opening = this.adapter.getMessages()[0];
-    if (
-      !shouldSeedOpeningMessageVariables(
-        opening,
-        opening ? this.context.variables.messages[opening.id] : undefined,
-        this.context.variables.character,
-      )
-    ) {
-      return;
-    }
-    if (!opening) return;
-    const variables = clone(this.context.variables.character);
-    this.context.variables.messages[opening.id] = variables;
-    this.queuePersist("message", variables, { messageId: opening.id });
   }
 
   private variableSchemaKey(option: VariableOption): string {
@@ -1370,6 +1348,16 @@ export class TavernHelperRuntime {
       this.addListener(event, listener, false, 1);
     const eventEmit = (event: string, ...values: unknown[]) =>
       this.emit(event, ...values);
+    const lastMessageId = () => this.adapter.getMessages().length - 1;
+    const getBoundCurrentMessageId = function (this: Window) {
+      const runtimeWindow = this as Window & { __TH_IFRAME_ID?: string };
+      const frameName =
+        runtimeWindow.__TH_IFRAME_ID ??
+        this.frameElement?.id ??
+        this.frameElement?.getAttribute("name") ??
+        this.name;
+      return resolveTavernHelperFrameMessageId(frameName, lastMessageId());
+    };
     const getVariables = (option: VariableOption) =>
       clone(this.variableStore(option).variables);
     const getAllVariables = () => {
@@ -2107,7 +2095,7 @@ export class TavernHelperRuntime {
         _insertVariables: insertVariables,
         _deleteVariable: deleteVariable,
         _getScriptId: scriptApi.getScriptId,
-        _getCurrentMessageId: helper.getCurrentMessageId,
+        _getCurrentMessageId: getBoundCurrentMessageId,
       },
     };
     const popupType = {

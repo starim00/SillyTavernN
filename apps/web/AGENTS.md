@@ -1,6 +1,12 @@
 # Prototype Instructions
 
-Run the local server yourself and open the preview in the browser available to this environment. Do not give the user server-start instructions when you can run it.
+Run the local server yourself and open the preview with Codex Browser or the
+connected Chrome browser. Prefer Chrome when the user's existing tab, session,
+or extension state matters; otherwise use the in-app Browser. Do not launch a
+standalone Playwright browser unless the user explicitly requests Playwright,
+CLI trace/test artifacts are required, or both Browser and Chrome have been
+confirmed unavailable. Do not give the user server-start instructions when you
+can run it.
 
 Before making substantial visual changes, use the Product Design plugin's `get-context` skill when the visual source is unclear or no longer matches the current goal. When the user gives durable prototype-specific design feedback, preferences, or decisions, record them in `AGENTS.md`.
 

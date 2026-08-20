@@ -30,6 +30,21 @@
 - Use Phosphor icons. Do not use emoji, hand-drawn SVGs, CSS illustration, or decorative placeholder art.
 - Durable user feedback on 2026-07-29: fresh light-novel tone, but platform-general and suitable for multi-character or world-only cards.
 
+## Browser validation
+
+- Codex Browser and connected Chrome are available for this project. Use the
+  in-app Browser for ordinary local UI inspection, and use Chrome when the
+  user's existing tab, session, extension state, or an explicit Chrome request
+  matters.
+- Do not start a standalone Playwright CLI/browser for interactive QA merely
+  because the app is local. Use standalone Playwright only when the user asks
+  for it, the task specifically requires CLI traces or Playwright test
+  artifacts, or Browser and Chrome have both been confirmed unavailable.
+- Historical notes that mention Playwright screenshots describe past evidence,
+  not a preferred browser-control route. Browser APIs named `playwright` inside
+  Codex Browser/Chrome still belong to those Codex browser surfaces and do not
+  justify launching standalone Playwright.
+
 ## Agent and extension safety
 
 - Model tool writes are server-authorized and must re-check actor, the target

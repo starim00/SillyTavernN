@@ -408,6 +408,8 @@ export function createTavernHelperMessageView(
     message_id: messageId,
     name: message.role === "user" ? "User" : assistantName,
     role: message.role,
+    is_user: message.role === "user",
+    is_system: false,
     is_hidden: false,
     message: message.content,
     data: activeVariables,
@@ -470,6 +472,10 @@ export class TavernHelperRuntime {
   >();
   private readonly initializedGlobals = new Map<string, Promise<unknown>>();
   private readonly scriptInfo = new Map<string, string>();
+  private readonly messageViews = new Map<
+    string,
+    ReturnType<typeof createTavernHelperMessageView>
+  >();
   private readonly audio = new Map<
     "bgm" | "ambient",
     {
@@ -583,6 +589,7 @@ export class TavernHelperRuntime {
     this.disposed = true;
     this.listeners.clear();
     this.injections.clear();
+    this.messageViews.clear();
     for (const audio of this.audio.values()) {
       audio.element?.pause();
       audio.element = null;
@@ -595,8 +602,17 @@ export class TavernHelperRuntime {
   async emit(event: string, ...values: unknown[]): Promise<void> {
     const entries = [...(this.listeners.get(event) ?? [])];
     for (const entry of entries) {
-      await this.withOwner(entry.owner, () => entry.listener(...values));
-      if (entry.once) this.removeListener(event, entry.listener);
+      try {
+        await this.withOwner(entry.owner, () => entry.listener(...values));
+      } catch (error) {
+        this.reportRuntimeError(entry.owner, error);
+        this.adapter.notify(
+          `${entry.owner?.script.name ?? "酒馆助手兼容层"} 处理 ${event} 事件失败：${errorMessage(error)}`,
+          "warning",
+        );
+      } finally {
+        if (entry.once) this.removeListener(event, entry.listener);
+      }
     }
     if (
       event === tavernEvents.MESSAGE_RECEIVED &&
@@ -613,6 +629,17 @@ export class TavernHelperRuntime {
       button.scriptId,
     );
     await this.withOwner(owner, () => this.emit(this.buttonEvent(button.name)));
+  }
+
+  async processUserMessage(expectedMessageId: string): Promise<boolean> {
+    const messages = await this.adapter.refreshMessages();
+    const messageIndex = messages.findIndex(
+      (message) => message.id === expectedMessageId,
+    );
+    if (messageIndex < 0) return false;
+    await this.emit(tavernEvents.MESSAGE_SENT, messageIndex);
+    await this.emit(tavernEvents.USER_MESSAGE_RENDERED, messageIndex, "user");
+    return true;
   }
 
   async processAssistantSwipe(
@@ -1308,13 +1335,20 @@ export class TavernHelperRuntime {
   }
 
   private messageView(message: WorkspaceMessage, messageId: number) {
-    return createTavernHelperMessageView(
+    const next = createTavernHelperMessageView(
       message,
       messageId,
       this.context.variables.messages[message.id] ?? {},
       this.context.sources.find((source) => source.scope === "card")?.name ??
         "Assistant",
     );
+    const current = this.messageViews.get(message.id);
+    if (!current) {
+      this.messageViews.set(message.id, next);
+      return next;
+    }
+    Object.assign(current, next);
+    return current;
   }
 
   private async setChatMessages(

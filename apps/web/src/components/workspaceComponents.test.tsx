@@ -695,6 +695,8 @@ describe("workspace components", () => {
     expect(sourceDocument).toContain("stn-message-dialogue");
     expect(sourceDocument).not.toContain("background:#fff1f0");
     expect(sourceDocument).toContain("new MutationObserver(decorate)");
+    expect(sourceDocument).toContain(".observe(root,");
+    expect(sourceDocument).not.toContain(".observe(document.body,");
     expect(trustedSourceDocument).toContain(
       'window.parent.document.querySelector("#send_textarea")',
     );

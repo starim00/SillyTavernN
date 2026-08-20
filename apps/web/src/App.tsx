@@ -1135,37 +1135,58 @@ export default function App() {
       }
 
       if (apiOnline) {
+        let persisted: WorkspaceMessage;
         try {
-          const persisted = await createMessage(conversation.id, { content });
-          const currentMessages =
-            workspaceStateRef.current.messagesByConversation[conversation.id] ??
-            [];
-          const nextMessages = [...currentMessages, persisted];
-          workspaceStateRef.current = {
-            ...workspaceStateRef.current,
-            messagesByConversation: {
-              ...workspaceStateRef.current.messagesByConversation,
-              [conversation.id]: nextMessages,
+          persisted = await createMessage(conversation.id, { content });
+        } catch {
+          showToast("消息未能保存到本地服务，已保存在离线工作区。", "warning");
+          dispatch({
+            type: "message/append",
+            message: {
+              id: identifier("message"),
+              conversationId: conversation.id,
+              role: "user",
+              content,
+              createdLabel: new Intl.DateTimeFormat("zh-CN", {
+                hour: "2-digit",
+                minute: "2-digit",
+              }).format(new Date()),
+              revision: 1,
             },
-          };
-          dispatch({ type: "message/append", message: persisted });
-          await tavernHelperRuntimeRef.current?.emit(
-            "message_sent",
-            nextMessages.length - 1,
-          );
-          await tavernHelperRuntimeRef.current?.emit(
-            "user_message_rendered",
-            nextMessages.length - 1,
-            "user",
-          );
-          await runGeneration({
-            conversationId: conversation.id,
-            mode: "send",
           });
           return;
-        } catch {
-          showToast("本地服务暂时不可用，消息已保存在离线工作区。", "warning");
         }
+
+        const currentMessages =
+          workspaceStateRef.current.messagesByConversation[conversation.id] ??
+          [];
+        const nextMessages = [...currentMessages, persisted];
+        workspaceStateRef.current = {
+          ...workspaceStateRef.current,
+          messagesByConversation: {
+            ...workspaceStateRef.current.messagesByConversation,
+            [conversation.id]: nextMessages,
+          },
+        };
+        dispatch({ type: "message/append", message: persisted });
+        try {
+          await tavernHelperRuntimeRef.current?.processUserMessage(
+            persisted.id,
+          );
+        } catch (error) {
+          showToast(
+            `消息已保存，但用户消息脚本处理失败：${
+              error instanceof Error ? error.message : String(error)
+            }`,
+            "warning",
+          );
+        }
+
+        await runGeneration({
+          conversationId: conversation.id,
+          mode: "send",
+        });
+        return;
       }
 
       dispatch({

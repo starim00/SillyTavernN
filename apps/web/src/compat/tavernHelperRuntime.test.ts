@@ -31,6 +31,171 @@ const assistantMessage: WorkspaceMessage = {
 };
 
 describe("Tavern Helper message compatibility", () => {
+  it("isolates event listener failures and attributes them to their script", async () => {
+    const statuses: Array<{
+      errors: Array<{ scriptName: string; message: string }>;
+    }> = [];
+    const notify = vi.fn();
+    let runtimeMessages: WorkspaceMessage[] = [];
+    const persistedUserMessage: WorkspaceMessage = {
+      id: "persisted-user",
+      conversationId: "conversation-runtime",
+      role: "user",
+      content: "Test message",
+      createdLabel: "12:01",
+      revision: 1,
+    };
+    const source = {
+      scope: "card" as const,
+      id: "card-runtime",
+      name: "Fixture card",
+      revision: 1,
+      trusted: true,
+      bundle: {
+        present: true,
+        scripts: [
+          {
+            id: "failing-script",
+            name: "Failing fixture",
+            content: "export {};",
+            info: "",
+            declaredEnabled: true,
+            enabled: true,
+            buttonEnabled: false,
+            buttons: [],
+            data: {},
+            sourcePath: "fixture",
+          },
+        ],
+        variables: {},
+        diagnostics: [],
+      },
+    };
+    const context: TavernHelperContext = {
+      conversation: {
+        id: "conversation-runtime",
+        cardId: source.id,
+        presetId: null,
+      },
+      sources: [source],
+      variables: {
+        global: {},
+        character: {},
+        preset: {},
+        chat: {},
+        messages: {},
+        scripts: {},
+      },
+    };
+    const adapter: TavernHelperRuntimeAdapter = {
+      connectionId: "provider-runtime",
+      getMessages: () => runtimeMessages,
+      createMessage: async () => {
+        throw new Error("not used");
+      },
+      deleteMessage: async () => undefined,
+      updateMessage: async (message) => message,
+      refreshMessages: async () => {
+        runtimeMessages = [persistedUserMessage];
+        return runtimeMessages;
+      },
+      generate: async () => "",
+      saveState: async () => undefined,
+      onButtonsChanged: () => undefined,
+      onStatusChanged: (status) => statuses.push(status),
+      notify,
+    };
+    const runtime = new TavernHelperRuntime(context, adapter);
+    const followingListener = vi.fn();
+    const owner = {
+      source,
+      script: source.bundle.scripts[0]!,
+      key: "card:card-runtime:failing-script",
+    };
+    const internal = runtime as unknown as {
+      listeners: Map<
+        string,
+        Array<{
+          listener: (...values: unknown[]) => unknown;
+          owner: typeof owner;
+          once: boolean;
+          priority: number;
+          sequence: number;
+        }>
+      >;
+    };
+    internal.listeners.set("message_sent", [
+      {
+        listener: () => {
+          throw new Error("fixture listener failed");
+        },
+        owner,
+        once: true,
+        priority: 0,
+        sequence: 0,
+      },
+      {
+        listener: followingListener,
+        owner,
+        once: false,
+        priority: 0,
+        sequence: 1,
+      },
+    ]);
+
+    await expect(runtime.emit("message_sent", 2)).resolves.toBeUndefined();
+
+    expect(followingListener).toHaveBeenCalledWith(2);
+    expect(statuses.at(-1)?.errors).toContainEqual(
+      expect.objectContaining({
+        scriptName: "Failing fixture",
+        message: "fixture listener failed",
+      }),
+    );
+    expect(notify).toHaveBeenCalledWith(
+      "Failing fixture 处理 message_sent 事件失败：fixture listener failed",
+      "warning",
+    );
+    expect(internal.listeners.get("message_sent")).toHaveLength(1);
+
+    const refreshedListener = vi.fn((messageIndex: unknown) => {
+      expect(runtimeMessages[Number(messageIndex)]?.id).toBe(
+        persistedUserMessage.id,
+      );
+    });
+    internal.listeners.set("message_sent", [
+      {
+        listener: refreshedListener,
+        owner,
+        once: false,
+        priority: 0,
+        sequence: 2,
+      },
+    ]);
+
+    await expect(
+      runtime.processUserMessage(persistedUserMessage.id),
+    ).resolves.toBe(true);
+    expect(refreshedListener).toHaveBeenCalledWith(0);
+
+    const messageView = (
+      runtime as unknown as {
+        messageView: (
+          message: WorkspaceMessage,
+          messageId: number,
+        ) => Record<string, unknown>;
+      }
+    ).messageView.bind(runtime);
+    const firstView = messageView(persistedUserMessage, 0);
+    const secondView = messageView({ ...persistedUserMessage, revision: 2 }, 0);
+    expect(secondView).toBe(firstView);
+    expect(secondView).toMatchObject({
+      role: "user",
+      is_user: true,
+      is_system: false,
+    });
+  });
+
   it("resolves the old Tavern Helper iframe floor contract", () => {
     expect(resolveTavernHelperFrameMessageId("TH-message--12--0", -1)).toBe(12);
     expect(resolveTavernHelperFrameMessageId("TH-message--7--2_1", -1)).toBe(7);
@@ -52,6 +217,8 @@ describe("Tavern Helper message compatibility", () => {
       message_id: 2,
       name: "Fixture card",
       role: "assistant",
+      is_user: false,
+      is_system: false,
       swipe_id: 1,
       swipes_data: [{}, variables],
     });

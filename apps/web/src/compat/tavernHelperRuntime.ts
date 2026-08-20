@@ -321,6 +321,37 @@ export function resolveTavernHelperMessageVariables(
   return asRecord(clone(update.swipes_data[resolvedIndex]));
 }
 
+export function validateTavernHelperVariables(
+  schema: z.ZodType,
+  variables: JsonRecord,
+): JsonRecord {
+  const result = schema.safeParse(variables);
+  if (!result.success) {
+    throw new Error(
+      `Variable schema validation failed: ${result.error.message}`,
+    );
+  }
+  return {
+    ...clone(variables),
+    ...clone(asRecord(result.data)),
+  };
+}
+
+export function shouldReparseAssistantVariables(
+  content: string,
+  variables: JsonRecord,
+  baseline: JsonRecord | undefined,
+): boolean {
+  return (
+    baseline !== undefined &&
+    _.has(baseline, "stat_data") &&
+    (!_.has(variables, "schema") || _.isEmpty(variables.stat_data)) &&
+    (_.isEmpty(variables.stat_data) ||
+      _.isEqual(variables.stat_data, baseline.stat_data)) &&
+    /<(?:update(?:variable)?|variableupdate)>/iu.test(content)
+  );
+}
+
 export function shouldReconcileOpeningMessageVariables(
   variables: Record<string, unknown>,
 ): boolean {
@@ -604,7 +635,7 @@ export class TavernHelperRuntime {
     );
     try {
       await this.emit(tavernEvents.MESSAGE_SWIPED, messageIndex);
-      const parsed = await this.parseAssistantSwipeVariables(
+      const parsed = await this.parseAssistantMessageVariables(
         messageIndex,
         message,
         baseline,
@@ -617,6 +648,49 @@ export class TavernHelperRuntime {
           messageIndex,
           "assistant",
         );
+      }
+      await this.emit(
+        tavernEvents.CHARACTER_MESSAGE_RENDERED,
+        messageIndex,
+        "assistant",
+      );
+    } finally {
+      const processedMessage = this.adapter.getMessages()[messageIndex];
+      if (processedMessage) {
+        const variables =
+          this.context.variables.messages[processedMessage.id] ?? {};
+        this.queuePersist("message", variables, {
+          messageId: processedMessage.id,
+        });
+      }
+      await this.flushPersistence();
+    }
+    return true;
+  }
+
+  async processAssistantMessage(messageIndex: number): Promise<boolean> {
+    const messages = await this.adapter.refreshMessages();
+    const message = messages[messageIndex];
+    if (!message || message.role !== "assistant") return false;
+    const baseline = this.previousMessageVariables(messageIndex, messages);
+
+    try {
+      await this.emit(
+        tavernEvents.MESSAGE_RECEIVED,
+        messageIndex,
+        "assistant",
+      );
+      const variables = this.context.variables.messages[message.id] ?? {};
+      if (
+        this.hasMessageVariableSchema(messageIndex) &&
+        shouldReparseAssistantVariables(message.content, variables, baseline)
+      ) {
+        const parsed = await this.parseAssistantMessageVariables(
+          messageIndex,
+          message,
+          baseline,
+        );
+        if (parsed) await this.reconcileAssistantMessage(messageIndex);
       }
       await this.emit(
         tavernEvents.CHARACTER_MESSAGE_RENDERED,
@@ -771,11 +845,54 @@ export class TavernHelperRuntime {
   }
 
   private async reconcileAssistantBacklog(): Promise<void> {
-    const messages = this.adapter.getMessages();
+    let messages = this.adapter.getMessages();
     for (const [index, message] of messages.entries()) {
       if (message.role !== "assistant") continue;
+      const baseline = this.previousMessageVariables(index, messages);
+      const variables = this.context.variables.messages[message.id] ?? {};
+      if (
+        this.hasMessageVariableSchema(index) &&
+        shouldReparseAssistantVariables(message.content, variables, baseline)
+      ) {
+        const parsed = await this.parseAssistantMessageVariables(
+          index,
+          message,
+          baseline,
+        );
+        if (parsed) {
+          await this.reconcileAssistantMessage(index);
+          messages = this.adapter.getMessages();
+          continue;
+        }
+      }
       await this.reconcileAssistantMessage(index);
+      messages = this.adapter.getMessages();
     }
+    await this.flushPersistence();
+  }
+
+  private hasMessageVariableSchema(messageIndex: number): boolean {
+    return (
+      this.variableSchemas.has(`message:${String(messageIndex)}`) ||
+      this.variableSchemas.has("message:*")
+    );
+  }
+
+  private previousMessageVariables(
+    messageIndex: number,
+    messages: WorkspaceMessage[],
+  ): JsonRecord | undefined {
+    for (let index = messageIndex - 1; index >= 0; index -= 1) {
+      const previousMessage = messages[index];
+      if (!previousMessage) continue;
+      const previousVariables =
+        this.context.variables.messages[previousMessage.id];
+      if (!previousVariables || !_.has(previousVariables, "stat_data")) {
+        continue;
+      }
+      return clone(previousVariables);
+    }
+    return undefined;
   }
 
   private rollbackAssistantMessageVariables(
@@ -785,15 +902,8 @@ export class TavernHelperRuntime {
     const message = messages[messageIndex];
     if (!message || message.role !== "assistant") return undefined;
 
-    for (let index = messageIndex - 1; index >= 0; index -= 1) {
-      const previousMessage = messages[index];
-      if (!previousMessage) continue;
-      const previousVariables =
-        this.context.variables.messages[previousMessage.id];
-      if (!previousVariables || !_.has(previousVariables, "stat_data")) {
-        continue;
-      }
-      const snapshot = clone(previousVariables);
+    const snapshot = this.previousMessageVariables(messageIndex, messages);
+    if (snapshot !== undefined) {
       this.context.variables.messages[message.id] = snapshot;
       this.queuePersist("message", snapshot, { messageId: message.id });
       return snapshot;
@@ -801,7 +911,7 @@ export class TavernHelperRuntime {
     return undefined;
   }
 
-  private async parseAssistantSwipeVariables(
+  private async parseAssistantMessageVariables(
     messageIndex: number,
     message: WorkspaceMessage,
     baseline: JsonRecord | undefined,
@@ -1088,13 +1198,7 @@ export class TavernHelperRuntime {
         ? this.variableSchemas.get("message:*")
         : undefined);
     if (schema) {
-      const result = schema.safeParse(variables);
-      if (!result.success) {
-        throw new Error(
-          `Variable schema validation failed: ${result.error.message}`,
-        );
-      }
-      variables = asRecord(result.data);
+      variables = validateTavernHelperVariables(schema, variables);
     }
     const target = this.variableStore(option);
     Object.keys(target.variables).forEach(
@@ -1413,6 +1517,14 @@ export class TavernHelperRuntime {
       option: VariableOption = { type: "chat" },
     ) => {
       this.variableSchemas.set(this.variableSchemaKey(option), schema);
+      if (option.type === "message") {
+        window.setTimeout(() => {
+          if (this.disposed) return;
+          void this.reconcileAssistantBacklog().catch((error) =>
+            this.reportRuntimeError(this.activeScript, error),
+          );
+        }, 0);
+      }
       return {
         unregister: () =>
           this.variableSchemas.delete(this.variableSchemaKey(option)),

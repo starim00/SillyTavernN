@@ -33,6 +33,15 @@ export function resizeComposerTextarea(
     textarea.scrollHeight > maxHeight ? "auto" : "hidden";
 }
 
+export function composerSubmissionContent(
+  draft: string,
+  liveValue: string | undefined,
+  blocked: boolean,
+): string | null {
+  const content = liveValue ?? draft;
+  return blocked || !content.trim() ? null : content;
+}
+
 type ConversationComposerProps = {
   draft: string;
   conversations: ConversationSpace[];
@@ -53,7 +62,7 @@ type ConversationComposerProps = {
   ) => void;
   onToggleScriptSource?: (source: TavernHelperSource) => void;
   onScriptButton?: (button: TavernHelperRuntimeButton) => void;
-  onSend: () => void;
+  onSend: (content: string) => void;
   onStop?: () => void;
 };
 
@@ -84,7 +93,16 @@ export function ConversationComposer({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [helperMenuOpen, setHelperMenuOpen] = useState(false);
   const generating = generationStatus !== "idle";
-  const canSend = draft.trim().length > 0 && !disabled && !generating;
+
+  const submitCurrentDraft = () => {
+    const content = composerSubmissionContent(
+      draft,
+      textareaRef.current?.value,
+      disabled || generating,
+    );
+    if (content === null) return;
+    onSend(content);
+  };
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
@@ -335,7 +353,7 @@ export function ConversationComposer({
           aria-label="消息内容"
           data-autogrow="true"
           disabled={disabled || generating}
-          onChange={(event) => {
+          onInput={(event) => {
             resizeComposerTextarea(event.currentTarget);
             onDraftChange(event.currentTarget.value);
           }}
@@ -346,7 +364,7 @@ export function ConversationComposer({
               !event.nativeEvent.isComposing
             ) {
               event.preventDefault();
-              if (canSend) onSend();
+              submitCurrentDraft();
             }
           }}
         />
@@ -365,8 +383,8 @@ export function ConversationComposer({
             id="send_but"
             className="send-button composer__primary-action"
             type="button"
-            disabled={!canSend}
-            onClick={onSend}
+            disabled={disabled || generating}
+            onClick={submitCurrentDraft}
           >
             <PaperPlaneRight size={19} weight="fill" />
             <span>发送</span>

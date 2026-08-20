@@ -999,12 +999,7 @@ export default function App() {
               );
             }
           } else {
-            await runtime?.emit("message_received", responseIndex, "assistant");
-            await runtime?.emit(
-              "character_message_rendered",
-              responseIndex,
-              "assistant",
-            );
+            await runtime?.processAssistantMessage(responseIndex);
           }
         }
         await runtime?.emit("generation_ended", receipt.content);
@@ -1148,9 +1143,12 @@ export default function App() {
     [conversation, runGeneration, showToast, apiOnline],
   );
 
-  const sendMessage = useCallback(async () => {
-    await sendMessageContent(draft);
-  }, [draft, sendMessageContent]);
+  const sendMessage = useCallback(
+    async (content: string) => {
+      await sendMessageContent(content);
+    },
+    [sendMessageContent],
+  );
 
   const copyMessage = useCallback(
     async (message: WorkspaceMessage) => {

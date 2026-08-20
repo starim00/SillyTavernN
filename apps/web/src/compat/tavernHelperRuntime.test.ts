@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
 import type { WorkspaceMessage } from "../domain/workspace";
 import type { TavernHelperContext } from "./tavernHelperTypes";
@@ -8,9 +9,11 @@ import {
   resolveTavernHelperMessageVariables,
   resolveTavernHelperFrameMessageId,
   shouldEnsureAssistantStatusPlaceholder,
+  shouldReparseAssistantVariables,
   shouldReconcileOpeningMessageVariables,
   TavernHelperRuntime,
   type TavernHelperRuntimeAdapter,
+  validateTavernHelperVariables,
 } from "./tavernHelperRuntime";
 
 const assistantMessage: WorkspaceMessage = {
@@ -66,6 +69,178 @@ describe("Tavern Helper message compatibility", () => {
         1,
       ),
     ).toEqual(initialized);
+  });
+
+  it("preserves the MVU envelope while applying a registered schema", () => {
+    const variables = validateTavernHelperVariables(
+      z.object({
+        stat_data: z.object({ score: z.coerce.number() }),
+      }),
+      {
+        initialized_lorebooks: { "Fixture lorebook": [100] },
+        stat_data: { score: "5" },
+        schema: { type: "object" },
+        display_data: { score: 4 },
+        delta_data: { score: 1 },
+      },
+    );
+
+    expect(variables).toEqual({
+      initialized_lorebooks: { "Fixture lorebook": [100] },
+      stat_data: { score: 5 },
+      schema: { type: "object" },
+      display_data: { score: 4 },
+      delta_data: { score: 1 },
+    });
+  });
+
+  it("reparses only an unchanged assistant MVU floor missing its schema", () => {
+    const baseline = { stat_data: { score: 10 } };
+    expect(
+      shouldReparseAssistantVariables(
+        "Reply <UpdateVariable>+5</UpdateVariable>",
+        { stat_data: { score: 10 } },
+        baseline,
+      ),
+    ).toBe(true);
+    expect(
+      shouldReparseAssistantVariables(
+        "Reply <UpdateVariable>+5</UpdateVariable>",
+        { stat_data: { score: 15 } },
+        baseline,
+      ),
+    ).toBe(false);
+    expect(
+      shouldReparseAssistantVariables(
+        "Reply <UpdateVariable>+5</UpdateVariable>",
+        { stat_data: { score: 10 }, schema: { type: "object" } },
+        baseline,
+      ),
+    ).toBe(false);
+    expect(
+      shouldReparseAssistantVariables(
+        "Reply <UpdateVariable>+5</UpdateVariable>",
+        { stat_data: {}, schema: { type: "object" } },
+        baseline,
+      ),
+    ).toBe(true);
+  });
+
+  it("falls back to Mvu.parseMessage for an unchanged new assistant floor", async () => {
+    vi.stubGlobal("window", {
+      clearTimeout: globalThis.clearTimeout.bind(globalThis),
+      setTimeout: globalThis.setTimeout.bind(globalThis),
+      Mvu: {
+        parseMessage: async (
+          _content: string,
+          oldData: Record<string, unknown>,
+        ) => ({
+          ...structuredClone(oldData),
+          stat_data: { score: 15 },
+          schema: { type: "object" },
+        }),
+      },
+    });
+    const messages: WorkspaceMessage[] = [
+      {
+        id: "opening",
+        conversationId: "conversation-runtime",
+        role: "assistant",
+        content: "Opening",
+        createdLabel: "12:00",
+        revision: 1,
+      },
+      {
+        id: "user-floor",
+        conversationId: "conversation-runtime",
+        role: "user",
+        content: "Continue",
+        createdLabel: "12:01",
+        revision: 1,
+      },
+      {
+        id: "assistant-floor",
+        conversationId: "conversation-runtime",
+        role: "assistant",
+        content: "Reply <UpdateVariable>+5</UpdateVariable>",
+        createdLabel: "12:02",
+        revision: 1,
+      },
+    ];
+    const context: TavernHelperContext = {
+      conversation: {
+        id: "conversation-runtime",
+        cardId: "card-runtime",
+        presetId: null,
+      },
+      sources: [],
+      variables: {
+        global: {},
+        character: {},
+        preset: {},
+        chat: {},
+        messages: {
+          opening: { stat_data: { score: 1 } },
+          "user-floor": { stat_data: { score: 10 } },
+          "assistant-floor": { stat_data: { score: 10 } },
+        },
+        scripts: {},
+      },
+    };
+    const savedStates: Array<{
+      messageId?: string;
+      variables: Record<string, unknown>;
+    }> = [];
+    const adapter: TavernHelperRuntimeAdapter = {
+      connectionId: "provider-runtime",
+      getMessages: () => messages,
+      createMessage: async () => {
+        throw new Error("not used");
+      },
+      deleteMessage: async () => undefined,
+      updateMessage: async (message, content) => {
+        const index = messages.findIndex(({ id }) => id === message.id);
+        const updated = { ...message, content, revision: message.revision + 1 };
+        messages[index] = updated;
+        return updated;
+      },
+      refreshMessages: async () => messages,
+      generate: async () => "",
+      saveState: async ({ messageId, variables }) => {
+        savedStates.push({
+          ...(messageId ? { messageId } : {}),
+          variables: structuredClone(variables),
+        });
+      },
+      onButtonsChanged: () => undefined,
+      onStatusChanged: () => undefined,
+      notify: () => undefined,
+    };
+    const runtime = new TavernHelperRuntime(context, adapter);
+    (
+      runtime as unknown as {
+        variableSchemas: Map<string, z.ZodType>;
+      }
+    ).variableSchemas.set(
+      "message:*",
+      z.object({ stat_data: z.object({ score: z.number() }) }),
+    );
+
+    await expect(runtime.processAssistantMessage(2)).resolves.toBe(true);
+    expect(context.variables.messages["assistant-floor"]).toEqual({
+      stat_data: { score: 15 },
+      schema: { type: "object" },
+    });
+    expect(messages[2]!.content).toContain("<StatusPlaceHolderImpl/>");
+    expect(savedStates.at(-1)).toEqual({
+      messageId: "assistant-floor",
+      variables: {
+        stat_data: { score: 15 },
+        schema: { type: "object" },
+      },
+    });
+
+    vi.unstubAllGlobals();
   });
 
   it("recognizes an MVU opening message left in a half-initialized state", () => {

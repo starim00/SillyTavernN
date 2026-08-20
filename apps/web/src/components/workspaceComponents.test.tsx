@@ -13,6 +13,7 @@ import type {
 import { createDemoWorkspace } from "../data/demoWorkspace";
 import { CardConversationEntry } from "./CardConversationEntry";
 import {
+  composerSubmissionContent,
   ConversationComposer,
   resizeComposerTextarea,
 } from "./ConversationComposer";
@@ -200,8 +201,17 @@ describe("workspace components", () => {
     expect(html).toContain('rows="1"');
     expect(html).toContain('id="send_textarea"');
     expect(html).toContain('id="send_but"');
+    expect(html).not.toMatch(/id="send_but"[^>]*disabled/gu);
     expect(html).not.toContain("发言者");
     expect(html).not.toContain("世界叙事");
+  });
+
+  it("submits the live legacy DOM value before React draft state catches up", () => {
+    const legacyValue = "<init_data>legacy card form</init_data>";
+
+    expect(composerSubmissionContent("", legacyValue, false)).toBe(legacyValue);
+    expect(composerSubmissionContent("", "", false)).toBeNull();
+    expect(composerSubmissionContent("", legacyValue, true)).toBeNull();
   });
 
   it("grows the composer with its content, caps it, and shrinks it again", () => {

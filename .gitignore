@@ -9,7 +9,7 @@ coverage/
 .env
 .env.*
 !.env.example
-data/
+/data/
 runtime/extensions/
 runtime/imports/
 apps/web/.openai/hosting.json

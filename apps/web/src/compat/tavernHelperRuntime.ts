@@ -390,6 +390,10 @@ export function resolveTavernHelperFrameMessageId(
   return match?.[1] === undefined ? fallback : Number(match[1]);
 }
 
+export function tavernHelperConfirmResult(confirmed: boolean): 0 | 1 {
+  return confirmed ? 1 : 0;
+}
+
 export function createTavernHelperMessageView(
   message: WorkspaceMessage,
   messageId: number,
@@ -475,6 +479,12 @@ export class TavernHelperRuntime {
   private readonly messageViews = new Map<
     string,
     ReturnType<typeof createTavernHelperMessageView>
+  >();
+  private readonly legacyChatViews = new Map<
+    string,
+    ReturnType<typeof createTavernHelperMessageView> & {
+      variables: JsonRecord[];
+    }
   >();
   private readonly audio = new Map<
     "bgm" | "ambient",
@@ -585,11 +595,13 @@ export class TavernHelperRuntime {
   }
 
   dispose(): void {
+    this.persistLegacyChatVariables();
     void this.flushPersistence();
     this.disposed = true;
     this.listeners.clear();
     this.injections.clear();
     this.messageViews.clear();
+    this.legacyChatViews.clear();
     for (const audio of this.audio.values()) {
       audio.element?.pause();
       audio.element = null;
@@ -1268,6 +1280,20 @@ export class TavernHelperRuntime {
       variables: clone(variables),
       identifiers,
     };
+    if (namespace === "message" && identifiers.messageId !== undefined) {
+      const view = this.legacyChatViews.get(identifiers.messageId);
+      const message =
+        view === undefined
+          ? undefined
+          : this.adapter.getMessages()[view.message_id];
+      if (view && message?.id === identifiers.messageId) {
+        const activeSwipeIndex = message.activeSwipeIndex ?? 0;
+        while (view.variables.length <= activeSwipeIndex) {
+          view.variables.push({});
+        }
+        view.variables[activeSwipeIndex] = clone(variables);
+      }
+    }
     this.pendingPersists.set(key, request);
     const previous = this.persistTimers.get(key);
     if (previous !== undefined) window.clearTimeout(previous);
@@ -1349,6 +1375,46 @@ export class TavernHelperRuntime {
     }
     Object.assign(current, next);
     return current;
+  }
+
+  private legacyChatView(message: WorkspaceMessage, messageId: number) {
+    const next = this.messageView(message, messageId);
+    const current = this.legacyChatViews.get(message.id);
+    if (!current) {
+      const created = {
+        ...next,
+        variables: clone(next.swipes_data),
+      };
+      this.legacyChatViews.set(message.id, created);
+      return created;
+    }
+    const variables = current.variables;
+    Object.assign(current, next);
+    current.variables = variables;
+    return current;
+  }
+
+  private persistLegacyChatVariables(): void {
+    const messages = this.adapter.getMessages();
+    const messagesById = new Map(
+      messages.map((message) => [message.id, message] as const),
+    );
+    for (const [messageId, view] of this.legacyChatViews) {
+      const message = messagesById.get(messageId);
+      if (!message) continue;
+      const variables = resolveTavernHelperMessageVariables(
+        { swipes_data: view.variables },
+        message.activeSwipeIndex ?? 0,
+      );
+      if (
+        variables === undefined ||
+        _.isEqual(this.context.variables.messages[messageId] ?? {}, variables)
+      ) {
+        continue;
+      }
+      this.context.variables.messages[messageId] = variables;
+      this.queuePersist("message", variables, { messageId });
+    }
   }
 
   private async setChatMessages(
@@ -2260,7 +2326,10 @@ export class TavernHelperRuntime {
       extensionSettings,
       getCurrentChatId: () => this.context.conversation.id,
       getChatCompletionModel: () => this.adapter.connectionId,
-      saveChat: () => Promise.resolve(),
+      saveChat: async () => {
+        this.persistLegacyChatVariables();
+        await this.flushPersistence();
+      },
       saveSettingsDebounced: () =>
         this.queuePersist("extension", extensionSettings, {
           extensionId: "sillytavern",
@@ -2288,7 +2357,17 @@ export class TavernHelperRuntime {
             : content instanceof Element
               ? (content.textContent ?? "")
               : String(content);
-        if (type === popupType.CONFIRM) return window.confirm(message);
+        if (type === popupType.CONFIRM) {
+          const result = tavernHelperConfirmResult(window.confirm(message));
+          // Some legacy scripts mutate SillyTavern.chat after a negative
+          // confirmation without calling saveChat(). Persist that mutation
+          // after their awaited popup continuation has run.
+          window.setTimeout(() => {
+            if (this.disposed) return;
+            this.persistLegacyChatVariables();
+          }, 0);
+          return result;
+        }
         if (type === popupType.INPUT)
           return window.prompt(message, inputValue) ?? undefined;
         window.alert(message);
@@ -2300,13 +2379,9 @@ export class TavernHelperRuntime {
       configurable: false,
       enumerable: true,
       get: () =>
-        this.adapter.getMessages().map((message, index) => {
-          const view = this.messageView(message, index);
-          return {
-            ...view,
-            variables: clone(view.swipes_data),
-          };
-        }),
+        this.adapter
+          .getMessages()
+          .map((message, index) => this.legacyChatView(message, index)),
     });
     expose("$", ownerAwareJQuery);
     expose("jQuery", ownerAwareJQuery);

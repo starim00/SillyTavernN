@@ -11,6 +11,7 @@ import {
   shouldEnsureAssistantStatusPlaceholder,
   shouldReparseAssistantVariables,
   shouldReconcileOpeningMessageVariables,
+  tavernHelperConfirmResult,
   TavernHelperRuntime,
   type TavernHelperRuntimeAdapter,
   validateTavernHelperVariables,
@@ -204,6 +205,11 @@ describe("Tavern Helper message compatibility", () => {
     );
   });
 
+  it("returns Tavern Helper numeric results for native confirmations", () => {
+    expect(tavernHelperConfirmResult(true)).toBe(1);
+    expect(tavernHelperConfirmResult(false)).toBe(0);
+  });
+
   it("exposes the assistant name and aligns variables with the active swipe", () => {
     const variables = { stat_data: { favor: 3 } };
     const view = createTavernHelperMessageView(
@@ -222,6 +228,85 @@ describe("Tavern Helper message compatibility", () => {
       swipe_id: 1,
       swipes_data: [{}, variables],
     });
+  });
+
+  it("persists direct mutations made through the legacy chat projection", async () => {
+    vi.stubGlobal("window", {
+      clearTimeout: globalThis.clearTimeout.bind(globalThis),
+      setTimeout: globalThis.setTimeout.bind(globalThis),
+    });
+    try {
+      const message: WorkspaceMessage = {
+        id: "message-cleanup-floor",
+        conversationId: "conversation-runtime",
+        role: "assistant",
+        content: "Opening",
+        createdLabel: "12:00",
+        revision: 1,
+      };
+      const context: TavernHelperContext = {
+        conversation: {
+          id: "conversation-runtime",
+          cardId: "card-runtime",
+          presetId: null,
+        },
+        sources: [],
+        variables: {
+          global: {},
+          character: {},
+          preset: {},
+          chat: {},
+          messages: {
+            [message.id]: { stat_data: { score: 10 } },
+          },
+          scripts: {},
+        },
+      };
+      const saveState = vi.fn(async () => undefined);
+      const adapter: TavernHelperRuntimeAdapter = {
+        connectionId: "provider-runtime",
+        getMessages: () => [message],
+        createMessage: async () => message,
+        deleteMessage: async () => undefined,
+        updateMessage: async (current) => current,
+        refreshMessages: async () => [message],
+        generate: async () => "",
+        saveState,
+        onButtonsChanged: () => undefined,
+        onStatusChanged: () => undefined,
+        notify: () => undefined,
+      };
+      const runtime = new TavernHelperRuntime(context, adapter);
+      const internal = runtime as unknown as {
+        legacyChatView: (
+          current: WorkspaceMessage,
+          messageId: number,
+        ) => ReturnType<typeof createTavernHelperMessageView> & {
+          variables: Array<Record<string, unknown>>;
+        };
+        persistLegacyChatVariables: () => void;
+      };
+
+      const view = internal.legacyChatView(message, 0);
+      view.variables[0]!.ignore_cleanup = true;
+      internal.persistLegacyChatVariables();
+      await runtime.flushPersistence();
+
+      expect(context.variables.messages[message.id]).toEqual({
+        stat_data: { score: 10 },
+        ignore_cleanup: true,
+      });
+      expect(saveState).toHaveBeenCalledWith({
+        namespace: "message",
+        messageId: message.id,
+        variables: {
+          stat_data: { score: 10 },
+          ignore_cleanup: true,
+        },
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("accepts MVU initialization written through swipes_data", () => {

@@ -30,6 +30,7 @@ import {
 } from "react";
 
 import type { LegacyHostPluginStatus, PersonaInput } from "../api/workspaceApi";
+import { createConversationTitle } from "../conversationTitle";
 import type {
   AgentProposal,
   LegacyPlugin,
@@ -953,7 +954,7 @@ function CreateConversationModal({
   onClose: () => void;
   onCreate: (input: { title: string; cardId: string }) => Promise<void>;
 }) {
-  const [title, setTitle] = useState(`${card.name} · 新对话`);
+  const [title, setTitle] = useState(() => createConversationTitle(card.name));
   const [submitting, setSubmitting] = useState(false);
 
   const submit = async (event: FormEvent) => {

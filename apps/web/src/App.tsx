@@ -104,6 +104,7 @@ import type { TavernHelperTool } from "./components/TavernHelperWorkbench";
 import { WorkspaceConnectionBanner } from "./components/WorkspaceConnectionBanner";
 import { SurfaceStatus } from "./components/WorkspacePrimitives";
 import { WorkspaceModals } from "./components/WorkspaceModals";
+import { createConversationTitle } from "./conversationTitle";
 import type {
   ConversationSpace,
   GenerationMode,
@@ -1514,7 +1515,7 @@ export default function App() {
       }
       await createConversationSpace({
         cardId,
-        title: `${card.name} · 新对话`,
+        title: createConversationTitle(card.name),
       });
     },
     [createConversationSpace, state.cards, state.conversations],

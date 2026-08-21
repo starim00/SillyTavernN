@@ -764,6 +764,18 @@ describe("workspace components", () => {
     expect(html).toContain(">正文标题</h2>");
   });
 
+  it("clips incidental cross-axis overflow in vertically scrolling trusted content", () => {
+    const document = trustedDisplayDocument(`
+      <style>.status-content { height: 200px; overflow-y: auto; }</style>
+      <section class="status-content">状态栏</section>
+    `);
+
+    expect(document).toContain('[data-stn-clip-incidental-overflow-x="true"]');
+    expect(document).toContain('style.overflowX==="auto"');
+    expect(document).toContain("element.scrollWidth<=element.clientWidth+1");
+    expect(document).toContain('style.overflowY==="scroll"');
+  });
+
   it("keeps consecutive fenced HTML documents in separate trusted frames", () => {
     const displayContent = `\`\`\`html
 <!DOCTYPE html>

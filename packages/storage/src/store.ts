@@ -1018,6 +1018,27 @@ export class AppStore {
       this.assertChatMessage(current);
       this.assertRevision("message", id, current.revision, expectedRevision);
       const now = timestamp();
+      // Message artifacts and Tavern Helper variables are intentionally kept
+      // outside the relational message/swipe tables, so clean them before the
+      // message delete cascades its swipe rows.
+      this.database.run(
+        "DELETE FROM artifacts WHERE scope_type = 'message' AND scope_id = ?",
+        id,
+      );
+      this.database.run(
+        `DELETE FROM extension_settings
+         WHERE extension_id = 'stn.tavern-helper'
+           AND (
+             key = ?
+             OR key IN (
+               SELECT 'variables:swipe:' || id
+               FROM swipes
+               WHERE message_id = ?
+             )
+           )`,
+        `variables:message:${id}`,
+        id,
+      );
       this.database.run(
         "DELETE FROM messages WHERE id = ? AND revision = ?",
         id,

@@ -665,4 +665,35 @@ export const migrations: readonly Migration[] = [
       ALTER TABLE swipes ADD COLUMN reasoning_text TEXT;
     `,
   },
+  {
+    version: 15,
+    name: "prune-orphan-tavern-helper-message-variables",
+    sql: `
+      CREATE TABLE IF NOT EXISTS extension_settings (
+        extension_id TEXT NOT NULL,
+        key TEXT NOT NULL,
+        value_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (extension_id, key)
+      );
+
+      DELETE FROM extension_settings
+      WHERE extension_id = 'stn.tavern-helper'
+        AND key LIKE 'variables:message:%'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM messages
+          WHERE extension_settings.key = 'variables:message:' || messages.id
+        );
+
+      DELETE FROM extension_settings
+      WHERE extension_id = 'stn.tavern-helper'
+        AND key LIKE 'variables:swipe:%'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM swipes
+          WHERE extension_settings.key = 'variables:swipe:' || swipes.id
+        );
+    `,
+  },
 ];

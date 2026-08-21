@@ -76,6 +76,74 @@ describe("AppStore", () => {
     }
   });
 
+  it("prunes orphan Tavern Helper floor variables during migration", () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "stn-variable-prune-"));
+    const databasePath = path.join(directory, "workspace.sqlite");
+    const initialStore = new AppStore(new AppDatabase({ path: databasePath }));
+    try {
+      const { first } = createConversationFixture(initialStore);
+      const swipe = initialStore.addSwipe({
+        id: "swipe-live-variable",
+        messageId: first.id,
+        content: "Live swipe.",
+      });
+      initialStore.setExtensionSetting(
+        "stn.tavern-helper",
+        `variables:message:${first.id}`,
+        { live: true },
+      );
+      initialStore.setExtensionSetting(
+        "stn.tavern-helper",
+        `variables:swipe:${swipe.id}`,
+        { live: true },
+      );
+      initialStore.setExtensionSetting(
+        "stn.tavern-helper",
+        "variables:message:missing-message",
+        { orphan: true },
+      );
+      initialStore.setExtensionSetting(
+        "stn.tavern-helper",
+        "variables:swipe:missing-swipe",
+        { orphan: true },
+      );
+      initialStore.database.run(
+        "DELETE FROM schema_migrations WHERE version = 15",
+      );
+    } finally {
+      initialStore.close();
+    }
+
+    const migratedStore = new AppStore(new AppDatabase({ path: databasePath }));
+    try {
+      expect(
+        migratedStore.database.get<{ count: number }>(
+          `SELECT COUNT(*) AS count
+           FROM extension_settings
+           WHERE extension_id = 'stn.tavern-helper'
+             AND key IN (?, ?)`,
+          "variables:message:missing-message",
+          "variables:swipe:missing-swipe",
+        )?.count,
+      ).toBe(0);
+      expect(
+        migratedStore.getExtensionSetting(
+          "stn.tavern-helper",
+          "variables:message:message-1",
+        ).value,
+      ).toEqual({ live: true });
+      expect(
+        migratedStore.getExtensionSetting(
+          "stn.tavern-helper",
+          "variables:swipe:swipe-live-variable",
+        ).value,
+      ).toEqual({ live: true });
+    } finally {
+      migratedStore.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("copies legacy provider rows when applying v10 to v11", () => {
     const directory = mkdtempSync(path.join(tmpdir(), "stn-provider-v11-"));
     const databasePath = path.join(directory, "legacy.sqlite");
@@ -643,6 +711,83 @@ describe("AppStore", () => {
         store.getExtensionSetting(
           "stn.tavern-helper",
           `variables:message:${otherMessage.id}`,
+        ).value,
+      ).toEqual({ keepMessageValue: 1 });
+    } finally {
+      store.close();
+    }
+  });
+
+  it("deletes a message with its variables, swipe variables and artifacts", () => {
+    const store = new AppStore();
+    try {
+      const { conversation, first, second } = createConversationFixture(store);
+      const swipe = store.addSwipe({
+        id: "swipe-message-delete",
+        messageId: first.id,
+        content: "Alternative response.",
+      });
+      store.createArtifact({
+        kind: "message_variables",
+        scopeType: "message",
+        scopeId: first.id,
+        content: "Delete this artifact.",
+      });
+      store.createArtifact({
+        kind: "message_variables",
+        scopeType: "message",
+        scopeId: second.id,
+        content: "Keep this artifact.",
+      });
+      store.setExtensionSetting(
+        "stn.tavern-helper",
+        `variables:message:${first.id}`,
+        { deleteMessageValue: 1 },
+      );
+      store.setExtensionSetting(
+        "stn.tavern-helper",
+        `variables:swipe:${swipe.id}`,
+        { deleteSwipeValue: 1 },
+      );
+      store.setExtensionSetting(
+        "stn.tavern-helper",
+        `variables:message:${second.id}`,
+        { keepMessageValue: 1 },
+      );
+
+      expect(
+        store.deleteMessage(first.id, store.getMessage(first.id).revision),
+      ).toMatchObject({
+        id: first.id,
+        conversationId: conversation.id,
+      });
+
+      expect(store.listMessages(conversation.id)).toEqual([
+        expect.objectContaining({ id: second.id }),
+      ]);
+      expect(
+        store.database.get<{ count: number }>(
+          "SELECT COUNT(*) AS count FROM artifacts WHERE scope_type = 'message' AND scope_id = ?",
+          first.id,
+        )?.count,
+      ).toBe(0);
+      expect(store.listArtifacts()).toEqual([
+        expect.objectContaining({ scopeId: second.id }),
+      ]);
+      expect(
+        store.database.get<{ count: number }>(
+          `SELECT COUNT(*) AS count
+           FROM extension_settings
+           WHERE extension_id = 'stn.tavern-helper'
+             AND key IN (?, ?)`,
+          `variables:message:${first.id}`,
+          `variables:swipe:${swipe.id}`,
+        )?.count,
+      ).toBe(0);
+      expect(
+        store.getExtensionSetting(
+          "stn.tavern-helper",
+          `variables:message:${second.id}`,
         ).value,
       ).toEqual({ keepMessageValue: 1 });
     } finally {

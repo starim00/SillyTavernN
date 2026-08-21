@@ -52,6 +52,13 @@ type PersistRequest = {
   };
 };
 
+export type AssistantSwipePreparation = {
+  messageId: string;
+  revision: number;
+  hadVariables: boolean;
+  variables: JsonRecord;
+};
+
 const nativeRuntimeGlobals = new WeakSet<object>();
 const SCRIPT_TOAST_CONTAINER_ID = "stn-script-toast-container";
 const SCRIPT_TOAST_CLASS = "stn-script-toast";
@@ -651,6 +658,62 @@ export class TavernHelperRuntime {
     if (messageIndex < 0) return false;
     await this.emit(tavernEvents.MESSAGE_SENT, messageIndex);
     await this.emit(tavernEvents.USER_MESSAGE_RENDERED, messageIndex, "user");
+    return true;
+  }
+
+  async prepareAssistantSwipe(
+    expectedMessageId: string,
+  ): Promise<AssistantSwipePreparation | null> {
+    const messages = await this.adapter.refreshMessages();
+    const messageIndex = messages.findIndex(
+      (message) => message.id === expectedMessageId,
+    );
+    const message = messages[messageIndex];
+    if (!message || message.role !== "assistant") return null;
+
+    const hadVariables = Object.prototype.hasOwnProperty.call(
+      this.context.variables.messages,
+      message.id,
+    );
+    const preparation: AssistantSwipePreparation = {
+      messageId: message.id,
+      revision: message.revision,
+      hadVariables,
+      variables: clone(this.context.variables.messages[message.id] ?? {}),
+    };
+    this.rollbackAssistantMessageVariables(messageIndex, messages);
+    await this.flushPersistence();
+    return preparation;
+  }
+
+  async restoreAssistantSwipePreparation(
+    preparation: AssistantSwipePreparation,
+  ): Promise<boolean> {
+    const messages = await this.adapter.refreshMessages();
+    const message = messages.find(
+      (candidate) => candidate.id === preparation.messageId,
+    );
+    if (
+      !message ||
+      message.role !== "assistant" ||
+      message.revision !== preparation.revision
+    ) {
+      return false;
+    }
+
+    if (preparation.hadVariables) {
+      this.context.variables.messages[message.id] = clone(
+        preparation.variables,
+      );
+    } else {
+      delete this.context.variables.messages[message.id];
+    }
+    this.queuePersist(
+      "message",
+      preparation.hadVariables ? preparation.variables : {},
+      { messageId: message.id },
+    );
+    await this.flushPersistence();
     return true;
   }
 

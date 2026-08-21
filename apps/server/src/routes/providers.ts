@@ -510,6 +510,9 @@ export async function registerProviderRoutes(
       const capabilities = provider.capabilities();
       const prompt = await prepareConversationPrompt(context.store, {
         conversationId,
+        ...(input.targetMessageId === undefined
+          ? {}
+          : { historyBeforeMessageId: input.targetMessageId }),
         providerConnectionId: input.connectionId,
         ...(input.presetId === undefined ? {} : { presetId: input.presetId }),
         ...(input.settings === undefined ? {} : { settings: input.settings }),

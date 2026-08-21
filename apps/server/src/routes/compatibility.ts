@@ -206,6 +206,7 @@ const promptTemplatePrepareSchema = z
     conversationId: z.string().trim().min(1).max(256),
     connectionId: z.string().trim().min(1).max(256),
     presetId: z.string().trim().min(1).max(256).optional(),
+    historyBeforeMessageId: z.string().trim().min(1).max(256).optional(),
   })
   .strict();
 
@@ -781,6 +782,9 @@ export async function registerCompatibilityRoutes(
     const capabilities = provider.capabilities();
     const prompt = await prepareConversationPrompt(context.store, {
       conversationId: conversation.id,
+      ...(input.historyBeforeMessageId === undefined
+        ? {}
+        : { historyBeforeMessageId: input.historyBeforeMessageId }),
       ...(input.presetId === undefined ? {} : { presetId: input.presetId }),
       ...(capabilities.maxContextTokens === undefined
         ? {}

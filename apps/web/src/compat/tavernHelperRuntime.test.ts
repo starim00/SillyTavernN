@@ -694,6 +694,27 @@ describe("Tavern Helper message compatibility", () => {
       await originalEmit(event, ...values);
     });
 
+    const preparation = await runtime.prepareAssistantSwipe("swipe-floor");
+    expect(preparation).toMatchObject({
+      messageId: "swipe-floor",
+      revision: 2,
+      hadVariables: true,
+      variables: { stat_data: { score: 99 } },
+    });
+    expect(context.variables.messages["swipe-floor"]).toEqual({
+      stat_data: { score: 10 },
+    });
+    expect(savedStates.at(-1)).toEqual({
+      messageId: "swipe-floor",
+      variables: { stat_data: { score: 10 } },
+    });
+    await expect(
+      runtime.restoreAssistantSwipePreparation(preparation!),
+    ).resolves.toBe(true);
+    expect(context.variables.messages["swipe-floor"]).toEqual({
+      stat_data: { score: 99 },
+    });
+
     await expect(runtime.processAssistantSwipe(2, "swipe-a")).resolves.toBe(
       true,
     );

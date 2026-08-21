@@ -452,9 +452,10 @@ describe("ordinary generation worldbook tools", () => {
       status: "complete",
       finishReason: "stop",
     }).message;
-    vi.spyOn(server.context.providers, "get").mockResolvedValue(
-      new DeterministicFakeProvider({ text: "regenerated answer" }),
-    );
+    const provider = new SequencedFakeProvider([
+      { text: "regenerated answer" },
+    ]);
+    vi.spyOn(server.context.providers, "get").mockResolvedValue(provider);
 
     const response = await server.app.inject({
       method: "POST",
@@ -465,6 +466,23 @@ describe("ordinary generation worldbook tools", () => {
       },
     });
     expect(response.statusCode).toBe(200);
+    expect(provider.requests).toHaveLength(1);
+    expect(provider.requests[0]?.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "user",
+          content: "Check the available lore, then answer normally.",
+        }),
+      ]),
+    );
+    expect(provider.requests[0]?.messages).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "assistant",
+          content: "original answer",
+        }),
+      ]),
+    );
     const assistantMessages = server.context.store
       .listMessages(conversation.id)
       .filter((message) => message.role === "assistant");

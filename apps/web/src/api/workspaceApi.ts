@@ -1113,6 +1113,7 @@ export async function preparePromptTemplate(input: {
   conversationId: string;
   connectionId: string;
   presetId?: string;
+  historyBeforeMessageId?: string;
 }): Promise<{
   enabled: boolean;
   messages: PreparedPromptMessage[];

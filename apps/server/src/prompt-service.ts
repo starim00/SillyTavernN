@@ -21,17 +21,18 @@ import {
   type WorldbookEntry,
 } from "@stn/contracts";
 import type { ProviderMessage } from "@stn/providers";
-import type {
-  AppStore,
-  Card as StoredCard,
-  JsonObject as StoredJsonObject,
-  Message as StoredMessage,
-  Participant as StoredParticipant,
-  Preset as StoredPreset,
-  Swipe as StoredSwipe,
-  Worldbook as StoredWorldbook,
-  WorldbookBinding as StoredWorldbookBinding,
-  WorldbookEntry as StoredWorldbookEntry,
+import {
+  StorageError,
+  type AppStore,
+  type Card as StoredCard,
+  type JsonObject as StoredJsonObject,
+  type Message as StoredMessage,
+  type Participant as StoredParticipant,
+  type Preset as StoredPreset,
+  type Swipe as StoredSwipe,
+  type Worldbook as StoredWorldbook,
+  type WorldbookBinding as StoredWorldbookBinding,
+  type WorldbookEntry as StoredWorldbookEntry,
 } from "@stn/storage";
 
 import { collectAuthorizedConversationRegex } from "./regex-service.js";
@@ -116,6 +117,7 @@ type WorldbookBinding = Worldbook["bindings"][number];
 
 export interface PrepareConversationPromptInput {
   readonly conversationId: string;
+  readonly historyBeforeMessageId?: string;
   readonly presetId?: string;
   readonly settings?: Readonly<Record<string, unknown>>;
   readonly maxContextTokens?: number;
@@ -757,7 +759,21 @@ export async function prepareConversationPrompt(
   const participantNames = new Map(
     storedParticipants.map((participant) => [participant.id, participant.name]),
   );
-  const storedMessages = store.listMessages(storedConversation.id);
+  const conversationMessages = store.listMessages(storedConversation.id);
+  const historyEnd =
+    input.historyBeforeMessageId === undefined
+      ? conversationMessages.length
+      : conversationMessages.findIndex(
+          (message) => message.id === input.historyBeforeMessageId,
+        );
+  if (historyEnd < 0) {
+    throw new StorageError(
+      "prompt_history_cutoff_not_found",
+      `Message '${input.historyBeforeMessageId}' does not belong to conversation '${storedConversation.id}'.`,
+      404,
+    );
+  }
+  const storedMessages = conversationMessages.slice(0, historyEnd);
   const reasoningByMessageId = new Map(
     storedMessages.flatMap((message) => {
       const selectedSwipe =

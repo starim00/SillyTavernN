@@ -83,6 +83,7 @@ import {
   renderPromptTemplateMessages,
 } from "./compat/loaders";
 import type {
+  AssistantSwipePreparation,
   TavernHelperRuntime,
   TavernHelperRuntimeAdapter,
 } from "./compat/tavernHelperRuntime";
@@ -928,10 +929,17 @@ export default function App() {
         mode: input.mode,
         targetMessageId: input.targetMessage?.id ?? null,
       });
+      let swipePreparation: AssistantSwipePreparation | null = null;
+      let regeneratedSwipePersisted = false;
 
       try {
         let surfacedToolProposal = false;
         const runtime = await ensureTavernHelperRuntime(input.conversationId);
+        if (input.mode === "regenerate" && input.targetMessage) {
+          swipePreparation =
+            (await runtime?.prepareAssistantSwipe(input.targetMessage.id)) ??
+            null;
+        }
         const helperContext = tavernHelperContextRef.current;
         await runtime?.emit("GENERATION_AFTER_COMMANDS");
         await runtime?.emit("generation_started");
@@ -942,6 +950,9 @@ export default function App() {
           conversationId: input.conversationId,
           connectionId: state.selectedProviderId,
           presetId: state.selectedPresetId,
+          ...(input.mode === "regenerate" && input.targetMessage
+            ? { historyBeforeMessageId: input.targetMessage.id }
+            : {}),
         });
         const renderedTemplate = await renderPreparedPrompt(
           preparedTemplate,
@@ -1006,6 +1017,10 @@ export default function App() {
         );
 
         if ("toolProposalOnly" in receipt) {
+          if (swipePreparation) {
+            await runtime?.restoreAssistantSwipePreparation(swipePreparation);
+            swipePreparation = null;
+          }
           showToast(
             surfacedToolProposal
               ? "模型工具提案已打开确认弹窗，等待你的确认。"
@@ -1016,6 +1031,7 @@ export default function App() {
           await runtime?.emit("js_generation_ended");
           return;
         }
+        regeneratedSwipePersisted = input.mode === "regenerate";
 
         const refreshedMessages = await refreshMessages(input.conversationId);
         const responseIndex =
@@ -1069,6 +1085,22 @@ export default function App() {
           );
         }
       } catch (error) {
+        if (swipePreparation && !regeneratedSwipePersisted) {
+          try {
+            await tavernHelperRuntimeRef.current?.restoreAssistantSwipePreparation(
+              swipePreparation,
+            );
+          } catch (restoreError) {
+            showToast(
+              `重新生成失败，且原 Swipe 变量状态恢复失败：${
+                restoreError instanceof Error
+                  ? restoreError.message
+                  : String(restoreError)
+              }`,
+              "warning",
+            );
+          }
+        }
         await tavernHelperRuntimeRef.current?.emit("generation_stopped");
         await tavernHelperRuntimeRef.current?.emit(
           "js_generation_ended",

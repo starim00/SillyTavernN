@@ -21,6 +21,7 @@ import {
   loadPendingAgentToolProposal,
   loadProviderModels,
   loadWorkspaceFromApi,
+  preparePromptTemplate,
   proposalFromGenerationToolEvent,
   reorderPresetPrompts,
   saveProviderConnection,
@@ -69,6 +70,35 @@ afterEach(() => {
 });
 
 describe("workspace API client", () => {
+  it("requests prompt history before the regenerated assistant message", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        data: {
+          enabled: false,
+          messages: [{ role: "user", content: "Question" }],
+          directives: [],
+          templateCount: 0,
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await preparePromptTemplate({
+      conversationId: "conversation-regenerate",
+      connectionId: "provider-regenerate",
+      historyBeforeMessageId: "assistant-latest",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/compatibility/prompt-template/prepare");
+    expect(parseRequestBody(init.body)).toEqual({
+      conversationId: "conversation-regenerate",
+      connectionId: "provider-regenerate",
+      historyBeforeMessageId: "assistant-latest",
+    });
+  });
+
   it("patches preset generation controls without replacing prompt definitions", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse({

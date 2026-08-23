@@ -98,6 +98,20 @@ workspace data is persisted in `./data`; keep that directory and its generated
 `config.json` private. The default published ports are Web `4173` and legacy
 host `4711`.
 
+### Update the NAS deployment
+
+After application changes have been checked, committed, and pushed to
+`origin/main`, run this command from a clean local `main` checkout:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/update-nas.ps1
+```
+
+The script fast-forwards the NAS checkout through its local proxy, rebuilds the
+Compose images, starts the updated services, and verifies all service health,
+the host-mounted data directory, and the UGREEN Docker panel registration. To
+check the current deployment without pulling or rebuilding, add `-CheckOnly`.
+
 ## User-installed compatibility plugins
 
 Plugin source is not part of this repository. Open **插件** in the workspace and

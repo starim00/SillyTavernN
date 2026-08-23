@@ -104,6 +104,117 @@ select:focus-visible {
   border: 0;
 }
 
+.auth-screen {
+  display: grid;
+  width: 100%;
+  height: 100dvh;
+  padding: 24px;
+  place-items: center;
+  background:
+    radial-gradient(
+      circle at 18% 18%,
+      rgba(219, 234, 243, 0.9),
+      transparent 34%
+    ),
+    radial-gradient(
+      circle at 82% 76%,
+      rgba(223, 242, 232, 0.75),
+      transparent 32%
+    ),
+    var(--warm-white);
+}
+
+.auth-card {
+  display: grid;
+  width: min(100%, 420px);
+  gap: 22px;
+  padding: 34px;
+  background: rgba(255, 254, 250, 0.96);
+  border: 1px solid rgba(203, 213, 219, 0.9);
+  border-radius: 22px;
+  box-shadow: var(--shadow);
+}
+
+.auth-card__mark {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  place-items: center;
+  color: #fff;
+  background: var(--coral);
+  border-radius: 15px;
+}
+
+.auth-card__heading p,
+.auth-card__heading h1,
+.auth-card__heading span,
+.auth-form__message {
+  margin: 0;
+}
+
+.auth-card__heading p {
+  color: var(--coral);
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.auth-card__heading h1 {
+  margin-top: 5px;
+  font-size: 25px;
+  letter-spacing: -0.025em;
+}
+
+.auth-card__heading span,
+.auth-card__checking {
+  display: block;
+  margin-top: 9px;
+  color: var(--text-soft);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.auth-form {
+  display: grid;
+  gap: 14px;
+}
+
+.auth-form__message {
+  color: var(--mint-strong);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.auth-form__message--error {
+  color: #b24f42;
+}
+
+.auth-control {
+  position: fixed;
+  z-index: 90;
+  top: 15px;
+  right: 16px;
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  color: var(--text-soft);
+  background: rgba(255, 254, 250, 0.94);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 6px 18px rgba(50, 70, 84, 0.08);
+}
+
+.auth-control:hover {
+  color: var(--coral);
+  border-color: #e3b2a9;
+}
+
+.auth-settings__actions {
+  justify-content: space-between;
+}
+
 .mobile-only,
 .mobile-only.icon-button {
   display: none;

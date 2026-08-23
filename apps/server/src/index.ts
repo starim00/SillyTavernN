@@ -15,6 +15,7 @@ const { app } = await createServer({
   corsOrigin,
   logger: true,
   seedDevelopmentData,
+  authentication: true,
 });
 
 await app.listen({ host, port });

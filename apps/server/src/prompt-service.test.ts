@@ -34,6 +34,7 @@ function jsonObject(value: unknown): JsonObject {
 async function application() {
   const dataDirectory = await mkdtemp(path.join(tmpdir(), "stn-prompt-"));
   const created = await createServer({
+    authentication: false,
     dataDirectory,
     databasePath: ":memory:",
     seedDevelopmentData: false,

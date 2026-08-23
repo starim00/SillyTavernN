@@ -29,6 +29,7 @@ function regexScript(id: string, findRegex: string, replaceString: string) {
 async function application(): Promise<ServerApplication> {
   const dataDirectory = await mkdtemp(path.join(tmpdir(), "stn-regex-routes-"));
   const created = await createServer({
+    authentication: false,
     dataDirectory,
     databasePath: ":memory:",
     seedDevelopmentData: false,

@@ -13,6 +13,7 @@ async function application(): Promise<ServerApplication> {
     path.join(tmpdir(), "stn-tavern-helper-"),
   );
   const created = await createServer({
+    authentication: false,
     dataDirectory,
     databasePath: ":memory:",
     seedDevelopmentData: false,

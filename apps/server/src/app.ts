@@ -8,6 +8,7 @@ import { ZodError } from "zod";
 
 import { AgentStore, AppDatabase, AppStore, StorageError } from "@stn/storage";
 
+import { AuthManager } from "./auth.js";
 import {
   defaultGenerationBudget,
   type GenerationBudget,
@@ -16,6 +17,7 @@ import {
 import { ImportService } from "./import-service.js";
 import { ProviderRegistry } from "./provider-registry.js";
 import { registerAgentRoutes } from "./routes/agent.js";
+import { registerAuthRoutes } from "./routes/auth.js";
 import { registerCompatibilityRoutes } from "./routes/compatibility.js";
 import { registerImportRoutes } from "./routes/imports.js";
 import { registerLegacyBrokerRoutes } from "./routes/legacy.js";
@@ -33,6 +35,7 @@ export interface ServerOptions {
   readonly logger?: boolean;
   readonly seedDevelopmentData?: boolean;
   readonly generationBudget?: Partial<GenerationBudget>;
+  readonly authentication?: boolean;
 }
 
 export interface ServerApplication {
@@ -72,8 +75,48 @@ export async function createServer(
   });
   await app.register(cors, {
     origin: options.corsOrigin ?? "http://localhost:4173",
-    credentials: false,
+    credentials: true,
   });
+
+  const authentication =
+    options.authentication === false
+      ? undefined
+      : await AuthManager.initialize(dataDirectory);
+  if (authentication?.generatedPassword) {
+    app.log.warn(
+      `No login password was configured. Generated password: ${authentication.generatedPassword}`,
+    );
+    app.log.warn(
+      `Authentication configuration written to ${authentication.configPath}`,
+    );
+  }
+
+  if (authentication) {
+    await registerAuthRoutes(app, authentication.auth);
+    app.addHook("onRequest", async (request, reply) => {
+      const pathname = request.url.split("?", 1)[0];
+      if (
+        request.method === "OPTIONS" ||
+        pathname === "/api/auth/status" ||
+        pathname === "/api/auth/login" ||
+        pathname === "/api/auth/logout" ||
+        !pathname?.startsWith("/api/")
+      ) {
+        return;
+      }
+      const token = authentication.auth.sessionFromCookie(
+        request.headers.cookie,
+      );
+      if (!authentication.auth.verifySession(token)) {
+        return reply.code(401).send({
+          error: {
+            code: "AUTH_REQUIRED",
+            message: "Authentication is required.",
+          },
+        });
+      }
+    });
+  }
 
   await app.register(multipart, {
     limits: {

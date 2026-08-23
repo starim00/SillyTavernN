@@ -29,6 +29,7 @@ async function application(
     path.join(tmpdir(), "stn-provider-tools-"),
   );
   const created = await createServer({
+    authentication: false,
     dataDirectory,
     databasePath: ":memory:",
     seedDevelopmentData: false,

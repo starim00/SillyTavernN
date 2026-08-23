@@ -21,6 +21,19 @@ See [docs/PHASES.md](docs/PHASES.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.m
 
 ## Development
 
+### Login password
+
+The server protects workspace API access with a single password and an HttpOnly
+session cookie. On the first startup it creates `data/config.json`, stores a
+scrypt password hash there, and prints the generated password once in the
+server log. Use the lock button in the web interface to change the password or
+sign out. Changing the password invalidates previously issued sessions.
+
+Keep `data/config.json` private. If the generated password is lost, stop the
+server, remove only the `auth` object from that file, and start the server to
+generate a new password without affecting the remaining configuration or
+workspace data.
+
 ```bash
 npm install
 npm run dev

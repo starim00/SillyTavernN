@@ -122,6 +122,7 @@ async function application() {
     path.join(tmpdir(), "stn-import-routes-"),
   );
   const created = await createServer({
+    authentication: false,
     dataDirectory,
     databasePath: ":memory:",
     seedDevelopmentData: false,

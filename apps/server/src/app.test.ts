@@ -21,6 +21,7 @@ async function application(seedDevelopmentData = true) {
     dataDirectory,
     databasePath: ":memory:",
     seedDevelopmentData,
+    authentication: false,
   });
   applications.push(created);
   return { ...created, dataDirectory };

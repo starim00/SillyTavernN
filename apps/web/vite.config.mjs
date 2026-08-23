@@ -28,7 +28,7 @@ export default defineConfig({
     allowedHosts: ["terminal.local"],
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:4710",
+        target: process.env.STN_API_ORIGIN ?? "http://127.0.0.1:4710",
         changeOrigin: true,
       },
     },

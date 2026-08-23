@@ -48,6 +48,7 @@ import type {
   TavernHelperStateNamespace,
 } from "../compat/tavernHelperTypes";
 import { LEGACY_REALM_ORIGIN } from "../legacy/origin";
+import { notifyAuthenticationRequired } from "./authApi";
 
 type ApiParticipant = {
   id: string;
@@ -432,6 +433,7 @@ async function errorFromResponse(
   response: Response,
   path: string,
 ): Promise<WorkspaceApiError> {
+  if (response.status === 401) notifyAuthenticationRequired();
   let message = `API request failed: ${path}`;
   let code: string | undefined;
   try {

@@ -1017,32 +1017,54 @@ export class AppStore {
       const current = this.getMessage(id);
       this.assertChatMessage(current);
       this.assertRevision("message", id, current.revision, expectedRevision);
+      const targetRowid = this.database.get<{ rowid: number }>(
+        "SELECT rowid FROM messages WHERE id = ?",
+        id,
+      )!.rowid;
       const now = timestamp();
       // Message artifacts and Tavern Helper variables are intentionally kept
       // outside the relational message/swipe tables, so clean them before the
-      // message delete cascades its swipe rows.
+      // message range delete cascades its swipe rows.
       this.database.run(
-        "DELETE FROM artifacts WHERE scope_type = 'message' AND scope_id = ?",
-        id,
+        `DELETE FROM artifacts
+         WHERE scope_type = 'message'
+           AND scope_id IN (
+             SELECT id FROM messages
+             WHERE conversation_id = ?
+               AND rowid >= ?
+           )`,
+        current.conversationId,
+        targetRowid,
       );
       this.database.run(
         `DELETE FROM extension_settings
          WHERE extension_id = 'stn.tavern-helper'
            AND (
-             key = ?
+             key IN (
+               SELECT 'variables:message:' || id
+               FROM messages
+               WHERE conversation_id = ?
+                 AND rowid >= ?
+             )
              OR key IN (
-               SELECT 'variables:swipe:' || id
+               SELECT 'variables:swipe:' || swipes.id
                FROM swipes
-               WHERE message_id = ?
+               JOIN messages ON messages.id = swipes.message_id
+               WHERE messages.conversation_id = ?
+                 AND messages.rowid >= ?
              )
            )`,
-        `variables:message:${id}`,
-        id,
+        current.conversationId,
+        targetRowid,
+        current.conversationId,
+        targetRowid,
       );
       this.database.run(
-        "DELETE FROM messages WHERE id = ? AND revision = ?",
-        id,
-        expectedRevision,
+        `DELETE FROM messages
+         WHERE conversation_id = ?
+           AND rowid >= ?`,
+        current.conversationId,
+        targetRowid,
       );
       this.database.run(
         `UPDATE conversations

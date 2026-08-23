@@ -573,7 +573,7 @@ describe("workspaceReducer", () => {
     );
   });
 
-  it("edits, adds Swipe candidates, selects them, and deletes a message", () => {
+  it("edits, adds Swipe candidates, selects them, and deletes from a message onward", () => {
     const state = createDemoWorkspace();
     const message = state.messagesByConversation["conversation-harbor"]?.[0];
     expect(message).toBeDefined();
@@ -605,11 +605,18 @@ describe("workspaceReducer", () => {
       type: "message/delete",
       messageId: message!.id,
     });
-    expect(
-      deleted.messagesByConversation["conversation-harbor"]?.some(
-        (candidate) => candidate.id === message!.id,
-      ),
-    ).toBe(false);
+    expect(deleted.messagesByConversation["conversation-harbor"]).toEqual([]);
+
+    const messages = state.messagesByConversation["conversation-harbor"] ?? [];
+    const lastMessage = messages.at(-1);
+    expect(lastMessage).toBeDefined();
+    const deletedLast = workspaceReducer(state, {
+      type: "message/delete",
+      messageId: lastMessage!.id,
+    });
+    expect(deletedLast.messagesByConversation["conversation-harbor"]).toEqual(
+      messages.slice(0, -1),
+    );
   });
 
   it("keeps streamed text transient and drops it without appending a half message", () => {

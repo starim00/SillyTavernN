@@ -536,8 +536,18 @@ export function workspaceReducer(
     case "message/delete":
       return {
         ...state,
-        messagesByConversation: mapMessages(state, (message) =>
-          message.id === action.messageId ? null : message,
+        messagesByConversation: Object.fromEntries(
+          Object.entries(state.messagesByConversation).map(
+            ([conversationId, messages]) => {
+              const targetIndex = messages.findIndex(
+                (message) => message.id === action.messageId,
+              );
+              return [
+                conversationId,
+                targetIndex === -1 ? messages : messages.slice(0, targetIndex),
+              ];
+            },
+          ),
         ),
       };
     case "message/swipe-add":

@@ -471,10 +471,31 @@ describe("SillyTavern N server", () => {
       ordinaryAssistant.json() as { data: { id: string; revision: number } }
     ).data;
     await app.inject({
+      method: "POST",
+      url: `/api/conversations/${conversationId}/messages`,
+      payload: {
+        content: "This later floor should be deleted with its predecessor.",
+      },
+    });
+    const ordinaryAssistantDeletion = await app.inject({
       method: "DELETE",
       url: `/api/messages/${ordinaryAssistantData.id}`,
       payload: { expectedRevision: ordinaryAssistantData.revision },
     });
+    expect(ordinaryAssistantDeletion.statusCode).toBe(200);
+    const messagesAfterRangeDeletion = await app.inject({
+      method: "GET",
+      url: `/api/conversations/${conversationId}/messages`,
+    });
+    expect(messagesAfterRangeDeletion.body).toContain(
+      "Continue this card-bound conversation.",
+    );
+    expect(messagesAfterRangeDeletion.body).not.toContain(
+      "User-created assistant message",
+    );
+    expect(messagesAfterRangeDeletion.body).not.toContain(
+      "This later floor should be deleted with its predecessor.",
+    );
 
     for (const role of ["narrator", "system", "tool"]) {
       const forged = await app.inject({

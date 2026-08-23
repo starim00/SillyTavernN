@@ -1374,7 +1374,9 @@ export default function App() {
   const deleteMessage = useCallback(
     async (message: WorkspaceMessage) => {
       const actor = message.role === "user" ? "你的这条输入" : "这条模型回复";
-      if (!window.confirm(`删除${actor}？`)) return;
+      if (!window.confirm(`删除${actor}及其之后的所有消息？此操作无法撤销。`)) {
+        return;
+      }
       if (apiOnline) {
         try {
           await deleteWorkspaceMessage(message.id, message.revision);
@@ -1384,7 +1386,7 @@ export default function App() {
         }
       }
       dispatch({ type: "message/delete", messageId: message.id });
-      showToast("消息已删除。", "success");
+      showToast("已删除该消息及后续消息。", "success");
     },
     [showToast, apiOnline],
   );

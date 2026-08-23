@@ -718,7 +718,7 @@ describe("AppStore", () => {
     }
   });
 
-  it("deletes a message with its variables, swipe variables and artifacts", () => {
+  it("deletes a message and every later floor with their associated data", () => {
     const store = new AppStore();
     try {
       const { conversation, first, second } = createConversationFixture(store);
@@ -726,6 +726,11 @@ describe("AppStore", () => {
         id: "swipe-message-delete",
         messageId: first.id,
         content: "Alternative response.",
+      });
+      const laterSwipe = store.addSwipe({
+        id: "swipe-later-message-delete",
+        messageId: second.id,
+        content: "Later alternative response.",
       });
       store.createArtifact({
         kind: "message_variables",
@@ -752,7 +757,12 @@ describe("AppStore", () => {
       store.setExtensionSetting(
         "stn.tavern-helper",
         `variables:message:${second.id}`,
-        { keepMessageValue: 1 },
+        { deleteLaterMessageValue: 1 },
+      );
+      store.setExtensionSetting(
+        "stn.tavern-helper",
+        `variables:swipe:${laterSwipe.id}`,
+        { deleteLaterSwipeValue: 1 },
       );
 
       expect(
@@ -762,34 +772,41 @@ describe("AppStore", () => {
         conversationId: conversation.id,
       });
 
-      expect(store.listMessages(conversation.id)).toEqual([
-        expect.objectContaining({ id: second.id }),
-      ]);
+      expect(store.listMessages(conversation.id)).toEqual([]);
       expect(
         store.database.get<{ count: number }>(
           "SELECT COUNT(*) AS count FROM artifacts WHERE scope_type = 'message' AND scope_id = ?",
           first.id,
         )?.count,
       ).toBe(0);
-      expect(store.listArtifacts()).toEqual([
-        expect.objectContaining({ scopeId: second.id }),
-      ]);
+      expect(store.listArtifacts()).toEqual([]);
       expect(
         store.database.get<{ count: number }>(
           `SELECT COUNT(*) AS count
            FROM extension_settings
            WHERE extension_id = 'stn.tavern-helper'
-             AND key IN (?, ?)`,
+             AND key IN (?, ?, ?, ?)`,
           `variables:message:${first.id}`,
           `variables:swipe:${swipe.id}`,
+          `variables:message:${second.id}`,
+          `variables:swipe:${laterSwipe.id}`,
         )?.count,
       ).toBe(0);
-      expect(
-        store.getExtensionSetting(
-          "stn.tavern-helper",
-          `variables:message:${second.id}`,
-        ).value,
-      ).toEqual({ keepMessageValue: 1 });
+    } finally {
+      store.close();
+    }
+  });
+
+  it("keeps every floor before the deleted message", () => {
+    const store = new AppStore();
+    try {
+      const { conversation, first, second } = createConversationFixture(store);
+
+      store.deleteMessage(second.id, second.revision);
+
+      expect(store.listMessages(conversation.id)).toEqual([
+        expect.objectContaining({ id: first.id }),
+      ]);
     } finally {
       store.close();
     }

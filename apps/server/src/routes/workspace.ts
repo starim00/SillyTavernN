@@ -427,6 +427,11 @@ export async function registerWorkspaceRoutes(
         generation.controller.abort();
       }
     }
+    for (const [id, generation] of context.generationResults) {
+      if (conversationIds.has(generation.conversationId)) {
+        context.generationResults.delete(id);
+      }
+    }
     return envelope(
       context.store.deleteCardCascade(
         request.params.id,
@@ -599,6 +604,11 @@ export async function registerWorkspaceRoutes(
           generation.controller.abort(
             new Error("The conversation was deleted."),
           );
+        }
+      }
+      for (const [id, generation] of context.generationResults) {
+        if (generation.conversationId === request.params.id) {
+          context.generationResults.delete(id);
         }
       }
       return envelope(

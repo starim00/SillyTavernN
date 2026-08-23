@@ -9,6 +9,7 @@ import type {
   RegexScriptDefinition,
 } from "../domain/workspace";
 import {
+  acknowledgeGeneration,
   callLegacyRpc,
   confirmAgentProposal,
   createConversationSpace,
@@ -17,6 +18,7 @@ import {
   importPortableFile,
   installLegacyPlugin,
   loadConversationMessages,
+  loadConversationGeneration,
   loadTavernHelperMessageHistory,
   loadLegacyGrants,
   loadLegacyHostHealth,
@@ -96,6 +98,44 @@ afterEach(() => {
 });
 
 describe("workspace API client", () => {
+  it("loads and acknowledges a background generation", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            id: "generation-background",
+            conversationId: "conversation-background",
+            mode: "send",
+            status: "running",
+            startedAt: "2026-08-24T00:00:00.000Z",
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: { id: "generation-background", acknowledged: true },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      loadConversationGeneration("conversation-background"),
+    ).resolves.toMatchObject({
+      id: "generation-background",
+      status: "running",
+    });
+    await acknowledgeGeneration("generation-background");
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "/api/conversations/conversation-background/generation",
+    );
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      "/api/generations/generation-background/acknowledge",
+    );
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ method: "POST" });
+  });
+
   it("requests prompt history before the regenerated assistant message", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse({

@@ -69,8 +69,13 @@ supports them. Plain text Providers remain valid for ordinary chat without
 tools. Provider events are schema-validated before entering the application.
 Generation uses bounded input, output, event, choice, tool-call, tool-argument,
 and SSE-frame budgets. Only one generation may be active per conversation;
-client disconnect, explicit cancellation, and budget exhaustion share one
-abort path. SSE writes honor stream backpressure.
+the server owns that generation after accepting the request, so an SSE client
+disconnect does not cancel Provider work. Active and recently completed tasks
+are queryable by conversation, allowing a reloaded client to restore the busy
+state, refresh the persisted result, and finish browser-side compatibility
+processing before acknowledging the task. Explicit user cancellation, server
+shutdown, and budget exhaustion still abort Provider work. Connected SSE writes
+honor stream backpressure, while writes become no-ops after the client detaches.
 
 ### History pagination
 

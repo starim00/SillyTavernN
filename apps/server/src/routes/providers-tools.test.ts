@@ -152,6 +152,47 @@ class BlockingProvider extends DeterministicFakeProvider {
   }
 }
 
+class BackgroundCompletionProvider extends DeterministicFakeProvider {
+  release: (() => void) | undefined;
+  aborted = false;
+
+  override async *generate(
+    request: ProviderRequest,
+    signal?: AbortSignal,
+  ): AsyncIterable<ProviderEvent> {
+    yield {
+      type: "start",
+      requestId: request.requestId,
+      sequence: 0,
+      model: "background-completion",
+      capabilities: this.capabilities(),
+    };
+    await new Promise<void>((resolve, reject) => {
+      this.release = resolve;
+      signal?.addEventListener(
+        "abort",
+        () => {
+          this.aborted = true;
+          reject(new Error("Aborted"));
+        },
+        { once: true },
+      );
+    });
+    yield {
+      type: "text-delta",
+      requestId: request.requestId,
+      sequence: 1,
+      delta: "The background reply completed after the page closed.",
+    };
+    yield {
+      type: "finish",
+      requestId: request.requestId,
+      sequence: 2,
+      reason: "stop",
+    };
+  }
+}
+
 type StreamEvent = { type: string; [key: string]: unknown };
 
 function streamEvents(body: string): StreamEvent[] {
@@ -375,6 +416,109 @@ describe("ordinary generation worldbook tools", () => {
     provider.release?.();
     await first;
     expect(server.context.generations.size).toBe(0);
+  });
+
+  it("continues generation after the SSE client disconnects and exposes the result", async () => {
+    const server = await application();
+    const { conversation } = workspaceFixture(server);
+    const provider = new BackgroundCompletionProvider();
+    vi.spyOn(server.context.providers, "get").mockResolvedValue(provider);
+    const address = await server.app.listen({ host: "127.0.0.1", port: 0 });
+
+    const response = await fetch(
+      `${address}/api/conversations/${conversation.id}/generate`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connectionId: "background-completion" }),
+      },
+    );
+    const reader = response.body?.getReader();
+    expect(reader).toBeDefined();
+    await reader?.read();
+    await reader?.cancel();
+
+    await vi.waitFor(() => expect(provider.release).toBeTypeOf("function"));
+    expect(provider.aborted).toBe(false);
+    expect(
+      (
+        await server.app.inject({
+          method: "GET",
+          url: `/api/conversations/${conversation.id}/generation`,
+        })
+      ).json(),
+    ).toMatchObject({
+      data: { status: "running", mode: "send" },
+    });
+    provider.release?.();
+    await vi.waitFor(() =>
+      expect(
+        server.context.store.listMessages(conversation.id).at(-1),
+      ).toMatchObject({
+        role: "assistant",
+        content: "The background reply completed after the page closed.",
+        generationStatus: "complete",
+      }),
+    );
+
+    const status = await server.app.inject({
+      method: "GET",
+      url: `/api/conversations/${conversation.id}/generation`,
+    });
+    const completed = status.json<{
+      data: { id: string; messageId?: string; mode: string; status: string };
+    }>();
+    expect(completed).toMatchObject({
+      data: {
+        status: "finished",
+        mode: "send",
+      },
+    });
+    expect(completed.data.messageId).toBeTypeOf("string");
+    const generationId = completed.data.id;
+    const acknowledged = await server.app.inject({
+      method: "POST",
+      url: `/api/generations/${generationId}/acknowledge`,
+    });
+    expect(acknowledged.json()).toEqual({
+      data: { id: generationId, acknowledged: true },
+    });
+    expect(
+      (
+        await server.app.inject({
+          method: "GET",
+          url: `/api/conversations/${conversation.id}/generation`,
+        })
+      ).json(),
+    ).toEqual({ data: null });
+  });
+
+  it("still cancels a background generation through the explicit abort endpoint", async () => {
+    const server = await application();
+    const { conversation } = workspaceFixture(server);
+    const provider = new BlockingProvider();
+    vi.spyOn(server.context.providers, "get").mockResolvedValue(provider);
+
+    const response = server.app.inject({
+      method: "POST",
+      url: `/api/conversations/${conversation.id}/generate`,
+      payload: { connectionId: "blocking" },
+    });
+    await vi.waitFor(() => expect(server.context.generations.size).toBe(1));
+    const generationId = [...server.context.generations.keys()][0]!;
+    expect(
+      (
+        await server.app.inject({
+          method: "POST",
+          url: `/api/generations/${generationId}/abort`,
+        })
+      ).json(),
+    ).toEqual({ data: { id: generationId, stopped: true } });
+    await response;
+
+    expect(server.context.generationResults.get(generationId)).toMatchObject({
+      incompleteReason: "cancelled",
+    });
   });
 
   it("persists visible output as partial when the event budget is exhausted", async () => {

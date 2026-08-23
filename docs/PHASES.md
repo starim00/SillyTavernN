@@ -45,6 +45,8 @@ several people, a narrator, or a world without changing the card/chat model.
 - Provider capability model.
 - OpenAI-compatible chat adapter and deterministic fake adapter.
 - SSE text deltas, structured tool-call events, abort, timeout, and error handling.
+- Server-owned generation continues after an SSE client disconnect; a reloaded
+  client restores task state and consumes the persisted result.
 - Providers without native structured tool calling continue with ordinary text generation.
 
 Exit: interrupted, cancelled, truncated, or resource-limited generation with

@@ -26,6 +26,7 @@ import {
 } from "react";
 
 import {
+  acknowledgeGeneration,
   abortGeneration,
   callLegacyRpc,
   cancelAgentRun,
@@ -47,6 +48,7 @@ import {
   importPortableFile,
   installLegacyPlugin,
   loadConversationMessagePage,
+  loadConversationGeneration,
   loadLegacyGrants,
   loadLegacyHostHealth,
   loadPendingAgentToolProposal,
@@ -216,6 +218,7 @@ export default function App() {
   const apiOnline = state.availability === "api";
   const loading = state.availability === "loading";
   const generationControllerRef = useRef<AbortController | null>(null);
+  const generationStopRequestedRef = useRef(false);
   const swipeSelectionQueueRef = useRef<Promise<void>>(Promise.resolve());
   const workspaceStateRef = useRef(state);
   workspaceStateRef.current = state;
@@ -1014,6 +1017,7 @@ export default function App() {
     }) => {
       if (!apiOnline || generationControllerRef.current) return;
       const controller = new AbortController();
+      generationStopRequestedRef.current = false;
       generationControllerRef.current = controller;
       dispatch({
         type: "generation/start",
@@ -1074,7 +1078,12 @@ export default function App() {
             signal: controller.signal,
           },
           {
-            onGenerationId: (id) => dispatch({ type: "generation/id", id }),
+            onGenerationId: (id) => {
+              dispatch({ type: "generation/id", id });
+              if (generationStopRequestedRef.current) {
+                void abortGeneration(id);
+              }
+            },
             onTextDelta: (delta) => {
               dispatch({ type: "generation/delta", delta });
               void runtime?.emit(
@@ -1121,6 +1130,9 @@ export default function App() {
           );
           await runtime?.emit("generation_ended");
           await runtime?.emit("js_generation_ended");
+          await acknowledgeGeneration(receipt.generationId).catch(
+            () => undefined,
+          );
           return;
         }
         regeneratedSwipePersisted = input.mode === "regenerate";
@@ -1160,6 +1172,9 @@ export default function App() {
         await runtime?.emit("generation_ended", completedContent);
         await runtime?.emit("js_stream_token_received_fully", completedContent);
         await runtime?.emit("js_generation_ended", completedContent);
+        await acknowledgeGeneration(receipt.generationId).catch(
+          () => undefined,
+        );
         if (receipt.incomplete) {
           const reason =
             receipt.reason === "length"
@@ -1221,6 +1236,7 @@ export default function App() {
       } finally {
         if (generationControllerRef.current === controller) {
           generationControllerRef.current = null;
+          generationStopRequestedRef.current = false;
           dispatch({ type: "generation/reset" });
         }
       }
@@ -1236,18 +1252,127 @@ export default function App() {
     ],
   );
 
+  useEffect(() => {
+    const conversationId = state.selectedConversationId;
+    if (!apiOnline || loading || !conversationId) return;
+    if (generationControllerRef.current !== null) return;
+
+    let active = true;
+    let timer: number | null = null;
+    const schedule = (delay: number) => {
+      if (!active) return;
+      timer = window.setTimeout(() => void synchronize(), delay);
+    };
+    const synchronize = async (): Promise<void> => {
+      try {
+        const generation = await loadConversationGeneration(conversationId);
+        if (!active) return;
+        if (generationControllerRef.current !== null) return;
+        if (generation === null) {
+          const current = workspaceStateRef.current.generation;
+          if (
+            current.conversationId === conversationId &&
+            generationControllerRef.current === null
+          ) {
+            dispatch({ type: "generation/reset" });
+          }
+          return;
+        }
+
+        const current = workspaceStateRef.current.generation;
+        if (
+          current.conversationId !== conversationId ||
+          current.generationId !== generation.id
+        ) {
+          dispatch({
+            type: "generation/start",
+            conversationId,
+            mode: generation.mode,
+            targetMessageId: generation.targetMessageId ?? null,
+          });
+          dispatch({ type: "generation/id", id: generation.id });
+        }
+
+        if (generation.status === "running") {
+          schedule(1_000);
+          return;
+        }
+
+        const messages = await refreshMessages(conversationId);
+        if (!active) return;
+        const messageIndex = generation.messageId
+          ? messages.findIndex((message) => message.id === generation.messageId)
+          : -1;
+        const message = messageIndex >= 0 ? messages[messageIndex] : undefined;
+        if (message) {
+          const runtime = await ensureTavernHelperRuntime(conversationId);
+          if (!active) return;
+          if (generation.mode === "regenerate") {
+            const activeSwipe =
+              message.swipes?.[message.activeSwipeIndex ?? 0] ?? undefined;
+            await runtime?.processAssistantSwipe(messageIndex, activeSwipe?.id);
+          } else {
+            await runtime?.processAssistantMessage(messageIndex);
+          }
+          await runtime?.emit("generation_ended", message.content);
+          await runtime?.emit(
+            "js_stream_token_received_fully",
+            message.content,
+          );
+          await runtime?.emit("js_generation_ended", message.content);
+        }
+        await acknowledgeGeneration(generation.id);
+        if (!active) return;
+        dispatch({ type: "generation/reset" });
+        if (generation.toolProposalOnly) {
+          showToast("后台生成已完成，模型工具提案正在等待确认。", "success");
+        } else if (generation.incompleteReason) {
+          const detail =
+            generation.incompleteReason === "cancelled"
+              ? "生成已停止"
+              : generation.incompleteReason === "length"
+                ? "模型达到最大输出长度"
+                : generation.errorMessage || "Provider 连接中断";
+          showToast(
+            `后台回复未完整结束（${detail}），已有内容已保存。`,
+            "warning",
+          );
+        } else {
+          showToast("后台回复已完整生成并保存。", "success");
+        }
+      } catch {
+        schedule(2_000);
+      }
+    };
+
+    void synchronize();
+    return () => {
+      active = false;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [
+    apiOnline,
+    ensureTavernHelperRuntime,
+    loading,
+    refreshMessages,
+    showToast,
+    state.generation.status,
+    state.selectedConversationId,
+  ]);
+
   const stopGeneration = useCallback(async () => {
     const controller = generationControllerRef.current;
-    if (!controller) return;
+    const generationId = state.generation.generationId;
+    if (!controller && !generationId) return;
     dispatch({ type: "generation/stopping" });
-    if (!state.generation.generationId) {
-      controller.abort();
+    generationStopRequestedRef.current = true;
+    if (!generationId) {
       return;
     }
     try {
-      await abortGeneration(state.generation.generationId);
+      await abortGeneration(generationId);
     } catch {
-      controller.abort();
+      controller?.abort();
       showToast("停止请求未得到确认，正在断开本次生成。", "warning");
     }
   }, [showToast, state.generation.generationId]);
@@ -1257,7 +1382,10 @@ export default function App() {
       if (!conversation) return;
       const content = rawContent.trim();
       if (!content) return;
-      if (generationControllerRef.current) {
+      if (
+        generationControllerRef.current ||
+        workspaceStateRef.current.generation.status !== "idle"
+      ) {
         showToast("当前回复仍在生成，请停止或等待完成后再发送。", "warning");
         return;
       }

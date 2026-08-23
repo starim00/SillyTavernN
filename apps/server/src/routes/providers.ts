@@ -137,13 +137,14 @@ async function writeEvent(
   if (Buffer.byteLength(frame, "utf8") > maxFrameBytes) {
     throw new GenerationLimitError("SSE frame exceeded its byte budget.");
   }
-  if (reply.raw.write(frame)) return;
-  await Promise.race([
-    once(reply.raw, "drain"),
-    once(reply.raw, "close").then(() => {
-      throw new Error("Generation client disconnected during backpressure.");
-    }),
-  ]);
+  if (reply.raw.destroyed || reply.raw.writableEnded) return;
+  try {
+    if (reply.raw.write(frame)) return;
+    await Promise.race([once(reply.raw, "drain"), once(reply.raw, "close")]);
+  } catch (error) {
+    if (reply.raw.destroyed || reply.raw.writableEnded) return;
+    throw error;
+  }
 }
 
 function assertGenerationInputBudget(
@@ -490,9 +491,17 @@ export async function registerProviderRoutes(
     }
     const generationId = randomUUID();
     const controller = new AbortController();
+    for (const [id, result] of context.generationResults) {
+      if (result.conversationId === conversationId) {
+        context.generationResults.delete(id);
+      }
+    }
     context.generations.set(generationId, {
       id: generationId,
       conversationId,
+      mode: targetMessageId === undefined ? "send" : "regenerate",
+      ...(targetMessageId === undefined ? {} : { targetMessageId }),
+      startedAt: new Date().toISOString(),
       controller,
     });
     const provider = await context.providers
@@ -573,12 +582,6 @@ export async function registerProviderRoutes(
     reply.raw.setHeader("Cache-Control", "no-cache, no-transform");
     reply.raw.setHeader("Connection", "keep-alive");
     reply.raw.flushHeaders();
-    const onClose = () => {
-      if (!reply.raw.writableEnded) {
-        controller.abort(new Error("Generation client disconnected."));
-      }
-    };
-    reply.raw.once("close", onClose);
     try {
       await writeEvent(
         reply,
@@ -591,8 +594,7 @@ export async function registerProviderRoutes(
     } catch (error) {
       controller.abort(error);
       context.generations.delete(generationId);
-      reply.raw.removeListener("close", onClose);
-      if (!reply.raw.writableEnded) reply.raw.end();
+      if (!reply.raw.destroyed && !reply.raw.writableEnded) reply.raw.end();
       throw error;
     }
 
@@ -609,6 +611,7 @@ export async function registerProviderRoutes(
     let persistedMessage: { id: string; revision: number } | undefined;
     let persistenceStarted = false;
     let toolExecutionClosed = false;
+    let generationLimitExceeded = false;
     let eventCount = 0;
     let outputBytes = 0;
     let toolCallCount = 0;
@@ -1080,6 +1083,7 @@ export async function registerProviderRoutes(
       }
     } catch (error) {
       const limitExceeded = error instanceof GenerationLimitError;
+      generationLimitExceeded = limitExceeded;
       providerFailed = true;
       providerError = {
         code: limitExceeded
@@ -1207,9 +1211,46 @@ export async function registerProviderRoutes(
           );
         }
       }
+      const activeGeneration = context.generations.get(generationId);
+      if (activeGeneration !== undefined) {
+        const incompleteReason = generationLimitExceeded
+          ? "limit"
+          : finishReason === "length"
+            ? "length"
+            : controller.signal.aborted || providerCancelled
+              ? "cancelled"
+              : providerFailed || !completed
+                ? "error"
+                : undefined;
+        context.generationResults.set(generationId, {
+          id: generationId,
+          conversationId,
+          mode: activeGeneration.mode,
+          ...(activeGeneration.targetMessageId === undefined
+            ? {}
+            : { targetMessageId: activeGeneration.targetMessageId }),
+          startedAt: activeGeneration.startedAt,
+          finishedAt: new Date().toISOString(),
+          ...(persistedMessage === undefined
+            ? {}
+            : {
+                messageId: persistedMessage.id,
+                revision: persistedMessage.revision,
+              }),
+          ...(incompleteReason === undefined ? {} : { incompleteReason }),
+          ...(providerError === undefined
+            ? {}
+            : {
+                errorCode: providerError.code,
+                errorMessage: providerError.message,
+              }),
+          ...(toolExecutionClosed && persistedMessage === undefined
+            ? { toolProposalOnly: true }
+            : {}),
+        });
+      }
       context.generations.delete(generationId);
-      reply.raw.removeListener("close", onClose);
-      if (!reply.raw.writableEnded) reply.raw.end();
+      if (!reply.raw.destroyed && !reply.raw.writableEnded) reply.raw.end();
     }
     return reply;
   };
@@ -1217,6 +1258,38 @@ export async function registerProviderRoutes(
   app.post<{ Params: { id: string } }>(
     "/api/conversations/:id/generate",
     (request, reply) => generate(request, reply),
+  );
+
+  app.get<{ Params: { id: string } }>(
+    "/api/conversations/:id/generation",
+    async (request) => {
+      const active = [...context.generations.values()].find(
+        (generation) => generation.conversationId === request.params.id,
+      );
+      if (active !== undefined) {
+        return envelope({
+          id: active.id,
+          conversationId: active.conversationId,
+          mode: active.mode,
+          ...(active.targetMessageId === undefined
+            ? {}
+            : { targetMessageId: active.targetMessageId }),
+          status: "running" as const,
+          startedAt: active.startedAt,
+        });
+      }
+      const completed = [...context.generationResults.values()].findLast(
+        (generation) => generation.conversationId === request.params.id,
+      );
+      return envelope(
+        completed === undefined
+          ? null
+          : {
+              ...completed,
+              status: "finished" as const,
+            },
+      );
+    },
   );
 
   app.post<{ Params: { id: string } }>(
@@ -1234,6 +1307,14 @@ export async function registerProviderRoutes(
         );
       }
       return envelope({ id: request.params.id, stopped: Boolean(generation) });
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    "/api/generations/:id/acknowledge",
+    async (request) => {
+      const acknowledged = context.generationResults.delete(request.params.id);
+      return envelope({ id: request.params.id, acknowledged });
     },
   );
 }

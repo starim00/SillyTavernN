@@ -320,6 +320,31 @@ export type GenerationReceipt =
       toolProposalOnly: true;
     };
 
+export type BackgroundGeneration =
+  | {
+      id: string;
+      conversationId: string;
+      mode: "send" | "regenerate";
+      targetMessageId?: string;
+      status: "running";
+      startedAt: string;
+    }
+  | {
+      id: string;
+      conversationId: string;
+      mode: "send" | "regenerate";
+      targetMessageId?: string;
+      status: "finished";
+      startedAt: string;
+      finishedAt: string;
+      messageId?: string;
+      revision?: number;
+      incompleteReason?: "length" | "cancelled" | "error" | "limit";
+      errorCode?: string;
+      errorMessage?: string;
+      toolProposalOnly?: boolean;
+    };
+
 export type GenerationToolProposal = {
   run: AgentRun;
   toolCall: ApiAgentToolCall;
@@ -1666,6 +1691,24 @@ export async function generateConversation(
 export async function abortGeneration(generationId: string): Promise<void> {
   await request<ApiEnvelope<{ id: string; stopped: boolean }>>(
     `/generations/${encodeURIComponent(generationId)}/abort`,
+    { method: "POST" },
+  );
+}
+
+export async function loadConversationGeneration(
+  conversationId: string,
+): Promise<BackgroundGeneration | null> {
+  const result = await request<ApiEnvelope<BackgroundGeneration | null>>(
+    `/conversations/${encodeURIComponent(conversationId)}/generation`,
+  );
+  return result.data;
+}
+
+export async function acknowledgeGeneration(
+  generationId: string,
+): Promise<void> {
+  await request<ApiEnvelope<{ id: string; acknowledged: boolean }>>(
+    `/generations/${encodeURIComponent(generationId)}/acknowledge`,
     { method: "POST" },
   );
 }

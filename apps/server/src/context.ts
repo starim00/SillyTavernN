@@ -7,7 +7,25 @@ import type { ServerSecretVault } from "./secrets.js";
 export interface ActiveGeneration {
   readonly id: string;
   readonly conversationId: string;
+  readonly mode: "send" | "regenerate";
+  readonly targetMessageId?: string;
+  readonly startedAt: string;
   readonly controller: AbortController;
+}
+
+export interface CompletedGeneration {
+  readonly id: string;
+  readonly conversationId: string;
+  readonly mode: "send" | "regenerate";
+  readonly targetMessageId?: string;
+  readonly startedAt: string;
+  readonly finishedAt: string;
+  readonly messageId?: string;
+  readonly revision?: number;
+  readonly incompleteReason?: "length" | "cancelled" | "error" | "limit";
+  readonly errorCode?: string;
+  readonly errorMessage?: string;
+  readonly toolProposalOnly?: boolean;
 }
 
 export interface GenerationBudget {
@@ -37,6 +55,7 @@ export interface ServerContext {
   readonly providers: ProviderRegistry;
   readonly vault: ServerSecretVault;
   readonly generations: Map<string, ActiveGeneration>;
+  readonly generationResults: Map<string, CompletedGeneration>;
   readonly generationBudget: GenerationBudget;
 }
 

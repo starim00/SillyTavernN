@@ -60,6 +60,7 @@ export async function createServer(
     providers,
     vault,
     generations: new Map(),
+    generationResults: new Map(),
     generationBudget: {
       ...defaultGenerationBudget,
       ...options.generationBudget,
@@ -219,6 +220,7 @@ export async function createServer(
       generation.controller.abort(new Error("Server is shutting down."));
     }
     context.generations.clear();
+    context.generationResults.clear();
     store.close();
   });
 

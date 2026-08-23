@@ -53,6 +53,7 @@ import {
   loadTavernHelperMessageHistory,
   loadWorkspaceFromApi,
   preparePromptTemplate,
+  countPreparedPromptTokens,
   proposalFromGenerationToolEvent,
   reorderPresetPrompts as reorderPresetPromptsOnServer,
   saveProviderConnection,
@@ -2997,12 +2998,17 @@ export default function App() {
                   prepared,
                   tavernHelperContextRef.current,
                 );
+                const tokenCounts = await countPreparedPromptTokens({
+                  connectionId: state.selectedProviderId,
+                  messages: rendered.messages,
+                });
                 return {
                   ...prepared,
                   messages: rendered.messages,
                   templateCount: rendered.sourceTemplateCount,
                   renderedCount: rendered.renderedCount,
                   diagnostics: rendered.diagnostics,
+                  tokenCounts,
                 };
               }}
             />

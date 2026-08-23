@@ -211,6 +211,22 @@ const promptTemplatePrepareSchema = z
   })
   .strict();
 
+const promptTemplateTokenCountSchema = z
+  .object({
+    connectionId: z.string().trim().min(1).max(256),
+    messages: z
+      .array(
+        z
+          .object({
+            role: z.enum(["system", "assistant", "user", "tool"]),
+            content: z.string().max(2_000_000),
+          })
+          .strict(),
+      )
+      .max(20_000),
+  })
+  .strict();
+
 function invalidTavernHelperState(message: string): StorageError {
   return new StorageError("invalid_tavern_helper_state", message, 400);
 }
@@ -817,4 +833,19 @@ export async function registerCompatibilityRoutes(
       ).length,
     });
   });
+
+  app.post(
+    "/api/compatibility/prompt-template/token-count",
+    async (request) => {
+      const input = promptTemplateTokenCountSchema.parse(request.body);
+      const provider = await context.providers.get(input.connectionId);
+      const messages = await Promise.all(
+        input.messages.map((message) => provider.countTokens(message.content)),
+      );
+      return envelope({
+        total: messages.reduce((sum, count) => sum + count, 0),
+        messages,
+      });
+    },
+  );
 }

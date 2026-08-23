@@ -2,7 +2,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import type { TavernHelperContext } from "../compat/tavernHelperTypes";
-import { createVariableTargets, VariableTree } from "./TavernHelperWorkbench";
+import {
+  createVariableTargets,
+  PromptViewer,
+  VariableTree,
+} from "./TavernHelperWorkbench";
 
 function contextWithMessages(): TavernHelperContext {
   return {
@@ -67,5 +71,31 @@ describe("TavernHelperWorkbench variables", () => {
     expect(html).toContain("&quot;Mira&quot;");
     expect(html).toContain("null");
     expect(html.match(/<details/g)).toHaveLength(4);
+  });
+});
+
+describe("TavernHelperWorkbench prompt viewer", () => {
+  it("shows the total and each message token count", () => {
+    const html = renderToStaticMarkup(
+      <PromptViewer
+        prompt={{
+          enabled: true,
+          messages: [
+            { role: "system", content: "System prompt" },
+            { role: "user", content: "Hello" },
+          ],
+          directives: [],
+          templateCount: 2,
+          renderedCount: 1,
+          tokenCounts: { total: 1_234, messages: [1_200, 34] },
+        }}
+      />,
+    );
+
+    expect(html).toContain("1,234");
+    expect(html).toContain("总 Token 数");
+    expect(html).toContain("1,200 Token");
+    expect(html).toContain("34 Token");
+    expect(html).toContain("2. user");
   });
 });

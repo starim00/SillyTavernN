@@ -1124,6 +1124,19 @@ export async function preparePromptTemplate(input: {
   return result.data;
 }
 
+export async function countPreparedPromptTokens(input: {
+  connectionId: string;
+  messages: PreparedPromptMessage[];
+}): Promise<{ total: number; messages: number[] }> {
+  const result = await request<
+    ApiEnvelope<{ total: number; messages: number[] }>
+  >("/compatibility/prompt-template/token-count", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return result.data;
+}
+
 export async function loadWorldbooksFromApi(): Promise<Worldbook[]> {
   const result = await request<ApiEnvelope<ApiWorldbook[]>>("/worldbooks");
   return result.data.map(normalizeWorldbook);

@@ -42,6 +42,10 @@ type PreparedPrompt = {
   directives: PromptTemplateDirective[];
   templateCount: number;
   renderedCount?: number;
+  tokenCounts: {
+    total: number;
+    messages: number[];
+  };
   diagnostics?: Array<{
     messageIndex: number;
     message: string;
@@ -50,6 +54,66 @@ type PreparedPrompt = {
     sourceLabel?: string;
   }>;
 };
+
+function formatTokenCount(count: number): string {
+  return count.toLocaleString("zh-CN");
+}
+
+export function PromptViewer({ prompt }: { prompt: PreparedPrompt }) {
+  return (
+    <>
+      <div className="helper-prompt-token-overview">
+        <div>
+          <strong>{formatTokenCount(prompt.tokenCounts.total)}</strong>
+          <span>总 Token 数</span>
+        </div>
+        <div>
+          <strong>{formatTokenCount(prompt.messages.length)}</strong>
+          <span>消息条目</span>
+        </div>
+      </div>
+      <p className="helper-prompt-summary">
+        {prompt.templateCount} 个源模板
+        {prompt.renderedCount === undefined
+          ? ""
+          : ` · 已执行 ${String(prompt.renderedCount)} 个`}
+        {" · "}
+        {prompt.enabled ? "模板已启用" : "模板未启用"}
+      </p>
+      {prompt.diagnostics?.length ? (
+        <div className="helper-prompt-diagnostics" role="alert">
+          <strong>{prompt.diagnostics.length} 处模板没有进入最终请求</strong>
+          <ul>
+            {prompt.diagnostics.map((diagnostic, index) => (
+              <li
+                key={`${diagnostic.sourceId ?? diagnostic.messageIndex}-${String(index)}`}
+              >
+                {diagnostic.sourceLabel ? `${diagnostic.sourceLabel}：` : ""}
+                {diagnostic.message}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      <div className="helper-prompt-list">
+        {prompt.messages.map((message, index) => (
+          <details key={`${message.role}-${String(index)}`}>
+            <summary>
+              <span>
+                {index + 1}. {message.role}
+              </span>
+              <span className="helper-prompt-token-count">
+                {formatTokenCount(prompt.tokenCounts.messages[index] ?? 0)}{" "}
+                Token
+              </span>
+            </summary>
+            <pre>{message.content}</pre>
+          </details>
+        ))}
+      </div>
+    </>
+  );
+}
 
 export type VariableTarget = {
   key: string;
@@ -1509,46 +1573,7 @@ export function TavernHelperWorkbench({
                     </button>
                   </div>
                   {prompt ? (
-                    <>
-                      <p className="helper-prompt-summary">
-                        {prompt.messages.length} 条消息 · {prompt.templateCount}{" "}
-                        个源模板
-                        {prompt.renderedCount === undefined
-                          ? ""
-                          : ` · 已执行 ${String(prompt.renderedCount)} 个`}
-                        {" · "}
-                        {prompt.enabled ? "模板已启用" : "模板未启用"}
-                      </p>
-                      {prompt.diagnostics?.length ? (
-                        <div className="helper-prompt-diagnostics" role="alert">
-                          <strong>
-                            {prompt.diagnostics.length} 处模板没有进入最终请求
-                          </strong>
-                          <ul>
-                            {prompt.diagnostics.map((diagnostic, index) => (
-                              <li
-                                key={`${diagnostic.sourceId ?? diagnostic.messageIndex}-${String(index)}`}
-                              >
-                                {diagnostic.sourceLabel
-                                  ? `${diagnostic.sourceLabel}：`
-                                  : ""}
-                                {diagnostic.message}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      ) : null}
-                      <div className="helper-prompt-list">
-                        {prompt.messages.map((message, index) => (
-                          <details key={`${message.role}-${String(index)}`}>
-                            <summary>
-                              {index + 1}. {message.role}
-                            </summary>
-                            <pre>{message.content}</pre>
-                          </details>
-                        ))}
-                      </div>
-                    </>
+                    <PromptViewer prompt={prompt} />
                   ) : (
                     <p className="helper-empty">点击“刷新”读取当前提示词。</p>
                   )}

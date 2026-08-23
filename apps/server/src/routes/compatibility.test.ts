@@ -513,6 +513,23 @@ describe("native Tavern Helper compatibility routes", () => {
       content: "Answer",
     });
 
+    const tokenCount = await server.app.inject({
+      method: "POST",
+      url: "/api/compatibility/prompt-template/token-count",
+      payload: {
+        connectionId: "fake",
+        messages: [
+          { role: "system", content: "abcd" },
+          { role: "user", content: "" },
+        ],
+      },
+    });
+    expect(tokenCount.statusCode).toBe(200);
+    expect((tokenCount.json() as { data: unknown }).data).toEqual({
+      total: 2,
+      messages: [2, 0],
+    });
+
     const regenerationPrompt = await server.app.inject({
       method: "POST",
       url: "/api/compatibility/prompt-template/prepare",

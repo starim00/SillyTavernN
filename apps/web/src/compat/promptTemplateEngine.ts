@@ -6,6 +6,21 @@ import type {
 } from "../api/workspaceApi";
 import type { TavernHelperContext } from "./tavernHelperTypes";
 import { browserRegexWorker } from "./browserRegexWorker";
+import {
+  applyPromptInjections,
+  hasPromptTemplateDecorator,
+  isInitialVariablesEntry,
+  isPromptTemplateEntryEnabled,
+  isStandalonePromptTemplateEntry,
+  parsePromptInjection,
+  parsePromptTemplateDecorators,
+  promptTemplateDecoratorArgument,
+  promptTemplateEntryTriggered,
+  promptTemplateGenerationPosition,
+  promptTemplateRenderPosition,
+  type PromptInjectionInstruction,
+  type PromptTemplateSourceEntry,
+} from "./promptTemplateDirectives";
 
 export type PromptTemplateDiagnostic = {
   messageIndex: number;
@@ -20,12 +35,13 @@ export type PromptTemplateResult = {
   diagnostics: PromptTemplateDiagnostic[];
   renderedCount: number;
   sourceTemplateCount: number;
+  displayRenderedIndexes?: number[];
 };
 
 const templatePattern = /<%[\s\S]*?%>/gu;
-const decoratorPattern = /^@@([a-z_]+)(?:\s+(.+))?$/iu;
+const escapeTemplateScopePattern = /<#escape-ejs>([\s\S]*?)<#\/escape-ejs>/giu;
 
-type PromptWorldbookEntry = {
+type PromptWorldbookEntry = PromptTemplateSourceEntry & {
   id: string;
   worldbookId: string;
   worldbookName: string;
@@ -35,7 +51,7 @@ type PromptWorldbookEntry = {
   enabled: boolean;
   order: number;
   legacyUid: number | null;
-  decorators: Array<{ name: string; argument: string }>;
+  probability?: number;
 };
 
 type TemporaryRegex = {
@@ -46,6 +62,13 @@ type TemporaryRegex = {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function coerceEjsOutput(value: unknown): string {
+  // Compatibility requires ordinary JavaScript string coercion, including
+  // custom toString implementations exposed to trusted prompt templates.
+  // eslint-disable-next-line @typescript-eslint/no-base-to-string
+  return String(value ?? "");
 }
 
 function latestMessageVariables(
@@ -74,37 +97,85 @@ function latestMessageVariables(
   return structuredClone(latest);
 }
 
+function protectEscapedTemplates(content: string): {
+  content: string;
+  restore: (rendered: string) => string;
+} {
+  let marker = "STN_ESCAPED_EJS_BLOCK";
+  while (content.includes(marker)) marker += "_";
+  const blocks: string[] = [];
+  const protectedContent = content.replace(
+    escapeTemplateScopePattern,
+    (_match, escaped: string) => {
+      const index = blocks.length;
+      blocks.push(escaped);
+      return `\u0000${marker}${String(index)}\u0000`;
+    },
+  );
+  return {
+    content: protectedContent,
+    restore: (rendered) =>
+      rendered.replace(
+        new RegExp(`\\u0000${marker}(\\d+)\\u0000`, "gu"),
+        (_match, index: string) => blocks[Number(index)] ?? "",
+      ),
+  };
+}
+
 function stripExecutableTemplate(content: string): string {
-  return content.replace(templatePattern, "");
+  const protectedTemplate = protectEscapedTemplates(content);
+  return protectedTemplate.restore(
+    protectedTemplate.content.replace(templatePattern, ""),
+  );
+}
+
+function unwrapEscapedTemplates(content: string): string {
+  const protectedTemplate = protectEscapedTemplates(content);
+  return protectedTemplate.restore(protectedTemplate.content);
 }
 
 function hasTemplate(content: string): boolean {
+  const protectedTemplate = protectEscapedTemplates(content);
   templatePattern.lastIndex = 0;
-  const result = templatePattern.test(content);
+  const result = templatePattern.test(protectedTemplate.content);
   templatePattern.lastIndex = 0;
   return result;
 }
 
-function parseDecorators(content: string): {
-  cleanContent: string;
-  decorators: PromptWorldbookEntry["decorators"];
-} {
-  const lines = content.split(/\r?\n/u);
-  const decorators: PromptWorldbookEntry["decorators"] = [];
-  let index = 0;
-  while (index < lines.length) {
-    const match = decoratorPattern.exec(lines[index]?.trim() ?? "");
-    if (!match) break;
-    decorators.push({
-      name: match[1]!.toLowerCase(),
-      argument: match[2]?.trim() ?? "",
-    });
-    index += 1;
-  }
-  return {
-    cleanContent: lines.slice(index).join("\n"),
-    decorators,
+function escapeDisplayText(content: string): string {
+  return content
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function formatDisplayTemplate(
+  content: string,
+  formatter: (content: string) => string,
+): string {
+  let marker = "STN_DISPLAY_EJS_BLOCK";
+  while (content.includes(marker)) marker += "_";
+  const blocks: Array<{ content: string; escaped: boolean }> = [];
+  const protect = (value: string, escaped: boolean) => {
+    const index = blocks.length;
+    blocks.push({ content: value, escaped });
+    return `${marker}${String(index)}END`;
   };
+  const escapedScopes = content.replace(
+    escapeTemplateScopePattern,
+    (_match, escaped: string) => protect(escaped, true),
+  );
+  const protectedTemplate = escapedScopes.replace(templatePattern, (template) =>
+    protect(template, false),
+  );
+  return formatter(protectedTemplate).replace(
+    new RegExp(`${marker}(\\d+)END`, "gu"),
+    (_match, index: string) => {
+      const block = blocks[Number(index)];
+      if (!block) return "";
+      return block.escaped ? escapeDisplayText(block.content) : block.content;
+    },
+  );
 }
 
 function promptWorldbookEntries(
@@ -112,7 +183,14 @@ function promptWorldbookEntries(
 ): PromptWorldbookEntry[] {
   return (context?.worldbooks ?? []).flatMap((worldbook) =>
     worldbook.entries.map((entry) => {
-      const parsed = parseDecorators(entry.content);
+      const parsed = parsePromptTemplateDecorators(entry.content);
+      const extensions =
+        typeof entry.metadata.extensions === "object" &&
+        entry.metadata.extensions !== null &&
+        !Array.isArray(entry.metadata.extensions)
+          ? (entry.metadata.extensions as Record<string, unknown>)
+          : undefined;
+      const rawProbability = extensions?.probability;
       return {
         id: entry.id,
         worldbookId: worldbook.id,
@@ -127,59 +205,13 @@ function promptWorldbookEntries(
         order: entry.position,
         legacyUid: entry.legacyUid,
         decorators: parsed.decorators,
+        ...(typeof rawProbability === "number" &&
+        Number.isFinite(rawProbability)
+          ? { probability: Math.max(0, Math.min(100, rawProbability)) }
+          : {}),
       };
     }),
   );
-}
-
-function hasDecorator(entry: PromptWorldbookEntry, name: string): boolean {
-  return entry.decorators.some((decorator) => decorator.name === name);
-}
-
-function decoratorArgument(
-  entry: PromptWorldbookEntry,
-  name: string,
-): string | undefined {
-  return entry.decorators.find((decorator) => decorator.name === name)
-    ?.argument;
-}
-
-function isInitialVariables(entry: PromptWorldbookEntry): boolean {
-  return (
-    /^\[InitialVariables\]$/iu.test(entry.title) ||
-    hasDecorator(entry, "initial_variables")
-  );
-}
-
-function generationPosition(
-  entry: PromptWorldbookEntry,
-): { index?: number; position: "BEFORE" | "AFTER" } | undefined {
-  const title = /^\[GENERATE(?::(\d+))?:(BEFORE|AFTER)\]$/iu.exec(entry.title);
-  if (title) {
-    return {
-      ...(title[1] === undefined ? {} : { index: Number(title[1]) }),
-      position: title[2]!.toUpperCase() as "BEFORE" | "AFTER",
-    };
-  }
-  const before = decoratorArgument(entry, "generate_before");
-  if (before !== undefined) {
-    return {
-      ...(before === "" || Number.isNaN(Number(before))
-        ? {}
-        : { index: Number(before) }),
-      position: "BEFORE",
-    };
-  }
-  const after = decoratorArgument(entry, "generate_after");
-  if (after !== undefined) {
-    return {
-      ...(after === "" || Number.isNaN(Number(after))
-        ? {}
-        : { index: Number(after) }),
-      position: "AFTER",
-    };
-  }
-  return undefined;
 }
 
 function replaceEntryContent(
@@ -214,6 +246,10 @@ export async function renderPromptTemplateMessages(
     enabled: boolean;
     context: TavernHelperContext | null;
     directives?: readonly PromptTemplateDirective[];
+    random?: () => number;
+    phase?: "display" | "generate";
+    formatDisplayContent?: (content: string) => string;
+    formatDisplayInline?: (content: string) => string;
   },
 ): Promise<PromptTemplateResult> {
   const diagnostics: PromptTemplateDiagnostic[] = [];
@@ -257,6 +293,7 @@ export async function renderPromptTemplateMessages(
   const worldbookEntries = promptWorldbookEntries(input.context);
   const injectedPrompts = new Map<string, string[]>();
   const forceActivatedEntryIds = new Set<string>();
+  const hardForceActivatedEntryIds = new Set<string>();
   const temporaryRegexes: TemporaryRegex[] = [];
   const findWorldbookEntry = (
     worldbookOrEntry: string | number | RegExp,
@@ -291,10 +328,22 @@ export async function renderPromptTemplateMessages(
   ) => findWorldbookEntry(worldbookOrEntry, entryReference)?.cleanContent ?? "";
   const activewi = async (
     worldbookOrEntry: string | number | RegExp,
-    entryReference?: string | number | RegExp,
+    entryReferenceOrForce?: string | number | RegExp | boolean,
+    force = false,
   ) => {
+    const entryReference =
+      typeof entryReferenceOrForce === "boolean"
+        ? undefined
+        : entryReferenceOrForce;
+    const hardForce =
+      typeof entryReferenceOrForce === "boolean"
+        ? entryReferenceOrForce
+        : force;
     const entry = findWorldbookEntry(worldbookOrEntry, entryReference);
-    if (entry) forceActivatedEntryIds.add(entry.id);
+    if (entry) {
+      forceActivatedEntryIds.add(entry.id);
+      if (hardForce) hardForceActivatedEntryIds.add(entry.id);
+    }
     return entry ?? null;
   };
   const injectPrompt = (name: string, content: string) => {
@@ -339,6 +388,7 @@ export async function renderPromptTemplateMessages(
     message: PreparedPromptMessage,
     messageIndex: number,
     additional: Record<string, unknown> = {},
+    options: { escapeFunction?: (value: unknown) => string } = {},
   ) => {
     const { default: ejs } = await import("ejs");
     const browserGlobals =
@@ -346,8 +396,11 @@ export async function renderPromptTemplateMessages(
         ? {}
         : ((window as unknown as { TavernHelper?: Record<string, unknown> })
             .TavernHelper ?? {});
-    return ejs.render(
+    const protectedTemplate = protectEscapedTemplates(
       await applyTemporaryRegexes(content),
+    );
+    const rendered = await ejs.render(
+      protectedTemplate.content,
       {
         ...browserGlobals,
         variables,
@@ -392,13 +445,15 @@ export async function renderPromptTemplateMessages(
       },
       {
         async: true,
-      },
+        escapeFunction: options.escapeFunction ?? coerceEjsOutput,
+      } as Parameters<typeof ejs.render>[2],
     );
+    return protectedTemplate.restore(rendered);
   };
   const working = messages.map((message) => ({ ...message }));
 
   const directiveEntries = [...(input.directives ?? [])].map((directive) => {
-    const parsed = parseDecorators(directive.content);
+    const parsed = parsePromptTemplateDecorators(directive.content);
     return {
       id: directive.id,
       worldbookId: directive.worldbookId,
@@ -413,6 +468,9 @@ export async function renderPromptTemplateMessages(
       order: directive.order,
       legacyUid: null,
       decorators: parsed.decorators,
+      ...(directive.probability === undefined
+        ? {}
+        : { probability: directive.probability }),
     } satisfies PromptWorldbookEntry;
   });
   const entriesById = new Map(
@@ -421,7 +479,6 @@ export async function renderPromptTemplateMessages(
       entry,
     ]),
   );
-  const directiveIds = new Set(directiveEntries.map((entry) => entry.id));
   const allEntries = [...entriesById.values()].sort(
     (left, right) =>
       left.order - right.order ||
@@ -431,41 +488,181 @@ export async function renderPromptTemplateMessages(
   const sourceTemplateCount = allEntries.filter((entry) =>
     hasTemplate(entry.cleanContent),
   ).length;
+  const random = input.random ?? Math.random;
+  const eligibleEntryIds = new Set(
+    allEntries
+      .filter(
+        (entry) =>
+          isPromptTemplateEntryEnabled(entry) &&
+          (!isStandalonePromptTemplateEntry(entry) ||
+            promptTemplateEntryTriggered(entry.probability, random)),
+      )
+      .map((entry) => entry.id),
+  );
+  const suppressedEntryIds = new Set<string>();
 
-  if (input.enabled) {
-    for (const entry of allEntries) {
-      if (isInitialVariables(entry)) {
-        replaceEntryContent(working, entry, "");
+  if (input.phase === "display") {
+    const formatDisplayContent =
+      input.formatDisplayContent ?? ((value) => value);
+    const formatDisplayInline = input.formatDisplayInline ?? ((value) => value);
+    const displayEscape = (value: unknown) =>
+      formatDisplayInline(coerceEjsOutput(value));
+    const renderEntries = allEntries.filter(
+      (entry) =>
+        promptTemplateRenderPosition(entry) !== undefined &&
+        eligibleEntryIds.has(entry.id) &&
+        !hasPromptTemplateDecorator(entry, "dont_activate") &&
+        !hasPromptTemplateDecorator(entry, "only_preload"),
+    );
+    const displayRenderedIndexes: number[] = [];
+
+    for (const [messageIndex, message] of working.entries()) {
+      const sourceHasTemplate = hasTemplate(message.content);
+      if (
+        !sourceHasTemplate &&
+        (!input.enabled || renderEntries.length === 0)
+      ) {
+        continue;
+      }
+      displayRenderedIndexes.push(messageIndex);
+      if (!input.enabled) {
+        message.content = formatDisplayContent(
+          stripExecutableTemplate(message.content),
+        );
+        continue;
+      }
+
+      const metadata = {
+        runType: "render",
+        message_id: messageIndex,
+        swipe_id: 0,
+        is_last: messageIndex === working.length - 1,
+        is_user: message.role === "user",
+        is_system: message.role === "system",
+        name:
+          message.role === "user"
+            ? "user"
+            : message.role === "assistant"
+              ? "assistant"
+              : message.role,
+        isDryRun: false,
+        generateType: "",
+      };
+      const renderEntry = async (
+        entry: PromptWorldbookEntry,
+      ): Promise<string> => {
+        const condition = promptTemplateDecoratorArgument(entry, "if");
+        if (condition !== undefined) {
+          const conditionResult = await renderContent(
+            `<%= Boolean(${condition}) %>`,
+            message,
+            messageIndex,
+            { ...metadata, world_info: entry },
+          );
+          if (conditionResult.trim() !== "true") return "";
+        }
+        let rendered = await renderContent(
+          entry.cleanContent,
+          message,
+          messageIndex,
+          { ...metadata, world_info: entry },
+          { escapeFunction: displayEscape },
+        );
+        if (hasPromptTemplateDecorator(entry, "message_formatting")) {
+          rendered = formatDisplayContent(rendered);
+        }
+        renderedCount += 1;
+        return rendered;
+      };
+
+      let mainContent: string;
+      try {
+        mainContent = await renderContent(
+          formatDisplayTemplate(message.content, formatDisplayContent),
+          message,
+          messageIndex,
+          metadata,
+          { escapeFunction: displayEscape },
+        );
+        if (sourceHasTemplate) renderedCount += 1;
+      } catch (error) {
+        mainContent = formatDisplayContent(
+          stripExecutableTemplate(message.content),
+        );
+        diagnostics.push({
+          messageIndex,
+          message: errorMessage(error),
+          phase: "render",
+        });
+      }
+
+      const before: string[] = [];
+      const after: string[] = [];
+      for (const entry of renderEntries) {
         try {
-          const initial = JSON.parse(entry.cleanContent) as unknown;
-          if (
-            typeof initial === "object" &&
-            initial !== null &&
-            !Array.isArray(initial)
-          ) {
-            _.merge(variables, initial);
-            persistMessageVariables();
+          const rendered = await renderEntry(entry);
+          if (!rendered) continue;
+          if (promptTemplateRenderPosition(entry) === "BEFORE") {
+            before.push(rendered);
+          } else {
+            after.push(rendered);
           }
         } catch (error) {
           diagnostics.push({
-            messageIndex: -1,
+            messageIndex,
             message: errorMessage(error),
-            phase: "preprocess",
+            phase: "directive",
             sourceId: entry.id,
             sourceLabel: `${entry.worldbookName}: ${entry.title}`,
           });
         }
       }
+      message.content = `${before.join("")}${mainContent}${after.join("")}`;
+    }
+
+    return {
+      messages: working,
+      diagnostics,
+      renderedCount,
+      sourceTemplateCount,
+      displayRenderedIndexes,
+    };
+  }
+
+  if (input.enabled) {
+    for (const entry of allEntries) {
+      if (isStandalonePromptTemplateEntry(entry)) {
+        replaceEntryContent(working, entry, "");
+      }
+    }
+    for (const entry of allEntries) {
+      if (!isInitialVariablesEntry(entry)) continue;
+      replaceEntryContent(working, entry, "");
+      if (!eligibleEntryIds.has(entry.id)) continue;
+      try {
+        const initial = JSON.parse(entry.cleanContent) as unknown;
+        if (
+          typeof initial === "object" &&
+          initial !== null &&
+          !Array.isArray(initial)
+        ) {
+          _.merge(variables, initial);
+          persistMessageVariables();
+        }
+      } catch (error) {
+        diagnostics.push({
+          messageIndex: -1,
+          message: errorMessage(error),
+          phase: "preprocess",
+          sourceId: entry.id,
+          sourceLabel: `${entry.worldbookName}: ${entry.title}`,
+        });
+      }
     }
 
     for (const entry of allEntries) {
-      if (
-        !entry.enabled &&
-        !directiveIds.has(entry.id) &&
-        !hasDecorator(entry, "always_enabled")
-      )
-        continue;
-      const condition = decoratorArgument(entry, "if");
+      if (!eligibleEntryIds.has(entry.id)) continue;
+      const condition = promptTemplateDecoratorArgument(entry, "if");
       if (condition !== undefined) {
         try {
           const result = await renderContent(
@@ -476,10 +673,12 @@ export async function renderPromptTemplateMessages(
           );
           if (result.trim() !== "true") {
             replaceEntryContent(working, entry, "");
+            suppressedEntryIds.add(entry.id);
             continue;
           }
         } catch (error) {
           replaceEntryContent(working, entry, "");
+          suppressedEntryIds.add(entry.id);
           diagnostics.push({
             messageIndex: -1,
             message: errorMessage(error),
@@ -490,11 +689,20 @@ export async function renderPromptTemplateMessages(
           continue;
         }
       }
-      if (hasDecorator(entry, "dont_activate")) {
+      if (hasPromptTemplateDecorator(entry, "only_preload")) {
+        replaceEntryContent(working, entry, "");
+        suppressedEntryIds.add(entry.id);
+        continue;
+      }
+      if (hasPromptTemplateDecorator(entry, "dont_activate")) {
         replaceEntryContent(working, entry, "");
         continue;
       }
-      if (hasDecorator(entry, "preprocessing")) {
+      if (hasPromptTemplateDecorator(entry, "activate")) {
+        forceActivatedEntryIds.add(entry.id);
+        hardForceActivatedEntryIds.add(entry.id);
+      }
+      if (hasPromptTemplateDecorator(entry, "preprocessing")) {
         try {
           const content = await renderContent(
             entry.cleanContent,
@@ -517,18 +725,16 @@ export async function renderPromptTemplateMessages(
       }
     }
 
-    for (const entry of allEntries) {
-      const position = generationPosition(entry);
+    const promptInjections: PromptInjectionInstruction[] = [];
+    for (const [sequence, entry] of allEntries.entries()) {
+      const position = promptTemplateGenerationPosition(entry);
       const regex = /^\[GENERATE:REGEX:(.+)\]$/iu.exec(entry.title);
       const inject = /^@INJECT\b/iu.test(entry.title);
       if (!position && !regex && !inject) continue;
       replaceEntryContent(working, entry, "");
-      if (
-        !entry.enabled &&
-        !directiveIds.has(entry.id) &&
-        !hasDecorator(entry, "always_enabled")
-      )
+      if (suppressedEntryIds.has(entry.id) || !eligibleEntryIds.has(entry.id)) {
         continue;
+      }
       if (position) {
         let renderedDirective: string;
         try {
@@ -595,60 +801,23 @@ export async function renderPromptTemplateMessages(
         continue;
       }
       if (inject) {
-        const parameters = Object.fromEntries(
-          [...entry.title.matchAll(/(\w+)=("[^"]*"|'[^']*'|[^,\]]+)/gu)].map(
-            (match) => [
-              match[1]!.toLowerCase(),
-              match[2]!.trim().replace(/^(['"])([\s\S]*)\1$/u, "$2"),
-            ],
-          ),
+        const instruction = parsePromptInjection(
+          entry.title,
+          "",
+          entry.order,
+          sequence,
         );
-        const role =
-          parameters.role === "user" || parameters.role === "assistant"
-            ? parameters.role
-            : "system";
-        let index = 0;
-        if (parameters.pos !== undefined) {
-          const requested = Number(parameters.pos);
-          index =
-            requested < 0
-              ? Math.max(0, working.length + requested + 1)
-              : Math.max(0, Math.min(working.length, requested - 1));
-        } else if (parameters.regex !== undefined) {
-          try {
-            const found = await browserRegexWorker.findIndex(
-              working.map((message) => message.content),
-              parameters.regex,
-            );
-            index =
-              found < 0
-                ? working.length
-                : found + (parameters.at === "after" ? 1 : 0);
-          } catch {
-            index = working.length;
-          }
-        } else if (parameters.target !== undefined) {
-          const candidates = working
-            .map((message, candidateIndex) => ({ message, candidateIndex }))
-            .filter(({ message }) => message.role === parameters.target);
-          const requested = Number(parameters.index ?? "1");
-          const selected =
-            requested < 0
-              ? candidates.at(requested)
-              : candidates[Math.max(0, requested - 1)];
-          index =
-            selected === undefined
-              ? working.length
-              : selected.candidateIndex + (parameters.at === "after" ? 1 : 0);
-        }
+        if (!instruction) continue;
         try {
           const content = await renderContent(
             entry.cleanContent,
-            { role, content: entry.cleanContent },
-            index,
+            { role: instruction.role, content: entry.cleanContent },
+            -1,
             { world_info: entry },
           );
-          working.splice(index, 0, { role, content });
+          if (content.trim()) {
+            promptInjections.push({ ...instruction, content });
+          }
         } catch (error) {
           diagnostics.push({
             messageIndex: -1,
@@ -661,14 +830,25 @@ export async function renderPromptTemplateMessages(
       }
     }
 
+    if (promptInjections.length > 0) {
+      const injected = await applyPromptInjections(
+        working,
+        promptInjections,
+        (contents, pattern) =>
+          browserRegexWorker.findIndex([...contents], pattern),
+      );
+      working.splice(0, working.length, ...injected);
+    }
+
     for (const entry of allEntries) {
+      const forced = forceActivatedEntryIds.has(entry.id);
+      const hardForced = hardForceActivatedEntryIds.has(entry.id);
       if (
-        !entry.enabled ||
-        isInitialVariables(entry) ||
-        generationPosition(entry) ||
-        /^\[GENERATE:REGEX:/iu.test(entry.title) ||
-        /^@INJECT\b/iu.test(entry.title) ||
-        hasDecorator(entry, "preprocessing")
+        suppressedEntryIds.has(entry.id) ||
+        (!entry.enabled && !forced) ||
+        (hasPromptTemplateDecorator(entry, "dont_activate") && !hardForced) ||
+        isStandalonePromptTemplateEntry(entry) ||
+        hasPromptTemplateDecorator(entry, "preprocessing")
       ) {
         continue;
       }
@@ -677,7 +857,7 @@ export async function renderPromptTemplateMessages(
           message.content.includes(entry.content) ||
           message.content.includes(entry.cleanContent),
       );
-      if (!present && !forceActivatedEntryIds.has(entry.id)) continue;
+      if (!present && !forced) continue;
       try {
         const content = hasTemplate(entry.cleanContent)
           ? await renderContent(
@@ -715,7 +895,10 @@ export async function renderPromptTemplateMessages(
   const rendered: PreparedPromptMessage[] = [];
   for (const [messageIndex, message] of working.entries()) {
     if (!hasTemplate(message.content)) {
-      rendered.push({ ...message });
+      rendered.push({
+        ...message,
+        content: unwrapEscapedTemplates(message.content),
+      });
       continue;
     }
     if (!input.enabled) {
@@ -751,4 +934,18 @@ export async function renderPromptTemplateMessages(
     renderedCount,
     sourceTemplateCount,
   };
+}
+
+export function renderPromptTemplateDisplayMessages(
+  messages: readonly PreparedPromptMessage[],
+  input: {
+    enabled: boolean;
+    context: TavernHelperContext | null;
+    directives?: readonly PromptTemplateDirective[];
+    random?: () => number;
+    formatDisplayContent: (content: string) => string;
+    formatDisplayInline: (content: string) => string;
+  },
+): Promise<PromptTemplateResult> {
+  return renderPromptTemplateMessages(messages, { ...input, phase: "display" });
 }

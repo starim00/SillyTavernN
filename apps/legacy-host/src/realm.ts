@@ -1,4 +1,7 @@
-import type { LegacyPluginLock } from "@stn/legacy-compat";
+import {
+  LEGACY_REALM_PROTOCOL,
+  type LegacyPluginLock,
+} from "@stn/legacy-compat";
 
 function json(value: string): string {
   return JSON.stringify(value);
@@ -120,10 +123,9 @@ export function createLegacyRealmHtml(
   <script src="/vendor/popper.min.js"></script>
   <script>
     (() => {
-      const protocol = "stn.legacy.v1";
+      const protocol = ${json(LEGACY_REALM_PROTOCOL)};
       const targetOrigin = ${json(mainOrigin)};
       const pluginId = ${json(lock.id)};
-      const pluginVersion = ${json(lock.manifestVersion)};
       const installDirectory = ${json(lock.installDirectory)};
       const activateExport = ${json(options.activateExport ?? "")};
       const conversationId = ${json(options.conversationId ?? "")};
@@ -136,25 +138,6 @@ export function createLegacyRealmHtml(
       let settingsTimer = null;
       let loadedModule = null;
       let crashed = false;
-      const nativeFetch = window.fetch.bind(window);
-
-      window.fetch = (input, init) => {
-        const url = typeof input === "string" ? input : input?.url;
-        if (
-          typeof url === "string" &&
-          url.startsWith(
-            "https://gitlab.com/api/v4/projects/novi028%2FJS-Slash-Runner/repository/files/manifest.json/raw",
-          )
-        ) {
-          return Promise.resolve(
-            Response.json(
-              { version: pluginVersion, compatibilityHost: true },
-              { headers: { "cache-control": "no-store" } },
-            ),
-          );
-        }
-        return nativeFetch(input, init);
-      };
 
       function notify(type, detail = {}) {
         window.parent.postMessage({ protocol, type, pluginId, ...detail }, targetOrigin);

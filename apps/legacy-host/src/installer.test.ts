@@ -21,10 +21,16 @@ function cleanRoomLock(files: {
 }): LegacyPluginLock {
   return {
     id: "fixture",
+    uiId: "plugin-fixture",
     displayName: "Clean-room install fixture",
+    shortName: "Fixture",
     repository: "https://example.invalid/clean-room-fixture",
     commit: "0000000000000000000000000000000000000000",
     manifestVersion: "1.0.0",
+    executionOwner: "legacy",
+    legacyRealmRole: "full-runtime",
+    capabilities: [],
+    nativeDescription: "Clean-room test fixture.",
     installDirectory: "Fixture",
     manifestPath: "manifest.json",
     manifestSha256: hash(files.manifest),

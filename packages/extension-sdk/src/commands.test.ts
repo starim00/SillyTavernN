@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { SlashCommandRegistry, type SlashCommandHost } from "./index.js";
+import { SlashCommandRegistry, type SlashCommandHost } from "./commands.js";
 
 function createHost(): SlashCommandHost {
   return {

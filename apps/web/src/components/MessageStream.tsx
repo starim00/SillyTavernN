@@ -234,6 +234,28 @@ export function displayContentSegments(value: string): DisplayContentSegment[] {
   return segments;
 }
 
+export function messageDisplayHtml(value: string): string {
+  return displayContentSegments(value)
+    .map((segment) => {
+      if (segment.kind === "html") return htmlDisplayContent(segment.content);
+      if (segment.kind === "mixed") return mixedDisplayContent(segment.content);
+      return marked.parse(markdownDisplayContent(segment.content), {
+        async: false,
+        breaks: true,
+        gfm: true,
+      });
+    })
+    .join("");
+}
+
+export function messageDisplayInlineHtml(value: string): string {
+  return marked.parseInline(value, {
+    async: false,
+    breaks: true,
+    gfm: true,
+  });
+}
+
 export function trustedDisplayDocument(
   content: string,
   frameName = "TH-message--0--0",
@@ -387,6 +409,7 @@ function MarkdownMessageContent({
 
 type MessageCardProps = {
   message: WorkspaceMessage;
+  promptTemplateDisplay?: { content: string; trusted: boolean } | undefined;
   messageIndex?: number;
   isLast: boolean;
   helperHostReady?: boolean;
@@ -406,6 +429,7 @@ type MessageCardProps = {
 
 export const MessageCard = memo(function MessageCard({
   message,
+  promptTemplateDisplay,
   messageIndex = 0,
   isLast,
   helperHostReady = true,
@@ -429,7 +453,8 @@ export const MessageCard = memo(function MessageCard({
   );
   const canRegenerate = message.role === "assistant";
   const actorLabel = message.role === "user" ? "你" : "模型";
-  const displayContent = message.displayContent ?? message.content;
+  const displayContent =
+    promptTemplateDisplay?.content ?? message.displayContent ?? message.content;
   const appliedRegexScriptIds = message.appliedRegexScriptIds ?? [];
   const displaySegments = displayContentSegments(displayContent);
   const displaysHtml = displaySegments.some(
@@ -511,6 +536,25 @@ export const MessageCard = memo(function MessageCard({
               {savingEdit ? "正在保存" : "保存"}
             </button>
           </div>
+        </div>
+      ) : promptTemplateDisplay?.trusted ? (
+        <div className="message-item__rich-content mes_text">
+          <TrustedDisplayFrame
+            frameName={`TH-message--${String(messageIndex)}--prompt-template`}
+            hostRuntimeReady={helperHostReady}
+            title={`${actorLabel}的提示词模板显示内容`}
+            content={promptTemplateDisplay.content}
+            displayKind="html"
+            appliedRegexScriptIds={appliedRegexScriptIds}
+            onHeightChange={onContentResize}
+          />
+        </div>
+      ) : promptTemplateDisplay ? (
+        <div className="mes_text" data-collapse-code={collapseCodeBlocks}>
+          <MarkdownMessageContent
+            content={promptTemplateDisplay.content}
+            appliedRegexScriptIds={appliedRegexScriptIds}
+          />
         </div>
       ) : message.role === "user" ? (
         <div className="mes_text" data-collapse-code={collapseCodeBlocks}>
@@ -643,6 +687,9 @@ export const MessageCard = memo(function MessageCard({
 type MessageStreamProps = {
   conversationId: string;
   messages: WorkspaceMessage[];
+  promptTemplateDisplayByMessageId?: Readonly<
+    Record<string, { content: string; trusted: boolean }>
+  >;
   messageFloorById?: Readonly<Record<string, number>>;
   hasMore?: boolean;
   loadingOlder?: boolean;
@@ -670,6 +717,7 @@ type MessageStreamProps = {
 export function MessageStream({
   conversationId,
   messages,
+  promptTemplateDisplayByMessageId,
   messageFloorById,
   hasMore = false,
   loadingOlder = false,
@@ -783,6 +831,9 @@ export function MessageStream({
             <MessageCard
               key={message.id}
               message={message}
+              promptTemplateDisplay={
+                promptTemplateDisplayByMessageId?.[message.id]
+              }
               messageIndex={messageFloorById?.[message.id] ?? index}
               isLast={index === messages.length - 1}
               helperHostReady={helperHostReady}

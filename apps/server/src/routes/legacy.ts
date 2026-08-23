@@ -6,26 +6,19 @@ import type { JsonObject, JsonValue } from "@stn/contracts";
 import {
   deniedLegacyCapability,
   getLegacyPluginLock,
+  legacyActorSchema,
+  legacyRpcCapability,
+  legacyRpcSuccess,
   legacyRpcRequestSchema,
 } from "@stn/legacy-compat";
 
 import { envelope, type ServerContext } from "../context.js";
+import {
+  normalizedCardPayload,
+  normalizedPreset,
+} from "../normalized-content.js";
 
-const legacyActorSchema = z.enum(["legacy-plugin", "embedded-script"]);
 const rootSettingsKey = "__root__";
-
-const methodCapabilities: Readonly<Record<string, string>> = {
-  "settings.load": "settings.read",
-  "settings.save": "settings.write",
-  "settings.get": "settings.read",
-  "settings.set": "settings.write",
-  "character.current.read": "character.read",
-  "preset.current.read": "preset.read",
-  "character.scripts.read": "character.read",
-  "preset.scripts.read": "preset.read",
-  "chat.snapshot": "chat.read",
-  "chat.message.send": "chat.write",
-};
 
 const legacyPluginOnlyMethods = new Set([
   "character.current.read",
@@ -68,15 +61,6 @@ function projectEmbeddedScriptExtensions(extensions: JsonObject): JsonObject {
       tavernHelperExtensionKeys.has(key),
     ),
   );
-}
-
-function rpcSuccess(id: string, result: unknown) {
-  return {
-    protocol: "stn.legacy.v1" as const,
-    id,
-    ok: true as const,
-    result,
-  };
 }
 
 export async function registerLegacyBrokerRoutes(
@@ -143,7 +127,7 @@ export async function registerLegacyBrokerRoutes(
           ),
         );
     }
-    const requiredCapability = methodCapabilities[rpc.method];
+    const requiredCapability = legacyRpcCapability(rpc.method);
     if (
       !requiredCapability ||
       rpc.capability !== requiredCapability ||
@@ -174,13 +158,13 @@ export async function registerLegacyBrokerRoutes(
 
     if (rpc.method === "settings.load") {
       try {
-        return rpcSuccess(
+        return legacyRpcSuccess(
           rpc.id,
           context.store.getExtensionSetting(rpc.pluginId, rootSettingsKey)
             .value,
         );
       } catch {
-        return rpcSuccess(rpc.id, {});
+        return legacyRpcSuccess(rpc.id, {});
       }
     }
     if (rpc.method === "settings.save") {
@@ -189,7 +173,7 @@ export async function registerLegacyBrokerRoutes(
         .strict()
         .parse(rpc.params);
       const value = sanitizeJsonValue(params.value);
-      return rpcSuccess(
+      return legacyRpcSuccess(
         rpc.id,
         context.store.setExtensionSetting(rpc.pluginId, rootSettingsKey, value),
       );
@@ -200,12 +184,12 @@ export async function registerLegacyBrokerRoutes(
         .strict()
         .parse(rpc.params);
       try {
-        return rpcSuccess(
+        return legacyRpcSuccess(
           rpc.id,
           context.store.getExtensionSetting(rpc.pluginId, params.key).value,
         );
       } catch {
-        return rpcSuccess(rpc.id, null);
+        return legacyRpcSuccess(rpc.id, null);
       }
     }
     if (rpc.method === "settings.set") {
@@ -217,7 +201,7 @@ export async function registerLegacyBrokerRoutes(
         .strict()
         .parse(rpc.params);
       const value = sanitizeJsonValue(params.value);
-      return rpcSuccess(
+      return legacyRpcSuccess(
         rpc.id,
         context.store.setExtensionSetting(rpc.pluginId, params.key, value),
       );
@@ -229,19 +213,17 @@ export async function registerLegacyBrokerRoutes(
         .parse(rpc.params);
       const conversation = context.store.getConversation(params.conversationId);
       if (!conversation.cardId) {
-        return rpcSuccess(rpc.id, {
+        return legacyRpcSuccess(rpc.id, {
           conversationId: conversation.id,
           card: null,
         });
       }
       const card = context.store.getCard(conversation.cardId);
-      const normalized = isJsonObject(card.legacyPayload.normalized)
-        ? card.legacyPayload.normalized
-        : {};
+      const normalized = normalizedCardPayload(card);
       const extensions = projectLegacyPluginExtensions(
         isJsonObject(normalized.extensions) ? normalized.extensions : {},
       );
-      return rpcSuccess(rpc.id, {
+      return legacyRpcSuccess(rpc.id, {
         conversationId: conversation.id,
         id: card.id,
         revision: card.revision,
@@ -263,16 +245,14 @@ export async function registerLegacyBrokerRoutes(
         .parse(rpc.params);
       const conversation = context.store.getConversation(params.conversationId);
       if (!conversation.cardId) {
-        return rpcSuccess(rpc.id, {
+        return legacyRpcSuccess(rpc.id, {
           conversationId: conversation.id,
           extensions: {},
         });
       }
       const card = context.store.getCard(conversation.cardId);
-      const normalized = isJsonObject(card.legacyPayload.normalized)
-        ? card.legacyPayload.normalized
-        : {};
-      return rpcSuccess(rpc.id, {
+      const normalized = normalizedCardPayload(card);
+      return legacyRpcSuccess(rpc.id, {
         conversationId: conversation.id,
         id: card.id,
         revision: card.revision,
@@ -287,9 +267,11 @@ export async function registerLegacyBrokerRoutes(
         .strict()
         .parse(rpc.params);
       const preset = context.store.getPreset(params.presetId);
-      const normalizedExtensions = isJsonObject(preset.payload.extensions)
-        ? preset.payload.extensions
-        : {};
+      const normalizedExtensions =
+        normalizedPreset(preset)?.extensions ??
+        (isJsonObject(preset.payload.extensions)
+          ? preset.payload.extensions
+          : {});
       const legacySource = isJsonObject(normalizedExtensions.legacySource)
         ? normalizedExtensions.legacySource
         : undefined;
@@ -298,7 +280,7 @@ export async function registerLegacyBrokerRoutes(
           ? legacySource.extensions
           : normalizedExtensions,
       );
-      return rpcSuccess(rpc.id, {
+      return legacyRpcSuccess(rpc.id, {
         id: preset.id,
         revision: preset.revision,
         preset: {
@@ -313,13 +295,15 @@ export async function registerLegacyBrokerRoutes(
         .strict()
         .parse(rpc.params);
       const preset = context.store.getPreset(params.presetId);
-      const normalizedExtensions = isJsonObject(preset.payload.extensions)
-        ? preset.payload.extensions
-        : {};
+      const normalizedExtensions =
+        normalizedPreset(preset)?.extensions ??
+        (isJsonObject(preset.payload.extensions)
+          ? preset.payload.extensions
+          : {});
       const legacySource = isJsonObject(normalizedExtensions.legacySource)
         ? normalizedExtensions.legacySource
         : undefined;
-      return rpcSuccess(rpc.id, {
+      return legacyRpcSuccess(rpc.id, {
         id: preset.id,
         revision: preset.revision,
         extensions: projectEmbeddedScriptExtensions(
@@ -334,7 +318,7 @@ export async function registerLegacyBrokerRoutes(
         .object({ conversationId: z.string().trim().min(1).max(256) })
         .strict()
         .parse(rpc.params);
-      return rpcSuccess(rpc.id, {
+      return legacyRpcSuccess(rpc.id, {
         conversation: context.store.getConversation(params.conversationId),
         messages: context.store.listChatMessages(params.conversationId),
         // Provider connections and secrets are deliberately absent.
@@ -348,7 +332,7 @@ export async function registerLegacyBrokerRoutes(
         })
         .strict()
         .parse(rpc.params);
-      return rpcSuccess(
+      return legacyRpcSuccess(
         rpc.id,
         context.store.addUserMessage({
           conversationId: params.conversationId,

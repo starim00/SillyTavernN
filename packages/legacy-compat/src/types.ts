@@ -1,11 +1,25 @@
+import type { LegacyActor } from "./protocol.js";
+
 export type LegacyTrustLevel = "disabled" | "trusted";
 
-export interface LegacyPluginLock {
+export type LegacyExecutionOwner = "native" | "legacy";
+export type LegacyRealmRole = "none" | "ui-only" | "full-runtime";
+
+export interface LegacyPluginProfile {
   readonly id: string;
+  readonly uiId: string;
   readonly displayName: string;
+  readonly shortName: string;
   readonly repository: string;
   readonly commit: string;
   readonly manifestVersion: string;
+  readonly executionOwner: LegacyExecutionOwner;
+  readonly legacyRealmRole: LegacyRealmRole;
+  readonly capabilities: readonly LegacyCapability[];
+  readonly nativeDescription: string;
+}
+
+export interface LegacyPluginLock extends LegacyPluginProfile {
   readonly installDirectory: string;
   readonly manifestPath: string;
   readonly manifestSha256: string;
@@ -82,5 +96,3 @@ export interface LegacyCapabilityGrant {
   readonly granted: boolean;
   readonly grantedAt?: string;
 }
-
-export type LegacyActor = "legacy-plugin" | "embedded-script";

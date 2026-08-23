@@ -7,6 +7,18 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./manifest": {
+      "types": "./dist/manifest.d.ts",
+      "import": "./dist/manifest.js"
+    },
+    "./native-runtime": {
+      "types": "./dist/native-runtime.d.ts",
+      "import": "./dist/native-runtime.js"
+    },
+    "./worker": {
+      "types": "./dist/worker-runtime.d.ts",
+      "import": "./dist/worker-runtime.js"
     }
   },
   "scripts": {

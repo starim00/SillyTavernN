@@ -11,6 +11,7 @@ import {
   UploadSimple,
   UserCircle,
 } from "@phosphor-icons/react";
+import { getLegacyPluginProfile } from "@stn/legacy-compat/profiles";
 import {
   useCallback,
   useEffect,
@@ -80,6 +81,7 @@ import {
 } from "./api/workspaceApi";
 import {
   loadTavernHelperRuntime,
+  renderPromptTemplateDisplayMessages,
   renderPromptTemplateMessages,
 } from "./compat/loaders";
 import type {
@@ -97,7 +99,11 @@ import type {
 import { CardConversationEntry } from "./components/CardConversationEntry";
 import { ConversationComposer } from "./components/ConversationComposer";
 import type { LegacyRealmStatus } from "./components/LegacyRealmBridge";
-import { MessageStream } from "./components/MessageStream";
+import {
+  messageDisplayHtml,
+  messageDisplayInlineHtml,
+  MessageStream,
+} from "./components/MessageStream";
 import { NavigationRail } from "./components/NavigationRail";
 import { PresetSettingsRail } from "./components/PresetSettingsRail";
 import type { PresetGenerationPatch } from "./components/PresetGenerationControls";
@@ -109,7 +115,7 @@ import { createConversationTitle } from "./conversationTitle";
 import type {
   ConversationSpace,
   GenerationMode,
-  LegacyPlugin,
+  CompatibilityPlugin,
   PromptPreset,
   PromptPresetEntry,
   ProviderConnection,
@@ -128,6 +134,8 @@ import {
   persistWorkspaceState,
   workspaceReducer,
 } from "./store/workspaceReducer";
+
+const EMPTY_MESSAGES: WorkspaceMessage[] = [];
 
 function conversationArchiveFilename(title: string): string {
   const safeTitle = title
@@ -166,20 +174,17 @@ const identifier = (prefix: string): string => {
   return `${prefix}-${suffix}`;
 };
 
-const legacyPluginCapabilities = [
-  "settings.read",
-  "settings.write",
-  "character.read",
-  "preset.read",
-] as const;
-
 async function updateLegacyPluginGrants(
   pluginId: string,
   granted: boolean,
 ): Promise<void> {
+  const profile = getLegacyPluginProfile(pluginId);
+  if (!profile) {
+    throw new Error(`Unknown pinned legacy plugin '${pluginId}'.`);
+  }
   const updated: string[] = [];
   try {
-    for (const capability of legacyPluginCapabilities) {
+    for (const capability of profile.capabilities) {
       await updateLegacyGrant({ pluginId, capability, granted });
       updated.push(capability);
     }
@@ -239,6 +244,10 @@ export default function App() {
   const tavernHelperEpochRef = useRef(0);
   const [tavernHelperContext, setTavernHelperContext] =
     useState<TavernHelperContext | null>(null);
+  const [
+    promptTemplateDisplayByMessageId,
+    setPromptTemplateDisplayByMessageId,
+  ] = useState<Record<string, { content: string; trusted: boolean }>>({});
   const [tavernHelperMessageFloors, setTavernHelperMessageFloors] = useState<
     Record<string, number>
   >({});
@@ -281,22 +290,27 @@ export default function App() {
         applyLegacyHealth(health);
         const trustedPluginIds = new Set(
           health.plugins
-            .filter((hostPlugin) =>
-              legacyPluginCapabilities.every((capability) =>
-                grants.some(
-                  (grant) =>
-                    grant.pluginId === hostPlugin.id &&
-                    grant.actor === "legacy-plugin" &&
-                    grant.capability === capability &&
-                    grant.granted,
-                ),
-              ),
-            )
+            .filter((hostPlugin) => {
+              const profile = getLegacyPluginProfile(hostPlugin.id);
+              return (
+                profile?.executionOwner === "legacy" &&
+                profile.capabilities.every((capability) =>
+                  grants.some(
+                    (grant) =>
+                      grant.pluginId === hostPlugin.id &&
+                      grant.actor === "legacy-plugin" &&
+                      grant.capability === capability &&
+                      grant.granted,
+                  ),
+                )
+              );
+            })
             .map((hostPlugin) => hostPlugin.id),
         );
         for (const plugin of workspaceStateRef.current.plugins) {
           const canonicalId = canonicalLegacyPluginId(plugin.id);
           if (!canonicalId) continue;
+          if (plugin.executionOwner === "native") continue;
           const hostPlugin = health.plugins.find(
             (candidate) => candidate.id === canonicalId,
           );
@@ -500,8 +514,8 @@ export default function App() {
       candidate.cardId === selectedCard?.id,
   );
   const messages = conversation
-    ? (state.messagesByConversation[conversation.id] ?? [])
-    : [];
+    ? (state.messagesByConversation[conversation.id] ?? EMPTY_MESSAGES)
+    : EMPTY_MESSAGES;
   const boundWorldbooks = state.worldbooks.filter((worldbook) =>
     conversation?.worldbookIds.includes(worldbook.id),
   );
@@ -894,6 +908,78 @@ export default function App() {
     state.selectedProviderId,
     tavernHelperRevision,
   ]);
+
+  useEffect(() => {
+    let active = true;
+    if (
+      !conversation ||
+      tavernHelperContext?.conversation.id !== conversation.id
+    ) {
+      setPromptTemplateDisplayByMessageId((current) =>
+        Object.keys(current).length === 0 ? current : {},
+      );
+      return () => {
+        active = false;
+      };
+    }
+
+    const promptTemplateTrusted = tavernHelperContext.sources.some(
+      (source) =>
+        source.trusted &&
+        ((source.scope === "card" &&
+          source.id === tavernHelperContext.conversation.cardId) ||
+          (source.scope === "preset" &&
+            source.id === tavernHelperContext.conversation.presetId)),
+    );
+    void renderPromptTemplateDisplayMessages(
+      messages.map((message) => ({
+        role: message.role,
+        content: message.displayContent ?? message.content,
+      })),
+      {
+        enabled: promptTemplateTrusted,
+        context: tavernHelperContext,
+        formatDisplayContent: promptTemplateTrusted
+          ? messageDisplayHtml
+          : (content) => content,
+        formatDisplayInline: promptTemplateTrusted
+          ? messageDisplayInlineHtml
+          : (content) => content,
+      },
+    )
+      .then((result) => {
+        if (!active) return;
+        const renderedIndexes = new Set(result.displayRenderedIndexes ?? []);
+        setPromptTemplateDisplayByMessageId(
+          Object.fromEntries(
+            result.messages.flatMap((message, index) => {
+              const sourceMessage = messages[index];
+              return renderedIndexes.has(index) && sourceMessage
+                ? [
+                    [
+                      sourceMessage.id,
+                      {
+                        content: message.content,
+                        trusted: promptTemplateTrusted,
+                      },
+                    ],
+                  ]
+                : [];
+            }),
+          ),
+        );
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setPromptTemplateDisplayByMessageId((current) =>
+          Object.keys(current).length === 0 ? current : {},
+        );
+        console.warn("Prompt Template display processing failed", error);
+      });
+    return () => {
+      active = false;
+    };
+  }, [conversation, messages, tavernHelperContext]);
 
   useEffect(() => {
     if (!apiOnline || !conversation) return;
@@ -1616,7 +1702,7 @@ export default function App() {
   );
 
   const installPlugin = useCallback(
-    async (plugin: LegacyPlugin) => {
+    async (plugin: CompatibilityPlugin) => {
       const canonicalId = canonicalLegacyPluginId(plugin.id);
       if (!canonicalId) {
         showToast("该插件不在固定兼容目标中。", "warning");
@@ -1629,14 +1715,26 @@ export default function App() {
       }
       const repository = current?.repository ?? plugin.repository;
       const commit = current?.commit ?? plugin.commit;
+      const nativeReplacement = plugin.executionOwner === "native";
       const accepted = window.confirm(
-        `将从 ${repository} 下载 ${plugin.name} 的固定提交 ${commit.slice(0, 12)}，校验 manifest 和资源哈希后安装到独立兼容域。安装不会自动启用插件或执行卡内脚本。是否继续？`,
+        nativeReplacement
+          ? `将从 ${repository} 下载 ${plugin.name} 的固定提交 ${commit.slice(0, 12)}，仅用于校验 manifest 和资源哈希。能力继续由内置兼容层提供，上游代码不会加载或执行。是否继续？`
+          : `将从 ${repository} 下载 ${plugin.name} 的固定提交 ${commit.slice(0, 12)}，校验 manifest 和资源哈希后安装到独立兼容域。安装不会自动启用插件或执行卡内脚本。是否继续？`,
       );
       if (!accepted) return;
       try {
         const result = await installLegacyPlugin(canonicalId, repository);
         const health = await loadLegacyHostHealth();
         applyLegacyHealth(health);
+        if (nativeReplacement) {
+          showToast(
+            result.outcome === "already-installed"
+              ? `${plugin.name} 的上游固定版本已经存在并通过校验；能力仍由内置兼容层提供。`
+              : `${plugin.name} 的上游固定版本已通过提交与资源哈希校验；代码不会被加载。`,
+            "success",
+          );
+          return;
+        }
         dispatch({
           type: "plugin/update",
           plugin: { ...plugin, status: "disabled", trust: "untrusted" },
@@ -1663,6 +1761,13 @@ export default function App() {
             (candidate) => candidate.id === canonicalId,
           );
           if (observed?.installed && observed.verified) {
+            if (nativeReplacement) {
+              showToast(
+                `${plugin.name} 的校验连接中断，但固定版本已由宿主重新核验；能力仍由内置兼容层提供。`,
+                "warning",
+              );
+              return;
+            }
             dispatch({
               type: "plugin/update",
               plugin: { ...plugin, status: "disabled", trust: "untrusted" },
@@ -1686,10 +1791,14 @@ export default function App() {
   );
 
   const togglePlugin = useCallback(
-    async (plugin: LegacyPlugin) => {
+    async (plugin: CompatibilityPlugin) => {
       const canonicalId = canonicalLegacyPluginId(plugin.id);
       if (!canonicalId) {
         showToast("该插件不在固定兼容目标中。", "warning");
+        return;
+      }
+      if (plugin.executionOwner === "native") {
+        showToast(`${plugin.name} 始终由内置兼容层执行，不会启用上游代码。`);
         return;
       }
       if (!apiOnline) {
@@ -2492,11 +2601,7 @@ export default function App() {
   const legacyBridgePlugins = useMemo(
     () =>
       state.plugins
-        .filter(
-          (plugin) =>
-            plugin.id !== "plugin-js-slash-runner" &&
-            plugin.id !== "plugin-st-prompt-template",
-        )
+        .filter((plugin) => plugin.legacyRealmRole !== "none")
         .map((plugin) => {
           const canonicalId = canonicalLegacyPluginId(plugin.id);
           const hostEnabled =
@@ -2779,6 +2884,7 @@ export default function App() {
           <MessageStream
             conversationId={conversation.id}
             messages={messages}
+            promptTemplateDisplayByMessageId={promptTemplateDisplayByMessageId}
             messageFloorById={tavernHelperMessageFloors}
             hasMore={Boolean(
               state.messageNextCursorByConversation[conversation.id],

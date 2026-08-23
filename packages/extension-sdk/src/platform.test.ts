@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { ExtensionEventBus } from "./events.js";
 import {
-  ExtensionEventBus,
   ExtensionSettingsManager,
-  ExtensionUiRegistry,
   MemoryExtensionSettingsAdapter,
-} from "./index.js";
+} from "./settings.js";
+import { ExtensionUiRegistry } from "./ui.js";
 
 describe("native extension platform contracts", () => {
   it("orders event listeners and isolates a listener failure", async () => {

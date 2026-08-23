@@ -13,7 +13,6 @@
     "@fastify/multipart": "^10.1.0",
     "@stn/contracts": "*",
     "@stn/core": "*",
-    "@stn/extension-sdk": "*",
     "@stn/legacy-compat": "*",
     "@stn/providers": "*",
     "@stn/storage": "*",

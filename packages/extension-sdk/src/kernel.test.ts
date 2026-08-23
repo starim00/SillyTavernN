@@ -1,10 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  ExtensionCapabilityError,
-  ExtensionKernel,
-  extensionManifestSchema,
-} from "./index.js";
+import { ExtensionCapabilityError, ExtensionKernel } from "./kernel.js";
+import { extensionManifestSchema } from "./manifest.js";
 
 describe("ExtensionKernel", () => {
   it("runs hooks in stable extension-id order and carries payload changes", async () => {

@@ -2,6 +2,7 @@
 
 import { readFileSync } from "node:fs";
 
+import { getLegacyPluginProfile } from "@stn/legacy-compat/profiles";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
@@ -23,6 +24,8 @@ import {
   highlightDialogueText,
   isHtmlDisplayContent,
   markdownDisplayContent,
+  messageDisplayHtml,
+  messageDisplayInlineHtml,
   mixedDisplayContent,
   MessageCard,
   MessageStream,
@@ -150,10 +153,11 @@ describe("workspace components", () => {
     expect(builtInHtml).not.toContain('value="second-model"');
   });
 
-  it("offers trust and enablement for a verified installed legacy plugin", () => {
+  it("shows a verified native replacement without legacy enablement", () => {
     const plugin = createDemoWorkspace().plugins.find(
       (candidate) => candidate.id === "plugin-js-slash-runner",
     )!;
+    const profile = getLegacyPluginProfile("js-slash-runner")!;
     const html = renderToStaticMarkup(
       <LegacyManagementModal
         kind="plugins"
@@ -161,11 +165,16 @@ describe("workspace components", () => {
         plugins={[plugin]}
         legacyHostPlugins={{
           "js-slash-runner": {
-            id: "js-slash-runner",
-            name: "酒馆助手 / JS-Slash-Runner",
+            id: profile.id,
+            uiId: profile.uiId,
+            name: profile.displayName,
             version: plugin.version,
-            repository: plugin.repository,
-            commit: plugin.commit,
+            repository: profile.repository,
+            commit: profile.commit,
+            executionOwner: profile.executionOwner,
+            legacyRealmRole: profile.legacyRealmRole,
+            capabilities: [...profile.capabilities],
+            description: profile.nativeDescription,
             installed: true,
             verified: true,
             enabled: false,
@@ -177,18 +186,62 @@ describe("workspace components", () => {
       />,
     );
 
+    expect(html).toContain("原生接管");
     expect(html).toContain("已校验固定提交");
-    expect(html).toContain("信任并启用");
+    expect(html).toContain("不加载上游代码");
+    expect(html).toContain("固定版本已校验");
+    expect(html).not.toContain("信任并启用");
     expect(html).not.toContain("安装服务不可用");
-    const actionIndex = html.indexOf("信任并启用");
+    const actionIndex = html.indexOf("固定版本已校验");
     const openingTagStart = html.lastIndexOf("<button", actionIndex);
     const openingTagEnd = html.indexOf(">", openingTagStart);
     expect(actionIndex).toBeGreaterThan(-1);
     expect(openingTagStart).toBeGreaterThan(-1);
     expect(openingTagEnd).toBeGreaterThan(openingTagStart);
-    expect(html.slice(openingTagStart, openingTagEnd + 1)).not.toContain(
+    expect(html.slice(openingTagStart, openingTagEnd + 1)).toContain(
       "disabled",
     );
+  });
+
+  it("retains trust and enablement for a verified legacy-runtime plugin", () => {
+    const source = createDemoWorkspace().plugins[0]!;
+    const plugin = {
+      ...source,
+      id: "plugin-fixture",
+      name: "Fixture",
+      executionOwner: "legacy" as const,
+      legacyRealmRole: "full-runtime" as const,
+    };
+    const html = renderToStaticMarkup(
+      <LegacyManagementModal
+        kind="plugins"
+        online
+        plugins={[plugin]}
+        legacyHostPlugins={{
+          fixture: {
+            id: "fixture",
+            uiId: "plugin-fixture",
+            name: "Fixture",
+            version: "1.0.0",
+            repository: "https://example.invalid/fixture",
+            commit: "0000000000000000000000000000000000000000",
+            executionOwner: "legacy",
+            legacyRealmRole: "full-runtime",
+            capabilities: [],
+            description: "Clean-room fixture.",
+            installed: true,
+            verified: true,
+            enabled: false,
+          },
+        }}
+        onClose={vi.fn()}
+        onInstall={vi.fn()}
+        onToggle={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain("信任并启用");
+    expect(html).toContain("独立兼容域");
   });
 
   it("starts with role cards instead of a global conversation list", () => {
@@ -546,6 +599,84 @@ describe("workspace components", () => {
     expect(html).not.toContain("&lt;dream&gt;");
     expect(html).not.toContain("&lt;tableEdit&gt;");
     expect(html).not.toContain("<iframe");
+  });
+
+  it("formats Prompt Template base and inline display content as HTML", () => {
+    const block = messageDisplayHtml(
+      '**状态**\n\n<section class="meter">80</section>',
+    );
+
+    expect(block).toContain("<strong>状态</strong>");
+    expect(block).toContain('<section class="meter">80</section>');
+    expect(messageDisplayInlineHtml("**80**")).toContain("<strong>80</strong>");
+  });
+
+  it("renders trusted Prompt Template output for both roles in the compatibility frame", () => {
+    const noop = vi.fn();
+    for (const role of ["user", "assistant"] as const) {
+      const message: WorkspaceMessage = {
+        id: `message-prompt-template-${role}`,
+        conversationId: "conversation-test",
+        role,
+        content: "raw <%= variables.hp %>",
+        createdLabel: "10:31",
+        revision: 1,
+      };
+      const html = renderToStaticMarkup(
+        <MessageCard
+          message={message}
+          messageIndex={7}
+          promptTemplateDisplay={{
+            content: "<p>Rendered <strong>80</strong></p>",
+            trusted: true,
+          }}
+          isLast={false}
+          onCopy={noop}
+          onUpdate={noop}
+          onDelete={noop}
+          onRegenerate={noop}
+          onContinue={noop}
+          onSelectSwipe={noop}
+        />,
+      );
+
+      expect(html).toContain("<iframe");
+      expect(html).toContain('id="TH-message--7--prompt-template"');
+      expect(html).toContain("提示词模板显示内容");
+      expect(html).not.toContain("raw &lt;%=");
+    }
+  });
+
+  it("keeps untrusted Prompt Template cleanup on the inert Markdown path", () => {
+    const noop = vi.fn();
+    const message: WorkspaceMessage = {
+      id: "message-prompt-template-untrusted",
+      conversationId: "conversation-test",
+      role: "assistant",
+      content: "raw <%= blocked() %>",
+      createdLabel: "10:31",
+      revision: 1,
+    };
+    const html = renderToStaticMarkup(
+      <MessageCard
+        message={message}
+        promptTemplateDisplay={{
+          content: "Safe **status** <script>blocked()</script>",
+          trusted: false,
+        }}
+        isLast={false}
+        onCopy={noop}
+        onUpdate={noop}
+        onDelete={noop}
+        onRegenerate={noop}
+        onContinue={noop}
+        onSelectSwipe={noop}
+      />,
+    );
+
+    expect(html).toContain("<strong>status</strong>");
+    expect(html).not.toContain("<iframe");
+    expect(html).not.toContain("<script>blocked()");
   });
 
   it("marks quoted dialogue without changing code blocks", () => {

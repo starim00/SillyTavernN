@@ -4,14 +4,11 @@ import {
   ST_PROMPT_TEMPLATE_MODULE_SURFACES,
 } from "./baseline.js";
 import { ST_PROMPT_TEMPLATE_RUNTIME_ASSETS } from "./prompt-template-assets.js";
+import { LEGACY_PLUGIN_PROFILES } from "./profiles.js";
 
 export const LEGACY_PLUGIN_LOCKS = {
   "js-slash-runner": {
-    id: "js-slash-runner",
-    displayName: "酒馆助手 / JS-Slash-Runner",
-    repository: "https://gitlab.com/novi028/JS-Slash-Runner",
-    commit: "49efcca50809be8d48bfb1776bacf952ef16991b",
-    manifestVersion: "4.8.19",
+    ...LEGACY_PLUGIN_PROFILES["js-slash-runner"],
     installDirectory: "JS-Slash-Runner",
     manifestPath: "manifest.json",
     manifestSha256:
@@ -68,11 +65,7 @@ export const LEGACY_PLUGIN_LOCKS = {
     },
   },
   "st-prompt-template": {
-    id: "st-prompt-template",
-    displayName: "Prompt Template / 提示词模板",
-    repository: "https://github.com/zonde306/ST-Prompt-Template",
-    commit: "c80a572839f99a2aaf3d91cf9b7ebfc202c4ef0b",
-    manifestVersion: "1.17.6.8",
+    ...LEGACY_PLUGIN_PROFILES["st-prompt-template"],
     installDirectory: "ST-Prompt-Template",
     manifestPath: "manifest.json",
     manifestSha256:
@@ -150,10 +143,8 @@ export const LEGACY_PLUGIN_LOCKS = {
   },
 } as const satisfies Record<string, LegacyPluginLock>;
 
-export type LegacyPluginId = keyof typeof LEGACY_PLUGIN_LOCKS;
-
 export function getLegacyPluginLock(id: string): LegacyPluginLock | undefined {
-  return LEGACY_PLUGIN_LOCKS[id as LegacyPluginId];
+  return LEGACY_PLUGIN_LOCKS[id as keyof typeof LEGACY_PLUGIN_LOCKS];
 }
 
 export function isLegacyPluginAssetAllowed(

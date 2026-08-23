@@ -36,10 +36,16 @@ async function createFixture(
     root,
     lock: {
       id: "fixture",
+      uiId: "plugin-fixture",
       displayName: "Clean-room fixture",
+      shortName: "Fixture",
       repository: "https://example.invalid/clean-room-fixture",
       commit: "0000000000000000000000000000000000000000",
       manifestVersion: "1.0.0",
+      executionOwner: "legacy",
+      legacyRealmRole: "full-runtime",
+      capabilities: [],
+      nativeDescription: "Clean-room test fixture.",
       installDirectory: "Fixture",
       manifestPath: "manifest.json",
       manifestSha256: hash(manifest),
@@ -159,8 +165,21 @@ describe("legacy host", () => {
     expect(health.json()).toMatchObject({
       ok: true,
       safeMode: false,
-      plugins: [{ installed: true, verified: true, enabled: false }],
+      plugins: [
+        {
+          id: "fixture",
+          uiId: "plugin-fixture",
+          executionOwner: "legacy",
+          legacyRealmRole: "full-runtime",
+          installed: true,
+          verified: true,
+          enabled: false,
+        },
+      ],
     });
+    expect(
+      health.json<{ plugins: Array<Record<string, unknown>> }>().plugins[0],
+    ).not.toHaveProperty("lock");
 
     const facade = await app.inject({ method: "GET", url: "/script.js" });
     expect(facade.statusCode).toBe(200);
@@ -226,9 +245,6 @@ describe("legacy host", () => {
       "reloadMarkdownProcessor: () => ({ makeHtml: renderLegacyMarkdown })",
     );
     expect(realm.body).toContain("uuidv4: () => crypto.randomUUID()");
-    expect(realm.body).toContain(
-      "https://gitlab.com/api/v4/projects/novi028%2FJS-Slash-Runner/repository/files/manifest.json/raw",
-    );
     const lodash = await app.inject({
       method: "GET",
       url: "/vendor/lodash.min.js",
@@ -299,6 +315,40 @@ describe("legacy host", () => {
       realm.body.indexOf("loadedModule = await import("),
     );
     expect(realm.body).toContain('reportCrash("activate", error)');
+
+    await app.close();
+  });
+
+  it("never exposes a legacy realm or assets for native replacements", async () => {
+    const fixture = await createFixture();
+    const nativeLock: LegacyPluginLock = {
+      ...fixture.lock,
+      executionOwner: "native",
+      legacyRealmRole: "none",
+    };
+    const app = await createLegacyHost({
+      extensionsRoot: fixture.root,
+      mainOrigin: "http://localhost:4173",
+      locks: [nativeLock],
+    });
+
+    expect(
+      await app.inject({
+        method: "POST",
+        url: "/plugins/fixture/enabled",
+        headers: { origin: "http://localhost:4173" },
+        payload: { enabled: true },
+      }),
+    ).toMatchObject({ statusCode: 409 });
+    expect(
+      await app.inject({ method: "GET", url: "/realm/fixture" }),
+    ).toMatchObject({ statusCode: 409 });
+    expect(
+      await app.inject({
+        method: "GET",
+        url: "/scripts/extensions/third-party/Fixture/dist/index.js",
+      }),
+    ).toMatchObject({ statusCode: 409 });
 
     await app.close();
   });

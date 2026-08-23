@@ -2,6 +2,18 @@ import {
   GenerationSettingsSchema,
   type GenerationSettings,
 } from "@stn/contracts";
+import {
+  parseLegacyRpcResponse,
+  type LegacyActor,
+  type LegacyRpcRequest,
+  type LegacyRpcResponse,
+} from "@stn/legacy-compat/protocol";
+import {
+  getLegacyPluginProfile,
+  type LegacyCapability,
+  type LegacyExecutionOwner,
+  type LegacyRealmRole,
+} from "@stn/legacy-compat/profiles";
 
 import type {
   AgentProposal,
@@ -347,7 +359,7 @@ export type ConversationArchive = {
 
 export type RegexGrantScope = "card" | "preset";
 
-export type LegacyActor = "legacy-plugin" | "embedded-script";
+export type { LegacyActor, LegacyRpcRequest, LegacyRpcResponse };
 
 export type LegacyCapabilityGrant = {
   pluginId: string;
@@ -358,40 +370,17 @@ export type LegacyCapabilityGrant = {
   updatedAt: string;
 };
 
-export type LegacyRpcRequest = {
-  protocol: "stn.legacy.v1";
-  id: string;
-  pluginId: string;
-  actor: LegacyActor;
-  method: string;
-  capability: string;
-  params: unknown;
-};
-
-export type LegacyRpcResponse =
-  | {
-      protocol: "stn.legacy.v1";
-      id: string;
-      ok: true;
-      result: unknown;
-    }
-  | {
-      protocol: "stn.legacy.v1";
-      id: string;
-      ok: false;
-      error: {
-        code: string;
-        message: string;
-        capability?: string;
-      };
-    };
-
 export type LegacyHostPluginStatus = {
   id: string;
+  uiId: string;
   name: string;
   version: string;
   repository: string;
   commit: string;
+  executionOwner: LegacyExecutionOwner;
+  legacyRealmRole: LegacyRealmRole;
+  capabilities: LegacyCapability[];
+  description: string;
   installed: boolean;
   verified: boolean;
   enabled: boolean;
@@ -1107,6 +1096,7 @@ export type PromptTemplateDirective = {
   content: string;
   enabled: boolean;
   order: number;
+  probability?: number;
 };
 
 export async function preparePromptTemplate(input: {
@@ -2781,47 +2771,14 @@ function normalizeLegacyRpcResponse(
   value: unknown,
   expectedId: string,
 ): LegacyRpcResponse {
-  if (
-    !isRecord(value) ||
-    value.protocol !== "stn.legacy.v1" ||
-    value.id !== expectedId ||
-    typeof value.ok !== "boolean"
-  ) {
+  try {
+    return parseLegacyRpcResponse(value, expectedId);
+  } catch {
     throw new WorkspaceApiError(
       "Legacy broker returned an invalid RPC response.",
       502,
     );
   }
-  if (value.ok) {
-    return {
-      protocol: "stn.legacy.v1",
-      id: expectedId,
-      ok: true,
-      result: value.result,
-    };
-  }
-  if (
-    !isRecord(value.error) ||
-    typeof value.error.code !== "string" ||
-    typeof value.error.message !== "string"
-  ) {
-    throw new WorkspaceApiError(
-      "Legacy broker returned an invalid RPC error.",
-      502,
-    );
-  }
-  return {
-    protocol: "stn.legacy.v1",
-    id: expectedId,
-    ok: false,
-    error: {
-      code: value.error.code,
-      message: value.error.message,
-      ...(typeof value.error.capability === "string"
-        ? { capability: value.error.capability }
-        : {}),
-    },
-  };
 }
 
 export async function callLegacyRpc(
@@ -2848,18 +2805,50 @@ export async function callLegacyRpc(
 }
 
 function normalizeLegacyHostPlugin(value: unknown): LegacyHostPluginStatus {
-  if (!isRecord(value) || !isRecord(value.lock)) {
+  if (!isRecord(value)) {
     throw new WorkspaceApiError(
       "Legacy host returned an invalid plugin status.",
       502,
     );
   }
+  const id = requireString(value.id, "plugin id");
+  const profile = getLegacyPluginProfile(id);
+  const capabilities = Array.isArray(value.capabilities)
+    ? value.capabilities.filter(
+        (capability): capability is string => typeof capability === "string",
+      )
+    : [];
+  if (
+    !profile ||
+    value.uiId !== profile.uiId ||
+    value.name !== profile.displayName ||
+    value.version !== profile.manifestVersion ||
+    value.repository !== profile.repository ||
+    value.commit !== profile.commit ||
+    value.executionOwner !== profile.executionOwner ||
+    value.legacyRealmRole !== profile.legacyRealmRole ||
+    value.description !== profile.nativeDescription ||
+    capabilities.length !== profile.capabilities.length ||
+    capabilities.some(
+      (capability, index) => capability !== profile.capabilities[index],
+    )
+  ) {
+    throw new WorkspaceApiError(
+      "Legacy host plugin metadata does not match its pinned profile.",
+      502,
+    );
+  }
   return {
-    id: requireString(value.lock.id, "plugin id"),
-    name: requireString(value.lock.displayName, "plugin name"),
-    version: requireString(value.lock.manifestVersion, "plugin version"),
-    repository: requireString(value.lock.repository, "plugin repository"),
-    commit: requireString(value.lock.commit, "plugin commit"),
+    id,
+    uiId: profile.uiId,
+    name: profile.displayName,
+    version: profile.manifestVersion,
+    repository: profile.repository,
+    commit: profile.commit,
+    executionOwner: profile.executionOwner,
+    legacyRealmRole: profile.legacyRealmRole,
+    capabilities: [...profile.capabilities],
+    description: profile.nativeDescription,
     installed: value.installed === true,
     verified: value.verified === true,
     enabled: value.enabled === true,

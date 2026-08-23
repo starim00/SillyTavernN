@@ -34,3 +34,16 @@ export async function renderPromptTemplateMessages(
   const module = await loadPromptTemplateEngine();
   return module.renderPromptTemplateMessages(messages, input);
 }
+
+export async function renderPromptTemplateDisplayMessages(
+  messages: readonly PreparedPromptMessage[],
+  input: {
+    enabled: boolean;
+    context: TavernHelperContext | null;
+    formatDisplayContent: (content: string) => string;
+    formatDisplayInline: (content: string) => string;
+  },
+) {
+  const module = await loadPromptTemplateEngine();
+  return module.renderPromptTemplateDisplayMessages(messages, input);
+}

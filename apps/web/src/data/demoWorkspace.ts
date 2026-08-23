@@ -1,6 +1,8 @@
+import { LEGACY_PLUGIN_PROFILES } from "@stn/legacy-compat/profiles";
+
 import type {
   ConversationSpace,
-  LegacyPlugin,
+  CompatibilityPlugin,
   Participant,
   Persona,
   PromptPreset,
@@ -401,30 +403,20 @@ export const demoPresets: PromptPreset[] = [
   },
 ];
 
-export const demoPlugins: LegacyPlugin[] = [
-  {
-    id: "plugin-js-slash-runner",
-    name: "JS-Slash-Runner",
-    version: "4.8.19",
-    repository: "https://gitlab.com/novi028/JS-Slash-Runner",
-    commit: "49efcca50809be8d48bfb1776bacf952ef16991b",
-    status: "disabled",
-    trust: "untrusted",
-    host: "legacy",
-    description: "可信脚本运行器；启用前需要单独确认脚本能力。",
-  },
-  {
-    id: "plugin-st-prompt-template",
-    name: "ST-Prompt-Template",
-    version: "1.17.6.8",
-    repository: "https://github.com/zonde306/ST-Prompt-Template",
-    commit: "c80a572839f99a2aaf3d91cf9b7ebfc202c4ef0b",
-    status: "disabled",
-    trust: "untrusted",
-    host: "legacy",
-    description: "提示词模板兼容层；确认信任后在隔离的旧版扩展域运行。",
-  },
-];
+export const demoPlugins: CompatibilityPlugin[] = Object.values(
+  LEGACY_PLUGIN_PROFILES,
+).map((profile) => ({
+  id: profile.uiId,
+  name: profile.shortName,
+  version: profile.manifestVersion,
+  repository: profile.repository,
+  commit: profile.commit,
+  status: "disabled",
+  trust: "untrusted",
+  executionOwner: profile.executionOwner,
+  legacyRealmRole: profile.legacyRealmRole,
+  description: profile.nativeDescription,
+}));
 
 const clone = <T>(value: T): T => structuredClone(value);
 

@@ -1,13 +1,20 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 
-import { CardSchema, type JsonObject, type JsonValue } from "@stn/contracts";
+import type { JsonObject } from "@stn/contracts";
 import { StorageError } from "@stn/storage";
 
 import { envelope, type ServerContext } from "../context.js";
+import { normalizedCard } from "../normalized-content.js";
 import { receiveImportUpload } from "../upload.js";
 import { collectAuthorizedConversationRegex } from "../regex-service.js";
 import { regexWorkerPool } from "../regex-worker-pool.js";
+import {
+  setWorldbookMetadata,
+  storedWorldbookDto,
+  WORLD_BOOK_INSERTION_POSITIONS,
+  worldbookMetadataStrings,
+} from "../worldbook-codec.js";
 
 const entityId = z.string().trim().min(1).max(256);
 
@@ -90,17 +97,6 @@ function decodePageCursor(
   }
 }
 
-const worldbookInsertionPositions = [
-  "before-card",
-  "after-card",
-  "author-note-top",
-  "author-note-bottom",
-  "at-depth",
-  "examples-top",
-  "examples-bottom",
-  "outlet",
-] as const;
-
 const worldbookEntryUpdateSchema = z
   .object({
     expectedWorldbookRevision: z.number().int().nonnegative(),
@@ -122,7 +118,7 @@ const worldbookEntryUpdateSchema = z
     excludeRecursion: z.boolean().optional(),
     delayUntilRecursion: z.boolean().optional(),
     insertionPosition: z
-      .enum(worldbookInsertionPositions)
+      .enum(WORLD_BOOK_INSERTION_POSITIONS)
       .nullable()
       .optional(),
     outletName: z.string().trim().max(1_024).nullable().optional(),
@@ -136,57 +132,6 @@ const worldbookEntryUpdateSchema = z
 
 function isJsonObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function metadataString(
-  metadata: JsonObject,
-  ...keys: string[]
-): string | undefined {
-  for (const key of keys) {
-    const value = metadata[key];
-    if (typeof value === "string" && value.trim()) return value;
-  }
-  return undefined;
-}
-
-function metadataStrings(
-  metadata: JsonObject,
-  key: string,
-): string[] | undefined {
-  const value = metadata[key];
-  return Array.isArray(value) &&
-    value.every((item): item is string => typeof item === "string")
-    ? value
-    : undefined;
-}
-
-function metadataBoolean(
-  metadata: JsonObject,
-  key: string,
-  fallback: boolean,
-): boolean {
-  const value = metadata[key];
-  return typeof value === "boolean" ? value : fallback;
-}
-
-function metadataNumber(metadata: JsonObject, key: string): number | undefined {
-  const value = metadata[key];
-  return typeof value === "number" && Number.isFinite(value)
-    ? value
-    : undefined;
-}
-
-function setMetadata(
-  metadata: JsonObject,
-  key: string,
-  value: JsonValue | undefined,
-): void {
-  if (value === undefined) return;
-  if (value === null) {
-    delete metadata[key];
-  } else {
-    metadata[key] = value;
-  }
 }
 
 function conversationDto(context: ServerContext, id: string) {
@@ -237,7 +182,7 @@ function messageDto(context: ServerContext, id: string) {
 
 function cardDto(context: ServerContext, id: string) {
   const card = context.store.getCard(id);
-  const parsed = CardSchema.safeParse(card.legacyPayload.normalized);
+  const normalized = normalizedCard(card);
   const worldbookIds = context.store.database
     .all<{ worldbook_id: string }>(
       `SELECT worldbook_id
@@ -247,8 +192,8 @@ function cardDto(context: ServerContext, id: string) {
       card.id,
     )
     .map((binding) => binding.worldbook_id);
-  const imageUrl = parsed.success
-    ? parsed.data.assets.find(
+  const imageUrl = normalized
+    ? normalized.assets.find(
         (asset) =>
           asset.mediaType === "image/png" &&
           asset.path.startsWith("/api/assets/cards/"),
@@ -262,124 +207,16 @@ function cardDto(context: ServerContext, id: string) {
   };
 }
 
-function worldbookDto(context: ServerContext, id: string) {
-  const worldbook = context.store.getWorldbook(id);
-  const normalized = isJsonObject(worldbook.legacyPayload.normalized)
-    ? worldbook.legacyPayload.normalized
-    : undefined;
-  const compatibility =
-    normalized && isJsonObject(normalized.compatibility)
-      ? normalized.compatibility
-      : undefined;
-  return {
-    ...worldbook,
-    description:
-      normalized && typeof normalized.description === "string"
-        ? normalized.description
-        : "",
-    imported:
-      typeof compatibility?.sourceFormat === "string" &&
-      compatibility.sourceFormat !== "native-storage",
-    entries: context.store.listWorldbookEntries(id).map((entry) => {
-      const metadataPrimary = metadataStrings(entry.metadata, "primaryKeys");
-      const metadataSecondary =
-        metadataStrings(entry.metadata, "secondaryKeys") ?? [];
-      const canPreserveSplit =
-        metadataPrimary !== undefined &&
-        [...metadataPrimary, ...metadataSecondary].length ===
-          entry.keys.length &&
-        [...metadataPrimary, ...metadataSecondary].every(
-          (key, index) => key === entry.keys[index],
-        );
-      const primaryKeys = canPreserveSplit ? metadataPrimary : entry.keys;
-      const secondaryKeys = canPreserveSplit ? metadataSecondary : [];
-      const secondaryLogic = metadataString(entry.metadata, "secondaryLogic");
-      const insertionPosition = metadataString(
-        entry.metadata,
-        "insertionPosition",
-      );
-      const outletName = metadataString(entry.metadata, "outletName");
-      const insertionRole = metadataString(entry.metadata, "insertionRole");
-      const extensions = isJsonObject(entry.metadata.extensions)
-        ? entry.metadata.extensions
-        : undefined;
-      return {
-        ...entry,
-        title:
-          metadataString(entry.metadata, "label", "title", "name") ?? entry.id,
-        keys: [...primaryKeys, ...secondaryKeys],
-        primaryKeys,
-        secondaryKeys,
-        secondaryLogic:
-          secondaryLogic === "all" ||
-          secondaryLogic === "not-any" ||
-          secondaryLogic === "not-all"
-            ? secondaryLogic
-            : "any",
-        selective:
-          canPreserveSplit &&
-          metadataBoolean(entry.metadata, "selective", false),
-        constant: metadataBoolean(entry.metadata, "constant", false),
-        caseSensitive: metadataBoolean(entry.metadata, "caseSensitive", false),
-        matchWholeWords: metadataBoolean(
-          entry.metadata,
-          "matchWholeWords",
-          false,
-        ),
-        useRegex: metadataBoolean(entry.metadata, "useRegex", false),
-        scanDepth: metadataNumber(entry.metadata, "scanDepth") ?? null,
-        recursion: metadataBoolean(entry.metadata, "recursion", true),
-        preventRecursion: metadataBoolean(
-          entry.metadata,
-          "preventRecursion",
-          false,
-        ),
-        excludeRecursion: metadataBoolean(
-          entry.metadata,
-          "excludeRecursion",
-          false,
-        ),
-        delayUntilRecursion: metadataBoolean(
-          entry.metadata,
-          "delayUntilRecursion",
-          false,
-        ),
-        insertionPosition: worldbookInsertionPositions.includes(
-          insertionPosition as (typeof worldbookInsertionPositions)[number],
-        )
-          ? insertionPosition
-          : null,
-        outletName: outletName ?? null,
-        insertionDepth:
-          metadataNumber(entry.metadata, "insertionDepth") ?? null,
-        insertionRole:
-          insertionRole === "user" || insertionRole === "assistant"
-            ? insertionRole
-            : "system",
-        order: entry.position,
-        priority: metadataNumber(entry.metadata, "priority") ?? 0,
-        probability:
-          extensions === undefined
-            ? 100
-            : Math.max(
-                0,
-                Math.min(100, metadataNumber(extensions, "probability") ?? 100),
-              ),
-      };
-    }),
-  };
-}
-
 function cardGreeting(
   context: ServerContext,
   cardId: string,
 ): { content: string; swipes: string[] } | undefined {
   const card = context.store.getCard(cardId);
-  const parsed = CardSchema.safeParse(card.legacyPayload.normalized);
-  if (!parsed.success) return undefined;
+  const normalized = normalizedCard(card);
+  if (!normalized) return undefined;
   const choices = [
-    parsed.data.greeting,
-    ...parsed.data.alternateGreetings,
+    normalized.greeting,
+    ...normalized.alternateGreetings,
   ].filter((content) => content.length > 0);
   const content = choices[0];
   return content === undefined ? undefined : { content, swipes: choices };
@@ -958,7 +795,7 @@ export async function registerWorkspaceRoutes(
     envelope(
       context.store
         .listWorldbooks()
-        .map((worldbook) => worldbookDto(context, worldbook.id)),
+        .map((worldbook) => storedWorldbookDto(context.store, worldbook.id)),
     ),
   );
 
@@ -985,7 +822,10 @@ export async function registerWorkspaceRoutes(
         actorId: "local-user",
       });
       return envelope({
-        worldbook: worldbookDto(context, request.params.worldbookId),
+        worldbook: storedWorldbookDto(
+          context.store,
+          request.params.worldbookId,
+        ),
       });
     },
   );
@@ -997,40 +837,57 @@ export async function registerWorkspaceRoutes(
       const entry = context.store.getWorldbookEntry(request.params.entryId);
       const metadata: JsonObject = { ...entry.metadata };
       const currentPrimary =
-        metadataStrings(metadata, "primaryKeys") ?? entry.keys;
-      const currentSecondary = metadataStrings(metadata, "secondaryKeys") ?? [];
+        worldbookMetadataStrings(metadata, "primaryKeys") ?? entry.keys;
+      const currentSecondary =
+        worldbookMetadataStrings(metadata, "secondaryKeys") ?? [];
       const primaryKeys = input.primaryKeys ?? currentPrimary;
       const secondaryKeys = input.secondaryKeys ?? currentSecondary;
 
       if (input.title !== undefined) {
-        setMetadata(metadata, "label", input.title);
-        setMetadata(metadata, "title", input.title);
+        setWorldbookMetadata(metadata, "label", input.title);
+        setWorldbookMetadata(metadata, "title", input.title);
       }
-      setMetadata(metadata, "primaryKeys", input.primaryKeys);
-      setMetadata(metadata, "secondaryKeys", input.secondaryKeys);
-      setMetadata(metadata, "secondaryLogic", input.secondaryLogic);
-      setMetadata(metadata, "selective", input.selective);
-      setMetadata(metadata, "constant", input.constant);
-      setMetadata(metadata, "caseSensitive", input.caseSensitive);
-      setMetadata(metadata, "matchWholeWords", input.matchWholeWords);
-      setMetadata(metadata, "useRegex", input.useRegex);
+      setWorldbookMetadata(metadata, "primaryKeys", input.primaryKeys);
+      setWorldbookMetadata(metadata, "secondaryKeys", input.secondaryKeys);
+      setWorldbookMetadata(metadata, "secondaryLogic", input.secondaryLogic);
+      setWorldbookMetadata(metadata, "selective", input.selective);
+      setWorldbookMetadata(metadata, "constant", input.constant);
+      setWorldbookMetadata(metadata, "caseSensitive", input.caseSensitive);
+      setWorldbookMetadata(metadata, "matchWholeWords", input.matchWholeWords);
+      setWorldbookMetadata(metadata, "useRegex", input.useRegex);
       if ("scanDepth" in input) {
         metadata.scanDepth = input.scanDepth ?? null;
       }
-      setMetadata(metadata, "recursion", input.recursion);
-      setMetadata(metadata, "preventRecursion", input.preventRecursion);
-      setMetadata(metadata, "excludeRecursion", input.excludeRecursion);
-      setMetadata(metadata, "delayUntilRecursion", input.delayUntilRecursion);
-      setMetadata(metadata, "insertionPosition", input.insertionPosition);
-      setMetadata(metadata, "outletName", input.outletName);
+      setWorldbookMetadata(metadata, "recursion", input.recursion);
+      setWorldbookMetadata(
+        metadata,
+        "preventRecursion",
+        input.preventRecursion,
+      );
+      setWorldbookMetadata(
+        metadata,
+        "excludeRecursion",
+        input.excludeRecursion,
+      );
+      setWorldbookMetadata(
+        metadata,
+        "delayUntilRecursion",
+        input.delayUntilRecursion,
+      );
+      setWorldbookMetadata(
+        metadata,
+        "insertionPosition",
+        input.insertionPosition,
+      );
+      setWorldbookMetadata(metadata, "outletName", input.outletName);
       if ("insertionDepth" in input) {
-        setMetadata(metadata, "insertionDepth", input.insertionDepth);
+        setWorldbookMetadata(metadata, "insertionDepth", input.insertionDepth);
       }
-      setMetadata(metadata, "insertionRole", input.insertionRole);
+      setWorldbookMetadata(metadata, "insertionRole", input.insertionRole);
       if (input.order !== undefined) {
-        setMetadata(metadata, "legacyInsertionOrder", input.order);
+        setWorldbookMetadata(metadata, "legacyInsertionOrder", input.order);
       }
-      setMetadata(metadata, "priority", input.priority);
+      setWorldbookMetadata(metadata, "priority", input.priority);
       if (input.probability !== undefined) {
         const extensions = isJsonObject(metadata.extensions)
           ? { ...metadata.extensions }
@@ -1056,7 +913,10 @@ export async function registerWorkspaceRoutes(
         },
       });
       return envelope({
-        worldbook: worldbookDto(context, request.params.worldbookId),
+        worldbook: storedWorldbookDto(
+          context.store,
+          request.params.worldbookId,
+        ),
       });
     },
   );

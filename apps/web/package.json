@@ -14,7 +14,7 @@
   "dependencies": {
     "@phosphor-icons/react": "2.1.10",
     "@stn/contracts": "*",
-    "@tanstack/react-query": "5.101.4",
+    "@stn/legacy-compat": "*",
     "@vitejs/plugin-react": "6.0.4",
     "ejs": "^6.0.1",
     "htmlparser2": "12.0.0",

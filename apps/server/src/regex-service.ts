@@ -5,8 +5,6 @@ import {
   type RegexScriptParseResult,
 } from "@stn/core";
 import {
-  CardSchema,
-  PromptPresetSchema,
   type Diagnostic,
   type JsonObject,
   type JsonValue,
@@ -16,8 +14,9 @@ import {
   NotFoundError,
   type AppStore,
   type ExtensionSetting,
-  type Preset,
 } from "@stn/storage";
+
+import { normalizedCard, normalizedPreset } from "./normalized-content.js";
 
 export const REGEX_EXTENSION_ID = "stn.regex";
 export const GLOBAL_REGEX_SCOPE_ID = "global";
@@ -94,18 +93,6 @@ function scopeKey(scope: RegexScopeKind, id: string): string {
   return scope === "global" ? GLOBAL_REGEX_SCOPE_ID : `${scope}:${id}`;
 }
 
-function normalizedPreset(value: Preset) {
-  for (const candidate of [
-    value.payload,
-    value.payload.normalized,
-    value.legacyPayload.normalized,
-  ]) {
-    const parsed = PromptPresetSchema.safeParse(candidate);
-    if (parsed.success) return parsed.data;
-  }
-  return undefined;
-}
-
 function locatedScope(
   store: AppStore,
   scope: RegexScopeKind,
@@ -124,12 +111,12 @@ function locatedScope(
   }
   if (scope === "card") {
     const stored = store.getCard(id);
-    const parsed = CardSchema.safeParse(stored.legacyPayload.normalized);
+    const parsed = normalizedCard(stored);
     return {
       name: stored.name,
       ownerRevision: stored.revision,
       fallbackUpdatedAt: stored.updatedAt,
-      embedded: parsed.success ? parsed.data : { extensions: {} },
+      embedded: parsed ?? { extensions: {} },
     };
   }
   const stored = store.getPreset(id);

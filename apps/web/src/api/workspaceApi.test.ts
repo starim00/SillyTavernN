@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { LEGACY_PLUGIN_PROFILES } from "@stn/legacy-compat/profiles";
+
 import { createDemoWorkspace } from "../data/demoWorkspace";
 import type {
   ProviderConnection,
@@ -42,6 +44,30 @@ const jsonResponse = (value: unknown, status = 200) =>
     status,
     headers: { "Content-Type": "application/json" },
   });
+
+const jsSlashRunnerProfile = LEGACY_PLUGIN_PROFILES["js-slash-runner"];
+const legacyHostPluginFixture = (
+  overrides: Partial<{
+    installed: boolean;
+    verified: boolean;
+    enabled: boolean;
+  }> = {},
+) => ({
+  id: jsSlashRunnerProfile.id,
+  uiId: jsSlashRunnerProfile.uiId,
+  name: jsSlashRunnerProfile.displayName,
+  version: jsSlashRunnerProfile.manifestVersion,
+  repository: jsSlashRunnerProfile.repository,
+  commit: jsSlashRunnerProfile.commit,
+  executionOwner: jsSlashRunnerProfile.executionOwner,
+  legacyRealmRole: jsSlashRunnerProfile.legacyRealmRole,
+  capabilities: jsSlashRunnerProfile.capabilities,
+  description: jsSlashRunnerProfile.nativeDescription,
+  installed: true,
+  verified: true,
+  enabled: false,
+  ...overrides,
+});
 
 const sseResponse = (chunks: string[]) => {
   const encoder = new TextEncoder();
@@ -1941,20 +1967,7 @@ describe("workspace API client", () => {
         ok: true,
         service: "legacy-host",
         safeMode: false,
-        plugins: [
-          {
-            lock: {
-              id: "js-slash-runner",
-              displayName: "酒馆助手 / JS-Slash-Runner",
-              manifestVersion: "4.8.19",
-              commit: "49efcca50809be8d48bfb1776bacf952ef16991b",
-              repository: "https://gitlab.com/novi028/JS-Slash-Runner",
-            },
-            installed: true,
-            verified: true,
-            enabled: true,
-          },
-        ],
+        plugins: [legacyHostPluginFixture({ enabled: true })],
       }),
     );
     vi.stubGlobal("fetch", fetchMock);
@@ -1972,10 +1985,20 @@ describe("workspace API client", () => {
       plugins: [
         {
           id: "js-slash-runner",
+          uiId: "plugin-js-slash-runner",
           name: "酒馆助手 / JS-Slash-Runner",
           version: "4.8.19",
           repository: "https://gitlab.com/novi028/JS-Slash-Runner",
           commit: "49efcca50809be8d48bfb1776bacf952ef16991b",
+          executionOwner: "native",
+          legacyRealmRole: "none",
+          capabilities: [
+            "settings.read",
+            "settings.write",
+            "character.read",
+            "preset.read",
+          ],
+          description: "角色卡与预设脚本由内置酒馆助手接口执行。",
           installed: true,
           verified: true,
           enabled: true,
@@ -1989,18 +2012,7 @@ describe("workspace API client", () => {
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse({
         outcome: "installed",
-        plugin: {
-          lock: {
-            id: "js-slash-runner",
-            displayName: "酒馆助手 / JS-Slash-Runner",
-            manifestVersion: "4.8.19",
-            repository,
-            commit: "49efcca50809be8d48bfb1776bacf952ef16991b",
-          },
-          installed: true,
-          verified: true,
-          enabled: false,
-        },
+        plugin: legacyHostPluginFixture(),
         receipt: {
           pluginId: "js-slash-runner",
           repository,
@@ -2031,10 +2043,20 @@ describe("workspace API client", () => {
       outcome: "installed",
       plugin: {
         id: "js-slash-runner",
+        uiId: "plugin-js-slash-runner",
         name: "酒馆助手 / JS-Slash-Runner",
         version: "4.8.19",
         repository,
         commit: "49efcca50809be8d48bfb1776bacf952ef16991b",
+        executionOwner: "native",
+        legacyRealmRole: "none",
+        capabilities: [
+          "settings.read",
+          "settings.write",
+          "character.read",
+          "preset.read",
+        ],
+        description: "角色卡与预设脚本由内置酒馆助手接口执行。",
         installed: true,
         verified: true,
         enabled: false,
@@ -2051,18 +2073,7 @@ describe("workspace API client", () => {
   it("updates host-authoritative legacy plugin enablement", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse({
-        plugin: {
-          lock: {
-            id: "js-slash-runner",
-            displayName: "酒馆助手 / JS-Slash-Runner",
-            manifestVersion: "4.8.19",
-            repository: "https://gitlab.com/novi028/JS-Slash-Runner",
-            commit: "49efcca50809be8d48bfb1776bacf952ef16991b",
-          },
-          installed: true,
-          verified: true,
-          enabled: true,
-        },
+        plugin: legacyHostPluginFixture({ enabled: true }),
       }),
     );
     vi.stubGlobal("fetch", fetchMock);

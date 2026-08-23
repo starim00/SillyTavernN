@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useRef, type RefCallback } from "react";
 
 import {
+  LEGACY_REALM_PROTOCOL,
+  isLegacyRpcResponse,
+  legacyRpcError,
+  legacyRpcRequestSchema,
+  type LegacyRpcRequest,
+  type LegacyRpcResponse,
+} from "@stn/legacy-compat/protocol";
+
+import {
   LEGACY_UI_TO_CANONICAL_PLUGIN_ID,
   canonicalLegacyPluginId,
   type CanonicalLegacyPluginId,
@@ -8,7 +17,7 @@ import {
 } from "../compat/legacyPluginIds";
 import { currentWebOrigin, LEGACY_REALM_ORIGIN } from "../legacy/origin";
 
-export const LEGACY_REALM_PROTOCOL = "stn.legacy.v1" as const;
+export { LEGACY_REALM_PROTOCOL };
 export { LEGACY_REALM_ORIGIN };
 export {
   LEGACY_UI_TO_CANONICAL_PLUGIN_ID,
@@ -29,33 +38,11 @@ export interface LegacyRealmScope {
   readonly revisionKey?: string;
 }
 
-export interface LegacyRealmRpcRequest {
-  readonly protocol: typeof LEGACY_REALM_PROTOCOL;
-  readonly id: string;
+export type LegacyRealmRpcRequest = LegacyRpcRequest & {
   readonly pluginId: CanonicalLegacyPluginId;
-  readonly actor: "legacy-plugin" | "embedded-script";
-  readonly method: string;
-  readonly capability: string;
-  readonly params: unknown;
-}
+};
 
-export type LegacyRealmRpcResponse =
-  | {
-      readonly protocol: typeof LEGACY_REALM_PROTOCOL;
-      readonly id: string;
-      readonly ok: true;
-      readonly result: unknown;
-    }
-  | {
-      readonly protocol: typeof LEGACY_REALM_PROTOCOL;
-      readonly id: string;
-      readonly ok: false;
-      readonly error: {
-        readonly code: string;
-        readonly message: string;
-        readonly capability?: string;
-      };
-    };
+export type LegacyRealmRpcResponse = LegacyRpcResponse;
 
 export type LegacyRealmStatus =
   | {
@@ -111,18 +98,6 @@ const ERROR_NOTIFICATION_KEYS = [
   "stage",
   "type",
 ] as const;
-const RPC_REQUEST_KEYS = [
-  "actor",
-  "capability",
-  "id",
-  "method",
-  "params",
-  "pluginId",
-  "protocol",
-] as const;
-const RPC_SUCCESS_KEYS = ["id", "ok", "protocol", "result"] as const;
-const RPC_ERROR_KEYS = ["error", "id", "ok", "protocol"] as const;
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -150,63 +125,18 @@ function parseRpcRequest(
   data: unknown,
   pluginId: CanonicalLegacyPluginId,
 ): LegacyRealmRpcRequest | null {
-  if (
-    !isRecord(data) ||
-    !hasExactKeys(data, RPC_REQUEST_KEYS) ||
-    data.protocol !== LEGACY_REALM_PROTOCOL ||
-    data.pluginId !== pluginId ||
-    (data.actor !== "legacy-plugin" && data.actor !== "embedded-script") ||
-    !isBoundedText(data.id, 512) ||
-    !isBoundedText(data.method, 256) ||
-    !isBoundedText(data.capability, 512)
-  ) {
+  const parsed = legacyRpcRequestSchema.safeParse(data);
+  if (!parsed.success || parsed.data.pluginId !== pluginId) {
     return null;
   }
-  return {
-    protocol: LEGACY_REALM_PROTOCOL,
-    id: data.id,
-    pluginId,
-    actor: data.actor,
-    method: data.method,
-    capability: data.capability,
-    params: data.params,
-  };
+  return { ...parsed.data, pluginId };
 }
 
 function isRpcResponse(
   value: unknown,
   requestId: string,
 ): value is LegacyRealmRpcResponse {
-  if (
-    !isRecord(value) ||
-    value.protocol !== LEGACY_REALM_PROTOCOL ||
-    value.id !== requestId
-  ) {
-    return false;
-  }
-  if (value.ok === true) {
-    return hasExactKeys(value, RPC_SUCCESS_KEYS);
-  }
-  if (
-    value.ok !== false ||
-    !hasExactKeys(value, RPC_ERROR_KEYS) ||
-    !isRecord(value.error)
-  ) {
-    return false;
-  }
-  const errorKeys = Object.keys(value.error).toSorted();
-  const expectedErrorKeys =
-    value.error.capability === undefined
-      ? ["code", "message"]
-      : ["capability", "code", "message"];
-  return (
-    errorKeys.length === expectedErrorKeys.length &&
-    errorKeys.every((key, index) => key === expectedErrorKeys[index]) &&
-    isBoundedText(value.error.code, 256) &&
-    isBoundedText(value.error.message, 4_096) &&
-    (value.error.capability === undefined ||
-      isBoundedText(value.error.capability, 512))
-  );
+  return isLegacyRpcResponse(value, requestId);
 }
 
 function errorResponse(
@@ -214,12 +144,7 @@ function errorResponse(
   code: string,
   message: string,
 ): LegacyRealmRpcResponse {
-  return {
-    protocol: LEGACY_REALM_PROTOCOL,
-    id,
-    ok: false,
-    error: { code, message },
-  };
+  return legacyRpcError(id, code, message);
 }
 
 function findRegistration(

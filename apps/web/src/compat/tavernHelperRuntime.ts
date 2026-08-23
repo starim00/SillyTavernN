@@ -7,6 +7,7 @@ import * as z from "zod";
 
 import type { WorkspaceMessage } from "../domain/workspace";
 import { createBrowserIdentifier } from "./browserIdentifier";
+import { TAVERN_HELPER_COMPAT_VERSION } from "./legacyPluginIds";
 import type {
   TavernHelperContext,
   TavernHelperRuntimeButton,
@@ -16,6 +17,30 @@ import type {
   TavernHelperSource,
   TavernHelperStateNamespace,
 } from "./tavernHelperTypes";
+import { iframeEvents, mvuEvents, tavernEvents } from "./tavernHelperEvents";
+import {
+  appendAssistantStatusPlaceholder,
+  createTavernHelperMessageView,
+  resolveTavernHelperFrameMessageId,
+  resolveTavernHelperMessageVariables,
+  shouldEnsureAssistantStatusPlaceholder,
+  shouldReconcileOpeningMessageVariables,
+  shouldReparseAssistantVariables,
+  tavernHelperConfirmResult,
+  validateTavernHelperVariables,
+} from "./tavernHelperMessageView";
+
+export {
+  appendAssistantStatusPlaceholder,
+  createTavernHelperMessageView,
+  resolveTavernHelperFrameMessageId,
+  resolveTavernHelperMessageVariables,
+  shouldEnsureAssistantStatusPlaceholder,
+  shouldReconcileOpeningMessageVariables,
+  shouldReparseAssistantVariables,
+  tavernHelperConfirmResult,
+  validateTavernHelperVariables,
+} from "./tavernHelperMessageView";
 
 type JsonRecord = Record<string, unknown>;
 type EventListener = (...values: unknown[]) => unknown;
@@ -191,108 +216,6 @@ export type TavernHelperRuntimeAdapter = {
   notify: (message: string, tone?: "success" | "info" | "warning") => void;
 };
 
-const tavernEvents = {
-  APP_READY: "app_ready",
-  EXTRAS_CONNECTED: "extras_connected",
-  MESSAGE_SWIPED: "message_swiped",
-  MESSAGE_SENT: "message_sent",
-  MESSAGE_RECEIVED: "message_received",
-  MESSAGE_EDITED: "message_edited",
-  MESSAGE_DELETED: "message_deleted",
-  MESSAGE_UPDATED: "message_updated",
-  MESSAGE_FILE_EMBEDDED: "message_file_embedded",
-  MESSAGE_REASONING_EDITED: "message_reasoning_edited",
-  MESSAGE_REASONING_DELETED: "message_reasoning_deleted",
-  MESSAGE_SWIPE_DELETED: "message_swipe_deleted",
-  MORE_MESSAGES_LOADED: "more_messages_loaded",
-  IMPERSONATE_READY: "impersonate_ready",
-  CHAT_CHANGED: "chat_id_changed",
-  GENERATION_AFTER_COMMANDS: "GENERATION_AFTER_COMMANDS",
-  GENERATION_STARTED: "generation_started",
-  GENERATION_STOPPED: "generation_stopped",
-  GENERATION_ENDED: "generation_ended",
-  SD_PROMPT_PROCESSING: "sd_prompt_processing",
-  EXTENSIONS_FIRST_LOAD: "extensions_first_load",
-  EXTENSION_SETTINGS_LOADED: "extension_settings_loaded",
-  SETTINGS_LOADED: "settings_loaded",
-  SETTINGS_UPDATED: "settings_updated",
-  MOVABLE_PANELS_RESET: "movable_panels_reset",
-  SETTINGS_LOADED_BEFORE: "settings_loaded_before",
-  SETTINGS_LOADED_AFTER: "settings_loaded_after",
-  CHATCOMPLETION_SOURCE_CHANGED: "chatcompletion_source_changed",
-  CHATCOMPLETION_MODEL_CHANGED: "chatcompletion_model_changed",
-  OAI_PRESET_CHANGED_BEFORE: "oai_preset_changed_before",
-  OAI_PRESET_CHANGED_AFTER: "oai_preset_changed_after",
-  OAI_PRESET_EXPORT_READY: "oai_preset_export_ready",
-  OAI_PRESET_IMPORT_READY: "oai_preset_import_ready",
-  WORLDINFO_SETTINGS_UPDATED: "worldinfo_settings_updated",
-  WORLDINFO_UPDATED: "worldinfo_updated",
-  CHARACTER_EDITOR_OPENED: "character_editor_opened",
-  CHARACTER_EDITED: "character_edited",
-  CHARACTER_PAGE_LOADED: "character_page_loaded",
-  USER_MESSAGE_RENDERED: "user_message_rendered",
-  CHARACTER_MESSAGE_RENDERED: "character_message_rendered",
-  FORCE_SET_BACKGROUND: "force_set_background",
-  CHAT_DELETED: "chat_deleted",
-  CHAT_CREATED: "chat_created",
-  GENERATE_BEFORE_COMBINE_PROMPTS: "generate_before_combine_prompts",
-  GENERATE_AFTER_COMBINE_PROMPTS: "generate_after_combine_prompts",
-  GENERATE_AFTER_DATA: "generate_after_data",
-  WORLD_INFO_ACTIVATED: "world_info_activated",
-  TEXT_COMPLETION_SETTINGS_READY: "text_completion_settings_ready",
-  CHAT_COMPLETION_SETTINGS_READY: "chat_completion_settings_ready",
-  CHAT_COMPLETION_PROMPT_READY: "chat_completion_prompt_ready",
-  CHARACTER_FIRST_MESSAGE_SELECTED: "character_first_message_selected",
-  CHARACTER_DELETED: "characterDeleted",
-  CHARACTER_DUPLICATED: "character_duplicated",
-  CHARACTER_RENAMED: "character_renamed",
-  CHARACTER_RENAMED_IN_PAST_CHAT: "character_renamed_in_past_chat",
-  SMOOTH_STREAM_TOKEN_RECEIVED: "stream_token_received",
-  STREAM_TOKEN_RECEIVED: "stream_token_received",
-  STREAM_REASONING_DONE: "stream_reasoning_done",
-  FILE_ATTACHMENT_DELETED: "file_attachment_deleted",
-  WORLDINFO_FORCE_ACTIVATE: "worldinfo_force_activate",
-  OPEN_CHARACTER_LIBRARY: "open_character_library",
-  ONLINE_STATUS_CHANGED: "online_status_changed",
-  IMAGE_SWIPED: "image_swiped",
-  CONNECTION_PROFILE_LOADED: "connection_profile_loaded",
-  CONNECTION_PROFILE_CREATED: "connection_profile_created",
-  CONNECTION_PROFILE_DELETED: "connection_profile_deleted",
-  CONNECTION_PROFILE_UPDATED: "connection_profile_updated",
-  TOOL_CALLS_PERFORMED: "tool_calls_performed",
-  TOOL_CALLS_RENDERED: "tool_calls_rendered",
-  CHARACTER_MANAGEMENT_DROPDOWN: "charManagementDropdown",
-  SECRET_WRITTEN: "secret_written",
-  SECRET_DELETED: "secret_deleted",
-  SECRET_ROTATED: "secret_rotated",
-  SECRET_EDITED: "secret_edited",
-  PRESET_CHANGED: "preset_changed",
-  PRESET_DELETED: "preset_deleted",
-  PRESET_RENAMED: "preset_renamed",
-  PRESET_RENAMED_BEFORE: "preset_renamed_before",
-  MAIN_API_CHANGED: "main_api_changed",
-  WORLDINFO_ENTRIES_LOADED: "worldinfo_entries_loaded",
-  WORLDINFO_SCAN_DONE: "worldinfo_scan_done",
-  MEDIA_ATTACHMENT_DELETED: "media_attachment_deleted",
-} as const;
-
-const iframeEvents = {
-  MESSAGE_IFRAME_RENDER_STARTED: "message_iframe_render_started",
-  MESSAGE_IFRAME_RENDER_ENDED: "message_iframe_render_ended",
-  GENERATION_STARTED: "js_generation_started",
-  STREAM_TOKEN_RECEIVED_FULLY: "js_stream_token_received_fully",
-  STREAM_TOKEN_RECEIVED_INCREMENTALLY: "js_stream_token_received_incrementally",
-  GENERATION_ENDED: "js_generation_ended",
-} as const;
-
-const mvuEvents = {
-  VARIABLE_INITIALIZED: "mag_variable_initialized",
-  VARIABLE_UPDATE_STARTED: "mag_variable_update_started",
-  COMMAND_PARSED: "mag_command_parsed",
-  VARIABLE_UPDATE_ENDED: "mag_variable_update_ended",
-  BEFORE_MESSAGE_UPDATE: "mag_before_message_update",
-} as const;
-
 function clone<T>(value: T): T {
   return structuredClone(value);
 }
@@ -313,125 +236,6 @@ function scriptKey(
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-export function resolveTavernHelperMessageVariables(
-  update: Record<string, unknown>,
-  activeSwipeIndex: number,
-): JsonRecord | undefined {
-  if (update.data !== undefined) return asRecord(clone(update.data));
-  if (!Array.isArray(update.swipes_data)) return undefined;
-  const resolvedIndex = Math.min(
-    Math.max(0, activeSwipeIndex),
-    Math.max(0, update.swipes_data.length - 1),
-  );
-  return asRecord(clone(update.swipes_data[resolvedIndex]));
-}
-
-export function validateTavernHelperVariables(
-  schema: z.ZodType,
-  variables: JsonRecord,
-): JsonRecord {
-  const result = schema.safeParse(variables);
-  if (!result.success) {
-    throw new Error(
-      `Variable schema validation failed: ${result.error.message}`,
-    );
-  }
-  return {
-    ...clone(variables),
-    ...clone(asRecord(result.data)),
-  };
-}
-
-export function shouldReparseAssistantVariables(
-  content: string,
-  variables: JsonRecord,
-  baseline: JsonRecord | undefined,
-): boolean {
-  return (
-    baseline !== undefined &&
-    _.has(baseline, "stat_data") &&
-    (!_.has(variables, "schema") || _.isEmpty(variables.stat_data)) &&
-    (_.isEmpty(variables.stat_data) ||
-      _.isEqual(variables.stat_data, baseline.stat_data)) &&
-    /<(?:update(?:variable)?|variableupdate)>/iu.test(content)
-  );
-}
-
-export function shouldReconcileOpeningMessageVariables(
-  variables: Record<string, unknown>,
-): boolean {
-  return (
-    _.has(variables, "initialized_lorebooks") &&
-    _.has(variables, "stat_data") &&
-    _.isPlainObject(variables.stat_data) &&
-    _.isEmpty(variables.stat_data)
-  );
-}
-
-export function shouldEnsureAssistantStatusPlaceholder(
-  messageIndex: number,
-  message: Pick<WorkspaceMessage, "role" | "content">,
-  variables: Record<string, unknown>,
-): boolean {
-  return (
-    messageIndex > 0 &&
-    message.role === "assistant" &&
-    _.has(variables, "stat_data") &&
-    _.isPlainObject(variables.stat_data) &&
-    !message.content.includes("<StatusPlaceHolderImpl/>")
-  );
-}
-
-export function appendAssistantStatusPlaceholder(content: string): string {
-  if (content.includes("<StatusPlaceHolderImpl/>")) return content;
-  return `${content.trimEnd()}\n\n<StatusPlaceHolderImpl/>`;
-}
-
-export function resolveTavernHelperFrameMessageId(
-  frameName: string,
-  fallback: number,
-): number {
-  const match = /^TH-message--(\d+)--\d+(?:_\d+)?$/u.exec(frameName);
-  return match?.[1] === undefined ? fallback : Number(match[1]);
-}
-
-export function tavernHelperConfirmResult(confirmed: boolean): 0 | 1 {
-  return confirmed ? 1 : 0;
-}
-
-export function createTavernHelperMessageView(
-  message: WorkspaceMessage,
-  messageId: number,
-  variables: JsonRecord,
-  assistantName: string,
-) {
-  const swipes = message.swipes?.map((swipe) => swipe.content) ?? [
-    message.content,
-  ];
-  const activeSwipeIndex = Math.min(
-    message.activeSwipeIndex ?? 0,
-    Math.max(0, swipes.length - 1),
-  );
-  const activeVariables = clone(variables);
-  return {
-    message_id: messageId,
-    name: message.role === "user" ? "User" : assistantName,
-    role: message.role,
-    is_user: message.role === "user",
-    is_system: false,
-    is_hidden: false,
-    message: message.content,
-    data: activeVariables,
-    extra: { stn_message_id: message.id },
-    swipe_id: activeSwipeIndex,
-    swipes,
-    swipes_data: swipes.map((_, index) =>
-      index === activeSwipeIndex ? clone(activeVariables) : {},
-    ),
-    swipes_info: swipes.map(() => ({})),
-  };
 }
 
 function appendInstanceToRemoteImports(
@@ -2257,7 +2061,7 @@ export class TavernHelperRuntime {
           progress: state.element?.currentTime ?? 0,
         };
       },
-      getTavernHelperVersion: () => "4.8.19-native",
+      getTavernHelperVersion: () => `${TAVERN_HELPER_COMPAT_VERSION}-native`,
       getTavernHelperExtensionId: () => "stn-native-tavern-helper",
       getTavernVersion: () => "SillyTavernN",
       substitudeMacros: substituteMacros,

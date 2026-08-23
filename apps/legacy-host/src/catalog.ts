@@ -7,22 +7,20 @@ import {
   LEGACY_PLUGIN_LOCKS,
   buildLegacyModuleSurfaces,
   isLegacyPluginAssetAllowed,
+  parseLegacyExtensionManifest,
   scanLegacyStaticImports,
   type LegacyModuleSurface,
+  type NormalizedLegacyExtensionManifest,
   type LegacyPluginAssetContract,
   type LegacyPluginLock,
 } from "@stn/legacy-compat";
-import {
-  parseExtensionManifest,
-  type NormalizedExtensionManifest,
-} from "@stn/extension-sdk";
 
 export interface InstalledPluginStatus {
   readonly lock: LegacyPluginLock;
   readonly installed: boolean;
   readonly verified: boolean;
   readonly enabled: boolean;
-  readonly manifest?: NormalizedExtensionManifest;
+  readonly manifest?: NormalizedLegacyExtensionManifest;
   readonly reason?: string;
 }
 
@@ -255,10 +253,12 @@ export class LegacySurfaceCatalog {
           throw new Error("Manifest hash does not match the pinned lock.");
         }
         const manifestSource = manifestBytes.toString("utf8");
-        const manifest = parseExtensionManifest(JSON.parse(manifestSource), {
-          directoryName: lock.id,
-          trustedLegacy: true,
-        });
+        const manifest = parseLegacyExtensionManifest(
+          JSON.parse(manifestSource),
+          {
+            directoryName: lock.id,
+          },
+        );
         if (
           manifest.id !== lock.id ||
           manifest.version !== lock.manifestVersion ||

@@ -13,6 +13,12 @@ export default defineConfig({
       "@stn/extension-sdk": workspaceSource(
         "./packages/extension-sdk/src/index.ts",
       ),
+      "@stn/legacy-compat/protocol": workspaceSource(
+        "./packages/legacy-compat/src/protocol.ts",
+      ),
+      "@stn/legacy-compat/profiles": workspaceSource(
+        "./packages/legacy-compat/src/profiles.ts",
+      ),
       "@stn/legacy-compat": workspaceSource(
         "./packages/legacy-compat/src/index.ts",
       ),

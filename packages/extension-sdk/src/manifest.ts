@@ -76,38 +76,7 @@ export const extensionManifestSchema = z
 
 export type ExtensionManifest = z.infer<typeof extensionManifestSchema>;
 
-export const legacyExtensionManifestSchema = z
-  .object({
-    display_name: z.string().trim().min(1).max(512),
-    loading_order: z.number().int().min(-10_000).max(10_000).default(100),
-    requires: z.array(dependencyIdSchema).default([]),
-    optional: z.array(dependencyIdSchema).default([]),
-    dependencies: z.array(dependencyIdSchema).default([]),
-    js: safeRelativePathSchema,
-    css: z.union([z.literal(""), safeRelativePathSchema]).default(""),
-    author: z.string().trim().max(512).default(""),
-    version: z.string().trim().min(1).max(128),
-    homePage: z.string().url().max(2_048).optional(),
-    minimum_client_version: z.string().trim().min(1).max(128).optional(),
-    i18n: z
-      .record(z.string().trim().min(1), safeRelativePathSchema)
-      .default({}),
-    hooks: z
-      .object({
-        activate: z.string().trim().min(1).max(256).optional(),
-      })
-      .strict()
-      .optional(),
-    auto_update: z.boolean().optional(),
-  })
-  .passthrough();
-
-export type LegacyExtensionManifest = z.infer<
-  typeof legacyExtensionManifestSchema
->;
-
 export interface NormalizedExtensionManifest {
-  readonly source: "legacy" | "native";
   readonly id: string;
   readonly name: string;
   readonly version: string;
@@ -120,84 +89,29 @@ export interface NormalizedExtensionManifest {
   readonly capabilities: readonly NativeCapability[];
   readonly activateExport?: string;
   readonly minimumHostVersion?: string;
-  readonly trustedLegacy: boolean;
-}
-
-export interface ParseExtensionManifestOptions {
-  readonly directoryName?: string;
-  readonly trustedLegacy?: boolean;
-}
-
-function manifestIdFromDirectory(directoryName: string): string {
-  const value = directoryName
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  if (!/^[a-z0-9][a-z0-9._-]+$/.test(value)) {
-    throw new Error(
-      `Cannot derive a stable extension id from directory ${JSON.stringify(directoryName)}.`,
-    );
-  }
-  return value;
 }
 
 export function parseExtensionManifest(
   input: unknown,
-  options: ParseExtensionManifestOptions = {},
 ): NormalizedExtensionManifest {
-  const native = extensionManifestSchema.safeParse(input);
-  if (native.success) {
-    return {
-      source: "native",
-      id: native.data.id,
-      name: native.data.name,
-      version: native.data.version,
-      loadingOrder: native.data.loadingOrder,
-      scripts: [native.data.entry],
-      styles: native.data.styles,
-      i18n: native.data.i18n,
-      requires: native.data.requires,
-      optional: native.data.optional,
-      capabilities: native.data.capabilities,
-      ...(native.data.activateExport === undefined
-        ? {}
-        : { activateExport: native.data.activateExport }),
-      ...(native.data.minimumHostApi === undefined
-        ? {}
-        : { minimumHostVersion: native.data.minimumHostApi }),
-      trustedLegacy: false,
-    };
-  }
-
-  const legacy = legacyExtensionManifestSchema.parse(input);
-  if (!options.directoryName) {
-    throw new Error(
-      "directoryName is required when normalizing a legacy extension manifest.",
-    );
-  }
-  const requires = Array.from(
-    new Set([...legacy.requires, ...legacy.dependencies]),
-  );
+  const native = extensionManifestSchema.parse(input);
   return {
-    source: "legacy",
-    id: manifestIdFromDirectory(options.directoryName),
-    name: legacy.display_name,
-    version: legacy.version,
-    loadingOrder: legacy.loading_order,
-    scripts: [legacy.js],
-    styles: legacy.css ? [legacy.css] : [],
-    i18n: legacy.i18n,
-    requires,
-    optional: Array.from(new Set(legacy.optional)),
-    capabilities: [],
-    ...(legacy.hooks?.activate === undefined
+    id: native.id,
+    name: native.name,
+    version: native.version,
+    loadingOrder: native.loadingOrder,
+    scripts: [native.entry],
+    styles: native.styles,
+    i18n: native.i18n,
+    requires: native.requires,
+    optional: native.optional,
+    capabilities: native.capabilities,
+    ...(native.activateExport === undefined
       ? {}
-      : { activateExport: legacy.hooks.activate }),
-    ...(legacy.minimum_client_version === undefined
+      : { activateExport: native.activateExport }),
+    ...(native.minimumHostApi === undefined
       ? {}
-      : { minimumHostVersion: legacy.minimum_client_version }),
-    trustedLegacy: options.trustedLegacy ?? false,
+      : { minimumHostVersion: native.minimumHostApi }),
   };
 }
 

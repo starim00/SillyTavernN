@@ -5,7 +5,7 @@ import type {
   AgentRun,
   ConversationSpace,
   GenerationMode,
-  LegacyPlugin,
+  CompatibilityPlugin,
   MessageSwipe,
   ModalState,
   PanelId,
@@ -94,7 +94,7 @@ type WorkspaceAction =
   | { type: "generation/reasoning-delta"; delta: string }
   | { type: "generation/stopping" }
   | { type: "generation/reset" }
-  | { type: "plugin/update"; plugin: LegacyPlugin }
+  | { type: "plugin/update"; plugin: CompatibilityPlugin }
   | {
       type: "agent/proposed";
       proposal: AgentProposal;

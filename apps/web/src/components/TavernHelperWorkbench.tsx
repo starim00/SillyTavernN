@@ -20,6 +20,7 @@ import type {
   PreparedPromptMessage,
   PromptTemplateDirective,
 } from "../api/workspaceApi";
+import { TAVERN_HELPER_COMPAT_VERSION } from "../compat/legacyPluginIds";
 import type {
   TavernHelperContext,
   TavernHelperScript,
@@ -558,7 +559,7 @@ export function TavernHelperWorkbench({
         <header className="helper-workbench__header">
           <div>
             <strong>酒馆助手</strong>
-            <span>旧版直连运行时 · 4.8.19 API</span>
+            <span>原生兼容运行时 · {TAVERN_HELPER_COMPAT_VERSION} API</span>
           </div>
           <button type="button" aria-label="关闭酒馆助手" onClick={onClose}>
             <X size={20} />

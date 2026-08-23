@@ -21,6 +21,7 @@ import {
 import { NotFoundError, StorageError, type Preset } from "@stn/storage";
 
 import { envelope, type ServerContext } from "../context.js";
+import { normalizedPreset } from "../normalized-content.js";
 
 const formatSchema = z.enum([
   "sillytavern-n",
@@ -122,16 +123,14 @@ function sourceValue(value: unknown): string | JsonObject {
 }
 
 function persistedPreset(value: Preset): PromptPreset {
-  for (const candidate of [value.payload, value.legacyPayload.normalized]) {
-    const parsed = PromptPresetSchema.safeParse(candidate);
-    if (parsed.success) {
-      return {
-        ...parsed.data,
-        id: value.id,
-        name: value.name,
-        updatedAt: value.updatedAt,
-      };
-    }
+  const normalized = normalizedPreset(value);
+  if (normalized) {
+    return {
+      ...normalized,
+      id: value.id,
+      name: value.name,
+      updatedAt: value.updatedAt,
+    };
   }
 
   const generationSource: JsonObject = {};

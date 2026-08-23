@@ -11,6 +11,7 @@ import type { ProviderMessage } from "@stn/providers";
 import { StorageError } from "@stn/storage";
 
 import { envelope, type ServerContext } from "../context.js";
+import { normalizedCardPayload } from "../normalized-content.js";
 import { prepareConversationPrompt } from "../prompt-service.js";
 import { resolveRegexScope, updateRegexScope } from "../regex-service.js";
 
@@ -375,11 +376,7 @@ function tavernHelperContext(
 ) {
   const conversation = context.store.getConversation(input.conversationId);
   const card = context.store.getCard(conversation.cardId);
-  const cardBundle = readTavernHelperBundle(
-    isJsonObject(card.legacyPayload.normalized)
-      ? card.legacyPayload.normalized
-      : {},
-  );
+  const cardBundle = readTavernHelperBundle(normalizedCardPayload(card));
   const preset =
     input.presetId === undefined
       ? undefined
@@ -616,12 +613,19 @@ function promptTemplateDirectives(
           ? entry.metadata.label.trim()
           : "";
       if (
-        !/^(?:\[GENERATE(?::[^\]]+)?\]|\[InitialVariables\]|@INJECT\b)/iu.test(
+        !/^(?:\[GENERATE(?::[^\]]+)?\]|\[InitialVariables\]|\[RENDER:(?:BEFORE|AFTER)\]|@INJECT\b)/iu.test(
           title,
+        ) &&
+        !/^(?:@@[^\r\n]*(?:\r?\n|$))*?@@render_(?:before|after)\b/iu.test(
+          entry.content,
         )
       ) {
         return [];
       }
+      const extensions = isJsonObject(entry.metadata.extensions)
+        ? entry.metadata.extensions
+        : undefined;
+      const probability = extensions?.probability;
       return [
         {
           id: entry.id,
@@ -630,6 +634,9 @@ function promptTemplateDirectives(
           content: entry.content,
           enabled: entry.enabled,
           order: entry.position,
+          ...(typeof probability === "number" && Number.isFinite(probability)
+            ? { probability: Math.max(0, Math.min(100, probability)) }
+            : {}),
         },
       ];
     });

@@ -33,7 +33,7 @@ import type { LegacyHostPluginStatus, PersonaInput } from "../api/workspaceApi";
 import { createConversationTitle } from "../conversationTitle";
 import type {
   AgentProposal,
-  LegacyPlugin,
+  CompatibilityPlugin,
   ModalState,
   PanelId,
   Persona,
@@ -55,6 +55,7 @@ import {
   serializePortableProviderConnection,
 } from "../providerConnectionPortability";
 import { RegexRail, WorldbookRail } from "./ContextRail";
+import { WorkspaceModalFrame } from "./WorkspaceModalFrame";
 import { IconButton, SurfaceStatus } from "./WorkspacePrimitives";
 
 const LazyLegacyManagementModal = lazy(() =>
@@ -62,51 +63,6 @@ const LazyLegacyManagementModal = lazy(() =>
     default: module.LegacyManagementModal,
   })),
 );
-
-function ModalFrame({
-  title,
-  description,
-  icon,
-  onClose,
-  children,
-  size = "medium",
-}: {
-  title: string;
-  description: string;
-  icon: ReactNode;
-  onClose: () => void;
-  children: ReactNode;
-  size?: "medium" | "large" | "wide";
-}) {
-  return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section
-        className={`modal-card modal-card--${size}`}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="modal-title"
-        aria-describedby="modal-description"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <header className="modal-card__header">
-          <span className="modal-card__icon" aria-hidden="true">
-            {icon}
-          </span>
-          <div>
-            <h2 id="modal-title">{title}</h2>
-            <p id="modal-description">{description}</p>
-          </div>
-          <IconButton
-            label="关闭弹窗"
-            icon={<X size={19} />}
-            onClick={onClose}
-          />
-        </header>
-        {children}
-      </section>
-    </div>
-  );
-}
 
 function ImportModal({
   online,
@@ -135,7 +91,7 @@ function ImportModal({
   };
 
   return (
-    <ModalFrame
+    <WorkspaceModalFrame
       title="导入便携内容"
       description="角色卡、独立世界书、提示词预设与聊天记录都会先经过兼容适配器；聊天归档会导入到当前选择的角色卡。"
       icon={<FileArrowUp size={22} />}
@@ -184,7 +140,7 @@ function ImportModal({
           </button>
         </footer>
       </form>
-    </ModalFrame>
+    </WorkspaceModalFrame>
   );
 }
 
@@ -588,7 +544,7 @@ function ProvidersModal({
   };
 
   return (
-    <ModalFrame
+    <WorkspaceModalFrame
       title="Provider 连接"
       description="选择对话生成所用的连接；凭据始终由本地服务保管。"
       icon={<PlugsConnected size={22} />}
@@ -719,7 +675,7 @@ function ProvidersModal({
           当前为离线工作区；连接本地服务后才能保存 Provider。
         </p>
       ) : null}
-    </ModalFrame>
+    </WorkspaceModalFrame>
   );
 }
 
@@ -842,7 +798,7 @@ function PersonasModal({
   const current = personas.find((persona) => persona.id === editingId);
 
   return (
-    <ModalFrame
+    <WorkspaceModalFrame
       title="我的人设"
       description="创建多个用户身份，并在当前对话中随时切换。"
       icon={<UserCircle size={22} />}
@@ -941,7 +897,7 @@ function PersonasModal({
           完成
         </button>
       </footer>
-    </ModalFrame>
+    </WorkspaceModalFrame>
   );
 }
 
@@ -973,7 +929,7 @@ function CreateConversationModal({
   };
 
   return (
-    <ModalFrame
+    <WorkspaceModalFrame
       title="新建对话"
       description={`新对话会归入“${card.name}”，并使用这张角色卡的全部内容。`}
       icon={<Plus size={22} />}
@@ -1021,7 +977,7 @@ function CreateConversationModal({
           </button>
         </footer>
       </form>
-    </ModalFrame>
+    </WorkspaceModalFrame>
   );
 }
 
@@ -1057,7 +1013,7 @@ function PermissionModal({
   };
 
   return (
-    <ModalFrame
+    <WorkspaceModalFrame
       title={nextEditable ? "允许 AI 编辑此条目？" : "禁止 AI 编辑此条目？"}
       description={`${worldbook.name} / ${entry.title} · 世界书修订 ${worldbook.revision}，条目修订 ${entry.revision}。`}
       icon={nextEditable ? <LockOpen size={22} /> : <Lock size={22} />}
@@ -1099,7 +1055,7 @@ function PermissionModal({
           {submitting ? "正在更新" : nextEditable ? "确认允许" : "确认禁止"}
         </button>
       </footer>
-    </ModalFrame>
+    </WorkspaceModalFrame>
   );
 }
 
@@ -1124,7 +1080,7 @@ function RegexModal({
   ) => Promise<void>;
 }) {
   return (
-    <ModalFrame
+    <WorkspaceModalFrame
       title="正则"
       description="管理当前会话使用的全局、角色卡与预设脚本。"
       icon={<BracketsCurly size={22} />}
@@ -1141,7 +1097,7 @@ function RegexModal({
           onSaveRegexScope={onSave}
         />
       </div>
-    </ModalFrame>
+    </WorkspaceModalFrame>
   );
 }
 
@@ -1216,7 +1172,7 @@ function WorldbookModal({
   };
 
   return (
-    <ModalFrame
+    <WorkspaceModalFrame
       title="世界书"
       description={`从全部世界书中组合附加到当前角色卡${card ? `“${card.name}”` : ""}，并管理条目。`}
       icon={<BookOpenText size={22} />}
@@ -1317,7 +1273,7 @@ function WorldbookModal({
           ) : null}
         </main>
       </div>
-    </ModalFrame>
+    </WorkspaceModalFrame>
   );
 }
 
@@ -1354,7 +1310,7 @@ function AgentProposalModal({
       : `${artifactLabel}：${proposal.targetLabel ?? "当前对话"} · ${revisionSummary}`;
 
   return (
-    <ModalFrame
+    <WorkspaceModalFrame
       title="模型工具提案"
       description="模型请求修改世界书、聊天摘要或参与者档案时，需要在此处单独确认。"
       icon={<Wrench size={22} />}
@@ -1437,7 +1393,7 @@ function AgentProposalModal({
           </small>
         </article>
       </div>
-    </ModalFrame>
+    </WorkspaceModalFrame>
   );
 }
 
@@ -1451,7 +1407,7 @@ type WorkspaceModalsProps = {
   expandedPanels?: Record<PanelId, boolean>;
   personas?: Persona[];
   activePersonaId?: string | null;
-  plugins: LegacyPlugin[];
+  plugins: CompatibilityPlugin[];
   pluginRealms?: ReactNode;
   legacyHostPlugins: Record<string, LegacyHostPluginStatus>;
   worldbooks: Worldbook[];
@@ -1468,8 +1424,8 @@ type WorkspaceModalsProps = {
     cardId: string;
   }) => Promise<void>;
   onImport: (file: File) => Promise<void>;
-  onInstallPlugin: (plugin: LegacyPlugin) => Promise<void>;
-  onTogglePlugin: (plugin: LegacyPlugin) => Promise<void>;
+  onInstallPlugin: (plugin: CompatibilityPlugin) => Promise<void>;
+  onTogglePlugin: (plugin: CompatibilityPlugin) => Promise<void>;
   onPermission: (
     worldbook: Worldbook,
     entry: WorldbookEntry,

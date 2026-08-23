@@ -1,4 +1,8 @@
 import type { GenerationSettings } from "@stn/contracts";
+import type {
+  LegacyExecutionOwner,
+  LegacyRealmRole,
+} from "@stn/legacy-compat/profiles";
 
 export type ParticipantKind = "person" | "character" | "narrator" | "system";
 
@@ -284,7 +288,7 @@ export type RegexScope = {
 
 export type PluginStatus = "enabled" | "disabled" | "attention";
 
-export type LegacyPlugin = {
+export type CompatibilityPlugin = {
   id: string;
   name: string;
   version: string;
@@ -292,7 +296,8 @@ export type LegacyPlugin = {
   commit: string;
   status: PluginStatus;
   trust: "trusted" | "untrusted";
-  host: "legacy";
+  executionOwner: LegacyExecutionOwner;
+  legacyRealmRole: LegacyRealmRole;
   description: string;
 };
 
@@ -387,7 +392,7 @@ export type WorkspaceState = {
   regexScopes: RegexScope[];
   providerConnections: ProviderConnection[];
   selectedProviderId: string;
-  plugins: LegacyPlugin[];
+  plugins: CompatibilityPlugin[];
   agentProposal: AgentProposal | null;
   agentRun: AgentRun | null;
   generation: GenerationState;

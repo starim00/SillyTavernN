@@ -4,45 +4,38 @@ import {
   ExtensionDependencyError,
   parseExtensionManifest,
   resolveExtensionLoadOrder,
-} from "./index.js";
+} from "./manifest.js";
 
-describe("extension manifest compatibility", () => {
-  it("normalizes a legacy manifest without treating it as trusted by default", () => {
-    const manifest = parseExtensionManifest(
-      {
-        display_name: "Clean-room fixture",
-        loading_order: 7,
-        requires: ["dependency"],
-        optional: [],
-        js: "dist/index.js",
-        css: "dist/index.css",
-        author: "fixture",
-        version: "1.0.0",
-        i18n: { en: "i18n/en.json" },
-      },
-      { directoryName: "Fixture Extension" },
-    );
+describe("native extension manifests", () => {
+  it("normalizes the native extension manifest shape", () => {
+    const manifest = parseExtensionManifest({
+      id: "native-fixture",
+      name: "Native fixture",
+      version: "1.0.0",
+      apiVersion: "1",
+      entry: "dist/index.js",
+      styles: ["dist/index.css"],
+      requires: ["dependency"],
+      i18n: { en: "i18n/en.json" },
+    });
 
     expect(manifest).toMatchObject({
-      source: "legacy",
-      id: "fixture-extension",
+      id: "native-fixture",
       scripts: ["dist/index.js"],
       styles: ["dist/index.css"],
       requires: ["dependency"],
-      trustedLegacy: false,
     });
   });
 
   it("rejects traversal in executable and localization paths", () => {
     expect(() =>
-      parseExtensionManifest(
-        {
-          display_name: "Unsafe",
-          js: "../outside.js",
-          version: "1",
-        },
-        { directoryName: "unsafe" },
-      ),
+      parseExtensionManifest({
+        id: "unsafe",
+        name: "Unsafe",
+        version: "1",
+        apiVersion: "1",
+        entry: "../outside.js",
+      }),
     ).toThrow();
   });
 

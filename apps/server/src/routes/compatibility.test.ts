@@ -454,7 +454,16 @@ describe("native Tavern Helper compatibility routes", () => {
           id: "entry-prompt-template",
           content: "Injected <%= variables.value %>",
           enabled: false,
-          metadata: { label: "[GENERATE:BEFORE]" },
+          metadata: {
+            label: "[GENERATE:BEFORE]",
+            extensions: { probability: 35 },
+          },
+        },
+        {
+          id: "entry-prompt-template-render",
+          content: "@@if !is_user\n@@render_after\nRendered status",
+          enabled: false,
+          metadata: { label: "Status" },
         },
       ],
     });
@@ -484,6 +493,12 @@ describe("native Tavern Helper compatibility routes", () => {
         {
           id: "entry-prompt-template",
           title: "[GENERATE:BEFORE]",
+          enabled: false,
+          probability: 35,
+        },
+        {
+          id: "entry-prompt-template-render",
+          title: "Status",
           enabled: false,
         },
       ],

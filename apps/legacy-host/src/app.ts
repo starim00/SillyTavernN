@@ -115,6 +115,26 @@ export async function createLegacyHost(
     const status = catalog.getStatus(pluginId);
     return status === undefined ? undefined : statusWithEnablement(status);
   };
+  const publicPluginStatus = (status: InstalledPluginStatus) => ({
+    id: status.lock.id,
+    uiId: status.lock.uiId,
+    name: status.lock.displayName,
+    version: status.lock.manifestVersion,
+    repository: status.lock.repository,
+    commit: status.lock.commit,
+    executionOwner: status.lock.executionOwner,
+    legacyRealmRole: status.lock.legacyRealmRole,
+    capabilities: status.lock.capabilities,
+    description: status.lock.nativeDescription,
+    installed: status.installed,
+    verified: status.verified,
+    enabled: status.enabled,
+    ...(status.reason === undefined ? {} : { reason: status.reason }),
+  });
+  const publicExposedStatus = (pluginId: string) => {
+    const status = exposedStatus(pluginId);
+    return status === undefined ? undefined : publicPluginStatus(status);
+  };
 
   app.addHook("onSend", async (request, reply, payload) => {
     const responseOrigin = isAllowedMainOrigin(request.headers.origin)
@@ -157,7 +177,9 @@ export async function createLegacyHost(
     ok: true,
     service: "legacy-host",
     safeMode: catalog.safeMode,
-    plugins: catalog.statuses().map((status) => statusWithEnablement(status)),
+    plugins: catalog
+      .statuses()
+      .map((status) => publicPluginStatus(statusWithEnablement(status))),
   }));
 
   app.post<{ Params: { pluginId: string } }>(
@@ -229,7 +251,7 @@ export async function createLegacyHost(
         await pluginState.setEnabled(lock.id, false);
         return reply.code(result.outcome === "installed" ? 201 : 200).send({
           outcome: result.outcome,
-          plugin: exposedStatus(lock.id),
+          plugin: publicExposedStatus(lock.id),
           ...(result.receipt === undefined ? {} : { receipt: result.receipt }),
         });
       } catch (error) {
@@ -286,6 +308,15 @@ export async function createLegacyHost(
           },
         });
       }
+      if (body.enabled && lock.legacyRealmRole === "none") {
+        return reply.code(409).send({
+          error: {
+            code: "ENABLE_NATIVE_REPLACEMENT",
+            message:
+              "Native compatibility replacements do not execute the pinned legacy bundle.",
+          },
+        });
+      }
       if (body.enabled && installsInProgress.has(lock.id)) {
         return reply.code(409).send({
           error: {
@@ -315,12 +346,14 @@ export async function createLegacyHost(
               "The plugin must match its fixed revision and hashes before it can be enabled.",
           },
           plugin:
-            status === undefined ? undefined : statusWithEnablement(status),
+            status === undefined
+              ? undefined
+              : publicPluginStatus(statusWithEnablement(status)),
         });
       }
       await pluginState.setEnabled(lock.id, body.enabled);
       return reply.send({
-        plugin: exposedStatus(lock.id),
+        plugin: publicExposedStatus(lock.id),
       });
     },
   );
@@ -342,6 +375,12 @@ export async function createLegacyHost(
     const lock = catalog.getLock(request.params.pluginId);
     if (!lock) {
       return reply.code(404).send({ error: "Unknown legacy plugin." });
+    }
+    if (lock.legacyRealmRole === "none") {
+      return reply.code(409).send({
+        error:
+          "This plugin is provided by native compatibility and has no legacy realm.",
+      });
     }
     const status = exposedStatus(lock.id);
     if (!status?.verified) {
@@ -432,6 +471,12 @@ export async function createLegacyHost(
     const requestedAsset = catalog.resolveAssetRequest(url.pathname);
     if (!requestedAsset) {
       return reply.code(404).send({ error: "Legacy resource not found." });
+    }
+    if (requestedAsset.lock.legacyRealmRole === "none") {
+      return reply.code(409).send({
+        error:
+          "This plugin is provided by native compatibility and exposes no legacy assets.",
+      });
     }
     if (!exposedStatus(requestedAsset.lock.id)?.enabled) {
       return reply.code(423).send({

@@ -190,27 +190,6 @@ select:focus-visible {
   color: #b24f42;
 }
 
-.auth-control {
-  position: fixed;
-  z-index: 90;
-  top: 15px;
-  right: 16px;
-  display: grid;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  color: var(--text-soft);
-  background: rgba(255, 254, 250, 0.94);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: 0 6px 18px rgba(50, 70, 84, 0.08);
-}
-
-.auth-control:hover {
-  color: var(--coral);
-  border-color: #e3b2a9;
-}
-
 .auth-settings__actions {
   justify-content: space-between;
 }

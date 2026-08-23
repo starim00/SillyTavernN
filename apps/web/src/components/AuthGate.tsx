@@ -5,7 +5,16 @@ import {
   SignOut,
   X,
 } from "@phosphor-icons/react";
-import { type FormEvent, type ReactNode, useEffect, useState } from "react";
+import {
+  createContext,
+  type FormEvent,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 import {
   AUTH_REQUIRED_EVENT,
@@ -16,6 +25,18 @@ import {
 } from "../api/authApi";
 
 type AuthState = "checking" | "authenticated" | "required" | "unavailable";
+
+interface AuthControls {
+  readonly openSecurity: () => void;
+}
+
+const AuthControlsContext = createContext<AuthControls | null>(null);
+
+export function useAuthControls(): AuthControls {
+  const controls = useContext(AuthControlsContext);
+  if (!controls) throw new Error("Auth controls must be used inside AuthGate.");
+  return controls;
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "请求失败。";
@@ -31,6 +52,11 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [securityMessage, setSecurityMessage] = useState("");
+  const openSecurity = useCallback(() => {
+    setSecurityMessage("");
+    setSecurityOpen(true);
+  }, []);
+  const authControls = useMemo(() => ({ openSecurity }), [openSecurity]);
 
   const check = () => {
     setState("checking");
@@ -163,20 +189,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }
 
   return (
-    <>
+    <AuthControlsContext.Provider value={authControls}>
       {children}
-      <button
-        className="auth-control"
-        type="button"
-        aria-label="账户与密码"
-        title="账户与密码"
-        onClick={() => {
-          setSecurityMessage("");
-          setSecurityOpen(true);
-        }}
-      >
-        <LockKey size={17} />
-      </button>
       {securityOpen ? (
         <div className="modal-backdrop" role="presentation">
           <section
@@ -268,6 +282,6 @@ export function AuthGate({ children }: { children: ReactNode }) {
           </section>
         </div>
       ) : null}
-    </>
+    </AuthControlsContext.Provider>
   );
 }

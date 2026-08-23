@@ -5,6 +5,7 @@ import {
   ChatCircleDots,
   CloudCheck,
   CloudSlash,
+  LockKey,
   PlugsConnected,
   PuzzlePiece,
   SlidersHorizontal,
@@ -110,6 +111,7 @@ import { PresetSettingsRail } from "./components/PresetSettingsRail";
 import type { PresetGenerationPatch } from "./components/PresetGenerationControls";
 import type { TavernHelperTool } from "./components/TavernHelperWorkbench";
 import { WorkspaceConnectionBanner } from "./components/WorkspaceConnectionBanner";
+import { useAuthControls } from "./components/AuthGate";
 import { SurfaceStatus } from "./components/WorkspacePrimitives";
 import { WorkspaceModals } from "./components/WorkspaceModals";
 import { createConversationTitle } from "./conversationTitle";
@@ -204,6 +206,7 @@ async function updateLegacyPluginGrants(
 }
 
 export default function App() {
+  const { openSecurity } = useAuthControls();
   const [state, dispatch] = useReducer(
     workspaceReducer,
     undefined,
@@ -2837,6 +2840,15 @@ export default function App() {
             >
               <UploadSimple size={18} />
               <span>导入</span>
+            </button>
+            <button
+              className="topbar-button"
+              type="button"
+              aria-label="账户与密码"
+              onClick={openSecurity}
+            >
+              <LockKey size={18} />
+              <span>安全</span>
             </button>
           </div>
 

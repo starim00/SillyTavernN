@@ -5595,6 +5595,7 @@ select:focus-visible {
 .helper-variable-tree__children > .helper-variable-tree__branch,
 .helper-variable-tree__children > .helper-variable-tree__node {
   position: relative;
+  container-type: inline-size;
 }
 
 .helper-variable-tree__children > .helper-variable-tree__branch::before,
@@ -5721,6 +5722,7 @@ select:focus-visible {
   border: 0;
   border-radius: 7px;
   font: inherit;
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -5763,6 +5765,24 @@ select:focus-visible {
   background: var(--surface-blue);
   color: var(--danger);
   font-size: 12px;
+}
+
+@container (max-width: 520px) {
+  .helper-variable-tree__row.is-editing {
+    grid-template-columns: 18px 18px minmax(0, 1fr);
+    padding-block: 7px;
+  }
+
+  .helper-variable-tree__row.is-editing .helper-variable-tree__inline-editor {
+    grid-row: 2;
+    grid-column: 2 / -1;
+    grid-template-columns: minmax(100px, 1fr) 116px max-content max-content;
+  }
+
+  .helper-variable-tree__row.is-editing
+    .helper-variable-tree__inline-editor:has(> select:first-child) {
+    grid-template-columns: 116px max-content max-content;
+  }
 }
 
 .helper-variable-editor {

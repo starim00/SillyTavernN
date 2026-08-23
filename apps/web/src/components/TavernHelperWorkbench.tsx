@@ -296,7 +296,12 @@ function parseVariableText(text: string): VariableParseResult {
 function variableValueLabel(value: unknown): string {
   if (value === null) return "null";
   if (typeof value === "string") return JSON.stringify(value);
-  return String(value);
+  if (typeof value === "number" || typeof value === "boolean") {
+    return value.toString();
+  }
+  if (typeof value === "bigint") return value.toString();
+  if (typeof value === "undefined") return "undefined";
+  return JSON.stringify(value) ?? "";
 }
 
 type VariableValueType =
@@ -377,7 +382,7 @@ function updateVariableAtPath(
     const key = path[offset];
     if (key === undefined) return value;
     if (Array.isArray(container)) {
-      const nextContainer = [...container];
+      const nextContainer = [...(container as unknown[])];
       const index = Number(key);
       nextContainer[index] = update(nextContainer[index], offset + 1);
       return nextContainer;
@@ -427,9 +432,11 @@ function VariableTreeNode({
   const isStructuredEditing =
     isEditing && (editingType === "object" || editingType === "array");
   const isStructuredValue = value !== null && typeof value === "object";
-  const entries = isStructuredValue
+  const entries: Array<readonly [string, unknown]> = isStructuredValue
     ? Array.isArray(value)
-      ? value.map((item, index) => [String(index), item] as const)
+      ? (value as unknown[]).map(
+          (item, index) => [String(index), item] as const,
+        )
       : Object.entries(value as Record<string, unknown>)
     : [];
   const kind = Array.isArray(value) ? "数组" : "对象";

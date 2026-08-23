@@ -7,6 +7,7 @@ import {
   FolderOpen,
   Info,
   MusicNotes,
+  PencilSimple,
   Plus,
   SlidersHorizontal,
   TerminalWindow,
@@ -14,7 +15,7 @@ import {
   Trash,
   X,
 } from "@phosphor-icons/react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   PreparedPromptMessage,
@@ -47,13 +48,17 @@ type PreparedPrompt = {
   }>;
 };
 
-type VariableTarget = {
+export type VariableTarget = {
   key: string;
   label: string;
   namespace: TavernHelperStateNamespace;
   messageId?: string;
   variables: Record<string, unknown>;
 };
+
+type VariableParseResult =
+  | { valid: true; value: Record<string, unknown> }
+  | { valid: false; message: string };
 
 type Props = {
   open: boolean;
@@ -207,6 +212,315 @@ function createScript(): TavernHelperScript {
     data: {},
     sourcePath: "native:editor",
   };
+}
+
+function hasVariables(variables: Record<string, unknown>): boolean {
+  return Object.keys(variables).length > 0;
+}
+
+export function createVariableTargets(
+  context: TavernHelperContext,
+): VariableTarget[] {
+  const messageEntries = Object.entries(context.variables.messages).reverse();
+  const messageTargets = messageEntries.map(
+    ([messageId, variables], index) => ({
+      key: `message:${messageId}`,
+      label:
+        index === 0
+          ? `最新消息 · ${messageId.slice(-8)}`
+          : `消息 ${String(messageEntries.length - index)} · ${messageId.slice(-8)}`,
+      namespace: "message" as const,
+      messageId,
+      variables,
+    }),
+  );
+
+  return [
+    ...messageTargets,
+    {
+      key: "chat",
+      label: "当前对话变量",
+      namespace: "chat",
+      variables: context.variables.chat,
+    },
+    {
+      key: "character",
+      label: "角色卡变量",
+      namespace: "character",
+      variables: context.variables.character,
+    },
+    {
+      key: "preset",
+      label: "预设变量",
+      namespace: "preset",
+      variables: context.variables.preset,
+    },
+    {
+      key: "global",
+      label: "全局变量",
+      namespace: "global",
+      variables: context.variables.global,
+    },
+  ];
+}
+
+function preferredVariableKey(targets: VariableTarget[]): string {
+  return (
+    targets.find(
+      (target) =>
+        target.namespace === "message" && hasVariables(target.variables),
+    )?.key ??
+    targets.find((target) => target.namespace === "message")?.key ??
+    "chat"
+  );
+}
+
+function parseVariableText(text: string): VariableParseResult {
+  try {
+    const value = JSON.parse(text) as unknown;
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return { valid: false, message: "变量根节点必须是 JSON 对象。" };
+    }
+    return { valid: true, value: value as Record<string, unknown> };
+  } catch (error) {
+    return {
+      valid: false,
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function variableValueLabel(value: unknown): string {
+  if (value === null) return "null";
+  if (typeof value === "string") return JSON.stringify(value);
+  return String(value);
+}
+
+type VariablePath = Array<string | number>;
+
+function variablePathLabel(path: VariablePath): string {
+  return path
+    .map((part, index) =>
+      typeof part === "number"
+        ? `[${String(part)}]`
+        : `${index === 0 ? "" : "."}${part}`,
+    )
+    .join("");
+}
+
+function updateVariableAtPath(
+  current: Record<string, unknown>,
+  path: VariablePath,
+  value: unknown,
+): Record<string, unknown> {
+  const update = (container: unknown, offset: number): unknown => {
+    const key = path[offset];
+    if (key === undefined) return value;
+    if (Array.isArray(container)) {
+      const nextContainer = [...container];
+      const index = Number(key);
+      nextContainer[index] = update(nextContainer[index], offset + 1);
+      return nextContainer;
+    }
+    const nextContainer = { ...(container as Record<string, unknown>) };
+    const property = String(key);
+    nextContainer[property] = update(nextContainer[property], offset + 1);
+    return nextContainer;
+  };
+
+  return update(current, 0) as Record<string, unknown>;
+}
+
+function VariableTreeNode({
+  name,
+  value,
+  depth,
+  path,
+  editingPath,
+  onEdit,
+}: {
+  name: string;
+  value: unknown;
+  depth: number;
+  path: VariablePath;
+  editingPath: string | null;
+  onEdit: ((path: VariablePath, value: unknown) => void) | undefined;
+}) {
+  const pathLabel = variablePathLabel(path);
+  const isEditing = editingPath === JSON.stringify(path);
+  const editButton = onEdit ? (
+    <button
+      className="helper-variable-tree__edit"
+      type="button"
+      aria-label={`编辑变量 ${pathLabel}`}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onEdit(path, value);
+      }}
+    >
+      <PencilSimple size={13} />
+      编辑
+    </button>
+  ) : null;
+
+  if (value !== null && typeof value === "object") {
+    const entries = Array.isArray(value)
+      ? value.map((item, index) => [String(index), item] as const)
+      : Object.entries(value as Record<string, unknown>);
+    const kind = Array.isArray(value) ? "数组" : "对象";
+    return (
+      <details
+        className="helper-variable-tree__branch"
+        open={depth === 0 || isEditing}
+      >
+        <summary>
+          <span className="helper-variable-tree__key">{name}</span>
+          <span className="helper-variable-tree__meta">
+            {kind} · {entries.length} 项
+          </span>
+          {editButton}
+        </summary>
+        <div className="helper-variable-tree__children">
+          {entries.length ? (
+            entries.map(([key, child]) => (
+              <VariableTreeNode
+                key={key}
+                name={Array.isArray(value) ? `[${key}]` : key}
+                value={child}
+                depth={depth + 1}
+                path={[...path, Array.isArray(value) ? Number(key) : key]}
+                editingPath={editingPath}
+                onEdit={onEdit}
+              />
+            ))
+          ) : (
+            <span className="helper-variable-tree__empty">空{kind}</span>
+          )}
+        </div>
+      </details>
+    );
+  }
+
+  const valueType = value === null ? "null" : typeof value;
+  return (
+    <div className="helper-variable-tree__leaf">
+      <span className="helper-variable-tree__key">{name}</span>
+      <span aria-hidden="true">:</span>
+      <span
+        className={`helper-variable-tree__value helper-variable-tree__value--${valueType}`}
+      >
+        {variableValueLabel(value)}
+      </span>
+      {editButton}
+    </div>
+  );
+}
+
+export function VariableTree({
+  value,
+  onSave,
+}: {
+  value: Record<string, unknown>;
+  onSave?: (value: Record<string, unknown>) => Promise<void>;
+}) {
+  const entries = Object.entries(value);
+  const [editingPath, setEditingPath] = useState<string | null>(null);
+  const [editingLabel, setEditingLabel] = useState("");
+  const [editingText, setEditingText] = useState("");
+  const [editingError, setEditingError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const startEditing = (path: VariablePath, current: unknown) => {
+    setEditingPath(JSON.stringify(path));
+    setEditingLabel(variablePathLabel(path));
+    setEditingText(JSON.stringify(current, null, 2));
+    setEditingError("");
+  };
+
+  const saveNode = async () => {
+    if (!onSave || !editingPath || saving) return;
+    try {
+      const nextValue = JSON.parse(editingText) as unknown;
+      const next = updateVariableAtPath(
+        value,
+        JSON.parse(editingPath) as VariablePath,
+        nextValue,
+      );
+      setSaving(true);
+      await onSave(next);
+      setEditingPath(null);
+      setEditingError("");
+    } catch (error) {
+      setEditingError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="helper-variable-tree" aria-label="变量树">
+        {entries.length ? (
+          entries.map(([key, child]) => (
+            <VariableTreeNode
+              key={key}
+              name={key}
+              value={child}
+              depth={0}
+              path={[key]}
+              editingPath={editingPath}
+              onEdit={onSave ? startEditing : undefined}
+            />
+          ))
+        ) : (
+          <p className="helper-empty">此范围暂无变量。</p>
+        )}
+      </div>
+      {editingPath ? (
+        <div className="helper-variable-node-editor">
+          <label>
+            编辑节点 · {editingLabel}
+            <textarea
+              className="helper-code-editor"
+              rows={Math.min(10, Math.max(2, editingText.split("\n").length))}
+              value={editingText}
+              spellCheck={false}
+              onChange={(event) => {
+                setEditingText(event.target.value);
+                setEditingError("");
+              }}
+            />
+          </label>
+          <small>使用 JSON 值格式；文本需要保留双引号。</small>
+          {editingError ? (
+            <p className="helper-error" role="alert">
+              {editingError}
+            </p>
+          ) : null}
+          <div className="helper-variable-node-editor__actions">
+            <button
+              className="button button--quiet"
+              type="button"
+              disabled={saving}
+              onClick={() => setEditingPath(null)}
+            >
+              取消
+            </button>
+            <button
+              className="button button--primary"
+              type="button"
+              disabled={saving}
+              onClick={() => void saveNode()}
+            >
+              <FloppyDisk size={15} />
+              {saving ? "正在保存" : "保存此节点"}
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
 }
 
 function importedScripts(value: unknown): TavernHelperScript[] {
@@ -377,9 +691,10 @@ export function TavernHelperWorkbench({
   const [scriptSearch, setScriptSearch] = useState("");
   const [prompt, setPrompt] = useState<PreparedPrompt | null>(null);
   const [promptLoading, setPromptLoading] = useState(false);
-  const [variableKey, setVariableKey] = useState("global");
+  const [variableKey, setVariableKey] = useState("chat");
   const [variableText, setVariableText] = useState("{}");
   const [variableError, setVariableError] = useState("");
+  const variableSelectionConversation = useRef<string | null>(null);
   const [audioUrl, setAudioUrl] = useState("");
   const [listenerResult, setListenerResult] = useState("");
 
@@ -411,42 +726,13 @@ export function TavernHelperWorkbench({
 
   const variableTargets = useMemo<VariableTarget[]>(() => {
     if (!context) return [];
-    return [
-      {
-        key: "global",
-        label: "全局变量",
-        namespace: "global",
-        variables: context.variables.global,
-      },
-      {
-        key: "character",
-        label: "角色卡变量",
-        namespace: "character",
-        variables: context.variables.character,
-      },
-      {
-        key: "preset",
-        label: "预设变量",
-        namespace: "preset",
-        variables: context.variables.preset,
-      },
-      {
-        key: "chat",
-        label: "当前对话变量",
-        namespace: "chat",
-        variables: context.variables.chat,
-      },
-      ...Object.entries(context.variables.messages).map(
-        ([messageId, variables]) => ({
-          key: `message:${messageId}`,
-          label: `消息 · ${messageId.slice(0, 8)}`,
-          namespace: "message" as const,
-          messageId,
-          variables,
-        }),
-      ),
-    ];
+    return createVariableTargets(context);
   }, [context]);
+
+  const parsedVariables = useMemo(
+    () => parseVariableText(variableText),
+    [variableText],
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -468,6 +754,20 @@ export function TavernHelperWorkbench({
       ),
     );
   }, [context]);
+
+  useEffect(() => {
+    if (!open) {
+      variableSelectionConversation.current = null;
+      return;
+    }
+    if (
+      !context ||
+      variableSelectionConversation.current === context.conversation.id
+    )
+      return;
+    variableSelectionConversation.current = context.conversation.id;
+    setVariableKey(preferredVariableKey(variableTargets));
+  }, [context?.conversation.id, open, variableTargets]);
 
   useEffect(() => {
     const selected = variableTargets.find(
@@ -531,11 +831,8 @@ export function TavernHelperWorkbench({
     );
     if (!selected) return;
     try {
-      const parsed = JSON.parse(variableText) as unknown;
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        throw new Error("变量根节点必须是 JSON 对象。");
-      }
-      await onSaveVariables(selected, parsed as Record<string, unknown>);
+      if (!parsedVariables.valid) throw new Error(parsedVariables.message);
+      await onSaveVariables(selected, parsedVariables.value);
       setVariableError("");
     } catch (error) {
       setVariableError(error instanceof Error ? error.message : String(error));
@@ -942,6 +1239,12 @@ export function TavernHelperWorkbench({
               </nav>
               {tool === "variables" ? (
                 <div className="helper-tool-panel">
+                  <div className="helper-tool-panel__heading">
+                    <div>
+                      <strong>变量树</strong>
+                      <span>消息变量按对话时间倒序排列，最新记录优先。</span>
+                    </div>
+                  </div>
                   <label>
                     变量范围
                     <select
@@ -955,13 +1258,34 @@ export function TavernHelperWorkbench({
                       ))}
                     </select>
                   </label>
-                  <textarea
-                    className="helper-code-editor"
-                    rows={18}
-                    value={variableText}
-                    spellCheck={false}
-                    onChange={(event) => setVariableText(event.target.value)}
-                  />
+                  {parsedVariables.valid ? (
+                    <VariableTree
+                      value={parsedVariables.value}
+                      onSave={async (value) => {
+                        const selected = variableTargets.find(
+                          (target) => target.key === variableKey,
+                        );
+                        if (!selected) return;
+                        await onSaveVariables(selected, value);
+                        setVariableText(JSON.stringify(value, null, 2));
+                        setVariableError("");
+                      }}
+                    />
+                  ) : (
+                    <p className="helper-error" role="alert">
+                      JSON 解析失败：{parsedVariables.message}
+                    </p>
+                  )}
+                  <details className="helper-variable-editor">
+                    <summary>编辑原始 JSON</summary>
+                    <textarea
+                      className="helper-code-editor"
+                      rows={14}
+                      value={variableText}
+                      spellCheck={false}
+                      onChange={(event) => setVariableText(event.target.value)}
+                    />
+                  </details>
                   {variableError ? (
                     <p className="helper-error">{variableError}</p>
                   ) : null}

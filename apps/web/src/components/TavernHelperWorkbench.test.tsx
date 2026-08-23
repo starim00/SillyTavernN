@@ -60,9 +60,9 @@ describe("TavernHelperWorkbench variables", () => {
 
     expect(html).toContain('aria-label="变量树"');
     expect(html).toContain("player");
-    expect(html).toContain("对象 · 2 项");
+    expect(html).toContain("对象 · 2");
     expect(html).toContain("inventory");
-    expect(html).toContain("数组 · 2 项");
+    expect(html).toContain("数组 · 2");
     expect(html).toContain("[1]");
     expect(html).toContain("&quot;Mira&quot;");
     expect(html).toContain("null");

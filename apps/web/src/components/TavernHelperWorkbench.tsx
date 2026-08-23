@@ -2,7 +2,9 @@ import {
   ArrowsDownUp,
   BookOpenText,
   Bug,
+  CaretRight,
   Code,
+  Cube,
   FloppyDisk,
   FolderOpen,
   Info,
@@ -11,6 +13,7 @@ import {
   Plus,
   SlidersHorizontal,
   TerminalWindow,
+  TextT,
   Toolbox,
   Trash,
   X,
@@ -296,6 +299,63 @@ function variableValueLabel(value: unknown): string {
   return String(value);
 }
 
+type VariableValueType =
+  "string" | "number" | "boolean" | "null" | "object" | "array";
+
+const variableValueTypes: Array<{
+  value: VariableValueType;
+  label: string;
+}> = [
+  { value: "string", label: "string" },
+  { value: "number", label: "number" },
+  { value: "boolean", label: "boolean" },
+  { value: "null", label: "null" },
+  { value: "object", label: "object" },
+  { value: "array", label: "array" },
+];
+
+function variableValueType(value: unknown): VariableValueType {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  if (typeof value === "object") return "object";
+  if (typeof value === "number") return "number";
+  if (typeof value === "boolean") return "boolean";
+  return "string";
+}
+
+function variableEditingText(value: unknown): string {
+  return typeof value === "string" ? value : JSON.stringify(value, null, 2);
+}
+
+function parseVariableNodeValue(
+  text: string,
+  type: VariableValueType,
+): unknown {
+  if (type === "string") return text;
+  if (type === "null") return null;
+  if (type === "number") {
+    const value = Number(text);
+    if (!Number.isFinite(value)) throw new Error("请输入有效数字。");
+    return value;
+  }
+  if (type === "boolean") {
+    if (text === "true") return true;
+    if (text === "false") return false;
+    throw new Error("布尔值只能是 true 或 false。");
+  }
+  const value = JSON.parse(text) as unknown;
+  if (type === "array" && !Array.isArray(value)) {
+    throw new Error("当前类型需要 JSON 数组。");
+  }
+  if (
+    type === "object" &&
+    (!value || typeof value !== "object" || Array.isArray(value))
+  ) {
+    throw new Error("当前类型需要 JSON 对象。");
+  }
+  return value;
+}
+
 type VariablePath = Array<string | number>;
 
 function variablePathLabel(path: VariablePath): string {
@@ -337,17 +397,42 @@ function VariableTreeNode({
   depth,
   path,
   editingPath,
+  editingText,
+  editingType,
+  editingError,
+  saving,
   onEdit,
+  onEditingTextChange,
+  onEditingTypeChange,
+  onSave,
+  onCancel,
 }: {
   name: string;
   value: unknown;
   depth: number;
   path: VariablePath;
   editingPath: string | null;
+  editingText: string;
+  editingType: VariableValueType;
+  editingError: string;
+  saving: boolean;
   onEdit: ((path: VariablePath, value: unknown) => void) | undefined;
+  onEditingTextChange: (value: string) => void;
+  onEditingTypeChange: (value: VariableValueType) => void;
+  onSave: () => void;
+  onCancel: () => void;
 }) {
   const pathLabel = variablePathLabel(path);
   const isEditing = editingPath === JSON.stringify(path);
+  const isStructuredEditing =
+    isEditing && (editingType === "object" || editingType === "array");
+  const isStructuredValue = value !== null && typeof value === "object";
+  const entries = isStructuredValue
+    ? Array.isArray(value)
+      ? value.map((item, index) => [String(index), item] as const)
+      : Object.entries(value as Record<string, unknown>)
+    : [];
+  const kind = Array.isArray(value) ? "数组" : "对象";
   const editButton = onEdit ? (
     <button
       className="helper-variable-tree__edit"
@@ -356,31 +441,144 @@ function VariableTreeNode({
       onClick={(event) => {
         event.preventDefault();
         event.stopPropagation();
+        event.currentTarget.closest("details")?.setAttribute("open", "");
         onEdit(path, value);
       }}
+      title={`编辑 ${pathLabel}`}
     >
-      <PencilSimple size={13} />
-      编辑
+      <PencilSimple size={15} />
     </button>
   ) : null;
 
-  if (value !== null && typeof value === "object") {
-    const entries = Array.isArray(value)
-      ? value.map((item, index) => [String(index), item] as const)
-      : Object.entries(value as Record<string, unknown>);
-    const kind = Array.isArray(value) ? "数组" : "对象";
+  const rowContent = (
+    <>
+      <span className="helper-variable-tree__caret" aria-hidden="true">
+        {isStructuredValue ? <CaretRight size={16} weight="bold" /> : null}
+      </span>
+      <span
+        className={`helper-variable-tree__kind-icon ${
+          isStructuredValue ? "is-structured" : "is-primitive"
+        }`}
+        aria-hidden="true"
+      >
+        {isStructuredValue ? <Cube size={17} /> : <TextT size={16} />}
+      </span>
+      <span className="helper-variable-tree__key" title={name}>
+        {name}
+      </span>
+      {isEditing ? (
+        <div
+          className="helper-variable-tree__inline-editor"
+          onClick={(event) => event.stopPropagation()}
+        >
+          {!isStructuredEditing ? (
+            <input
+              aria-label={`变量 ${pathLabel} 的值`}
+              value={editingText}
+              disabled={saving}
+              onChange={(event) => onEditingTextChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") onSave();
+                if (event.key === "Escape") onCancel();
+              }}
+            />
+          ) : null}
+          <select
+            aria-label={`变量 ${pathLabel} 的类型`}
+            value={editingType}
+            disabled={saving}
+            onChange={(event) =>
+              onEditingTypeChange(event.target.value as VariableValueType)
+            }
+          >
+            {variableValueTypes.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <button
+            className="helper-variable-tree__save-node"
+            type="button"
+            disabled={saving}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onSave();
+            }}
+          >
+            {saving ? "保存中" : "保存"}
+          </button>
+          <button
+            className="helper-variable-tree__cancel-node"
+            type="button"
+            disabled={saving}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onCancel();
+            }}
+          >
+            取消
+          </button>
+        </div>
+      ) : (
+        <>
+          {isStructuredValue ? (
+            <span className="helper-variable-tree__meta">
+              {kind} · {entries.length}
+            </span>
+          ) : (
+            <span
+              className={`helper-variable-tree__value helper-variable-tree__value--${variableValueType(value)}`}
+            >
+              {variableValueLabel(value)}
+            </span>
+          )}
+          {editButton}
+        </>
+      )}
+    </>
+  );
+
+  const structuredEditor = isStructuredEditing ? (
+    <div
+      className="helper-variable-tree__structured-editor"
+      onClick={(event) => event.stopPropagation()}
+    >
+      <textarea
+        className="helper-code-editor"
+        aria-label={`变量 ${pathLabel} 的 JSON 值`}
+        rows={Math.min(10, Math.max(4, editingText.split("\n").length))}
+        value={editingText}
+        disabled={saving}
+        spellCheck={false}
+        onChange={(event) => onEditingTextChange(event.target.value)}
+      />
+    </div>
+  ) : null;
+
+  const error =
+    isEditing && editingError ? (
+      <p className="helper-variable-tree__error" role="alert">
+        {editingError}
+      </p>
+    ) : null;
+
+  if (isStructuredValue) {
     return (
       <details
         className="helper-variable-tree__branch"
-        open={depth === 0 || isEditing}
+        data-depth={depth}
+        {...(depth === 0 && !Array.isArray(value) ? { open: true } : {})}
       >
-        <summary>
-          <span className="helper-variable-tree__key">{name}</span>
-          <span className="helper-variable-tree__meta">
-            {kind} · {entries.length} 项
-          </span>
-          {editButton}
+        <summary
+          className={`helper-variable-tree__row ${isEditing ? "is-editing" : ""}`}
+        >
+          {rowContent}
         </summary>
+        {structuredEditor}
+        {error}
         <div className="helper-variable-tree__children">
           {entries.length ? (
             entries.map(([key, child]) => (
@@ -391,7 +589,15 @@ function VariableTreeNode({
                 depth={depth + 1}
                 path={[...path, Array.isArray(value) ? Number(key) : key]}
                 editingPath={editingPath}
+                editingText={editingText}
+                editingType={editingType}
+                editingError={editingError}
+                saving={saving}
                 onEdit={onEdit}
+                onEditingTextChange={onEditingTextChange}
+                onEditingTypeChange={onEditingTypeChange}
+                onSave={onSave}
+                onCancel={onCancel}
               />
             ))
           ) : (
@@ -402,17 +608,15 @@ function VariableTreeNode({
     );
   }
 
-  const valueType = value === null ? "null" : typeof value;
   return (
-    <div className="helper-variable-tree__leaf">
-      <span className="helper-variable-tree__key">{name}</span>
-      <span aria-hidden="true">:</span>
-      <span
-        className={`helper-variable-tree__value helper-variable-tree__value--${valueType}`}
+    <div className="helper-variable-tree__node" data-depth={depth}>
+      <div
+        className={`helper-variable-tree__row ${isEditing ? "is-editing" : ""}`}
       >
-        {variableValueLabel(value)}
-      </span>
-      {editButton}
+        {rowContent}
+      </div>
+      {structuredEditor}
+      {error}
     </div>
   );
 }
@@ -428,20 +632,22 @@ export function VariableTree({
   const [editingPath, setEditingPath] = useState<string | null>(null);
   const [editingLabel, setEditingLabel] = useState("");
   const [editingText, setEditingText] = useState("");
+  const [editingType, setEditingType] = useState<VariableValueType>("string");
   const [editingError, setEditingError] = useState("");
   const [saving, setSaving] = useState(false);
 
   const startEditing = (path: VariablePath, current: unknown) => {
     setEditingPath(JSON.stringify(path));
     setEditingLabel(variablePathLabel(path));
-    setEditingText(JSON.stringify(current, null, 2));
+    setEditingText(variableEditingText(current));
+    setEditingType(variableValueType(current));
     setEditingError("");
   };
 
   const saveNode = async () => {
     if (!onSave || !editingPath || saving) return;
     try {
-      const nextValue = JSON.parse(editingText) as unknown;
+      const nextValue = parseVariableNodeValue(editingText, editingType);
       const next = updateVariableAtPath(
         value,
         JSON.parse(editingPath) as VariablePath,
@@ -470,7 +676,29 @@ export function VariableTree({
               depth={0}
               path={[key]}
               editingPath={editingPath}
+              editingText={editingText}
+              editingType={editingType}
+              editingError={editingError}
+              saving={saving}
               onEdit={onSave ? startEditing : undefined}
+              onEditingTextChange={(next) => {
+                setEditingText(next);
+                setEditingError("");
+              }}
+              onEditingTypeChange={(next) => {
+                setEditingType(next);
+                setEditingError("");
+                if (next === "object") setEditingText("{}");
+                if (next === "array") setEditingText("[]");
+                if (next === "null") setEditingText("null");
+                if (next === "boolean") setEditingText("false");
+                if (next === "number") setEditingText("0");
+              }}
+              onSave={() => void saveNode()}
+              onCancel={() => {
+                setEditingPath(null);
+                setEditingError("");
+              }}
             />
           ))
         ) : (
@@ -478,46 +706,9 @@ export function VariableTree({
         )}
       </div>
       {editingPath ? (
-        <div className="helper-variable-node-editor">
-          <label>
-            编辑节点 · {editingLabel}
-            <textarea
-              className="helper-code-editor"
-              rows={Math.min(10, Math.max(2, editingText.split("\n").length))}
-              value={editingText}
-              spellCheck={false}
-              onChange={(event) => {
-                setEditingText(event.target.value);
-                setEditingError("");
-              }}
-            />
-          </label>
-          <small>使用 JSON 值格式；文本需要保留双引号。</small>
-          {editingError ? (
-            <p className="helper-error" role="alert">
-              {editingError}
-            </p>
-          ) : null}
-          <div className="helper-variable-node-editor__actions">
-            <button
-              className="button button--quiet"
-              type="button"
-              disabled={saving}
-              onClick={() => setEditingPath(null)}
-            >
-              取消
-            </button>
-            <button
-              className="button button--primary"
-              type="button"
-              disabled={saving}
-              onClick={() => void saveNode()}
-            >
-              <FloppyDisk size={15} />
-              {saving ? "正在保存" : "保存此节点"}
-            </button>
-          </div>
-        </div>
+        <span className="sr-only" aria-live="polite">
+          正在编辑变量 {editingLabel}
+        </span>
       ) : null}
     </>
   );
@@ -1239,12 +1430,6 @@ export function TavernHelperWorkbench({
               </nav>
               {tool === "variables" ? (
                 <div className="helper-tool-panel">
-                  <div className="helper-tool-panel__heading">
-                    <div>
-                      <strong>变量树</strong>
-                      <span>消息变量按对话时间倒序排列，最新记录优先。</span>
-                    </div>
-                  </div>
                   <label>
                     变量范围
                     <select
@@ -1260,6 +1445,7 @@ export function TavernHelperWorkbench({
                   </label>
                   {parsedVariables.valid ? (
                     <VariableTree
+                      key={variableKey}
                       value={parsedVariables.value}
                       onSave={async (value) => {
                         const selected = variableTargets.find(
@@ -1295,7 +1481,7 @@ export function TavernHelperWorkbench({
                     onClick={() => void saveVariables()}
                   >
                     <FloppyDisk size={16} />
-                    保存变量
+                    保存全部变量
                   </button>
                 </div>
               ) : null}

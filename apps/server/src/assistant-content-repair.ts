@@ -185,7 +185,7 @@ export function repairAssistantStructuredContent(content: string): string {
     const bareJsonStart =
       jsonClose < 0
         ? -1
-      : repaired.slice(searchStart, jsonClose).search(/[[{]/);
+        : repaired.slice(searchStart, jsonClose).search(/[[{]/);
     const insertion =
       json >= 0
         ? lineStart(repaired, json)

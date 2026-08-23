@@ -211,7 +211,7 @@ function PresetPromptItem({
           >
             <PencilSimple size={15} />
           </button>
-          {!prompt.systemPrompt ? (
+          {!prompt.dynamicMarker ? (
             <button
               className="preset-prompt__icon preset-prompt__icon--danger"
               type="button"

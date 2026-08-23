@@ -257,6 +257,33 @@ describe("ContextRail", () => {
     expect(html).not.toContain("<textarea");
   });
 
+  it("allows static system prompts to leave the current list", () => {
+    const state = createDemoWorkspace();
+    const preset = state.presets[0]!;
+    const html = renderRail(null, {
+      ...preset,
+      prompts: [
+        {
+          ...preset.prompts[0]!,
+          id: "static-system-prompt",
+          name: "变量（别动）",
+          systemPrompt: true,
+          dynamicMarker: false,
+        },
+        {
+          ...preset.prompts[1]!,
+          id: "dynamic-system-prompt",
+          name: "动态角色描述",
+          systemPrompt: true,
+          dynamicMarker: true,
+        },
+      ],
+    });
+
+    expect(html).toContain('aria-label="移出 变量（别动）"');
+    expect(html).not.toContain('aria-label="移出 动态角色描述"');
+  });
+
   it("keeps uninserted preset definitions out of the main list", () => {
     const state = createDemoWorkspace();
     const preset = state.presets[0]!;

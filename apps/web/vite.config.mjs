@@ -11,6 +11,9 @@ export default defineConfig({
     __VUE_OPTIONS_API__: true,
     __VUE_PROD_DEVTOOLS__: false,
     __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: false,
+    __STN_LEGACY_PUBLIC_ORIGIN__: JSON.stringify(
+      process.env.VITE_STN_LEGACY_ORIGIN ?? "",
+    ),
   },
   build: {
     outDir: "dist/client",

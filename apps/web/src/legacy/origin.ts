@@ -1,6 +1,11 @@
+declare const __STN_LEGACY_PUBLIC_ORIGIN__: string;
+
 const defaultWebOrigin = "http://localhost:4173";
 const defaultLegacyPort = "4711";
-const configuredLegacyOrigin = import.meta.env.VITE_STN_LEGACY_ORIGIN?.trim();
+const configuredLegacyOrigin =
+  typeof __STN_LEGACY_PUBLIC_ORIGIN__ === "string"
+    ? __STN_LEGACY_PUBLIC_ORIGIN__.trim() || undefined
+    : undefined;
 
 export function currentWebOrigin(): string {
   return typeof globalThis.location?.origin === "string"

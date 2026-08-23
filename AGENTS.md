@@ -69,11 +69,10 @@
 
 - The live NAS deployment is `/volume1/docker/sillytavern-n/app` on
   `hutiance@192.168.50.244`; its `data` directory is persistent host storage.
-- After pushing an application change to `origin/main`, synchronize and verify
-  the NAS deployment with `powershell -ExecutionPolicy Bypass -File
-  scripts/update-nas.ps1`. Do not leave the live NAS deployment behind the
-  repository after a user-facing change unless the user explicitly asks not to
-  deploy it.
+- After pushing an application change to `origin/main`, run
+  `scripts/update-nas.ps1` via PowerShell to synchronize and verify the NAS
+  deployment. Do not leave the live NAS deployment behind the repository after
+  a user-facing change unless the user explicitly asks not to deploy it.
 - The update script must preserve the NAS `.env`, `data`, and UGREEN Docker
   panel registration. Never replace the deployment with an unregistered
   Compose project or an anonymous data volume.

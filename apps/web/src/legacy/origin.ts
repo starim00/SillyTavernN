@@ -1,5 +1,6 @@
 const defaultWebOrigin = "http://localhost:4173";
 const defaultLegacyPort = "4711";
+const configuredLegacyOrigin = import.meta.env.VITE_STN_LEGACY_ORIGIN?.trim();
 
 export function currentWebOrigin(): string {
   return typeof globalThis.location?.origin === "string"
@@ -7,7 +8,13 @@ export function currentWebOrigin(): string {
     : defaultWebOrigin;
 }
 
-export function legacyHostOrigin(webOrigin = currentWebOrigin()): string {
+export function legacyHostOrigin(
+  webOrigin = currentWebOrigin(),
+  configuredOrigin = configuredLegacyOrigin,
+): string {
+  if (configuredOrigin) {
+    return new URL(configuredOrigin).origin;
+  }
   const parsed = new URL(webOrigin);
   if (
     parsed.hostname === "localhost" ||

@@ -1,0 +1,9 @@
+.git
+.github
+.openai
+.vscode
+data
+node_modules
+**/dist
+**/coverage
+*.log

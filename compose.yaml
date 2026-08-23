@@ -1,0 +1,72 @@
+name: sillytavern-n
+
+services:
+  server:
+    build:
+      context: .
+      target: runtime
+      args:
+        STN_LEGACY_PUBLIC_ORIGIN: ${STN_LEGACY_PUBLIC_ORIGIN:-http://localhost:4711}
+    image: sillytavern-n-runtime:local
+    command: ["node", "apps/server/dist/index.js"]
+    restart: unless-stopped
+    environment:
+      STN_HOST: 0.0.0.0
+      STN_PORT: 4710
+      STN_DATA_DIR: /app/data
+      STN_WEB_ORIGIN: ${STN_WEB_ORIGIN:-http://localhost:4173}
+      STN_SEED_DEMO: ${STN_SEED_DEMO:-false}
+    volumes:
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4710/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  legacy-host:
+    image: sillytavern-n-runtime:local
+    command: ["node", "apps/legacy-host/dist/index.js"]
+    restart: unless-stopped
+    depends_on:
+      server:
+        condition: service_healthy
+    environment:
+      STN_HOST: 0.0.0.0
+      STN_LEGACY_PORT: 4711
+      STN_DATA_DIR: /app/data
+      STN_WEB_ORIGIN: ${STN_WEB_ORIGIN:-http://localhost:4173}
+      STN_SAFE_MODE: ${STN_SAFE_MODE:-false}
+    ports:
+      - "${STN_LEGACY_PORT:-4711}:4711"
+    volumes:
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4711/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  web:
+    build:
+      context: .
+      target: web
+      args:
+        STN_LEGACY_PUBLIC_ORIGIN: ${STN_LEGACY_PUBLIC_ORIGIN:-http://localhost:4711}
+    image: sillytavern-n-web:local
+    restart: unless-stopped
+    depends_on:
+      server:
+        condition: service_healthy
+      legacy-host:
+        condition: service_healthy
+    ports:
+      - "${STN_WEB_PORT:-4173}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 5s

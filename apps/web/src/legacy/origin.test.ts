@@ -18,4 +18,13 @@ describe("legacy host loopback origin", () => {
       "http://localhost:4711",
     );
   });
+
+  it("uses an explicitly configured public legacy origin", () => {
+    expect(
+      legacyHostOrigin(
+        "http://192.168.50.244:4173",
+        "http://192.168.50.244:4711/ignored/path",
+      ),
+    ).toBe("http://192.168.50.244:4711");
+  });
 });

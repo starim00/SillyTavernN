@@ -83,6 +83,21 @@ npm run verify
 See [docs/TESTING.md](docs/TESTING.md) for the test tiers and the latest suite
 audit.
 
+## Docker Compose
+
+Build and start the production web, API, and legacy-host services with:
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+```
+
+For access from another machine, set `STN_WEB_ORIGIN` and
+`STN_LEGACY_PUBLIC_ORIGIN` in `.env` to the externally reachable origins. The
+workspace data is persisted in `./data`; keep that directory and its generated
+`config.json` private. The default published ports are Web `4173` and legacy
+host `4711`.
+
 ## User-installed compatibility plugins
 
 Plugin source is not part of this repository. Open **插件** in the workspace and

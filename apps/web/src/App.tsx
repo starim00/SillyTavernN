@@ -5,6 +5,7 @@ import {
   ChatCircleDots,
   CloudCheck,
   CloudSlash,
+  DotsThree,
   LockKey,
   PlugsConnected,
   PuzzlePiece,
@@ -234,6 +235,7 @@ export default function App() {
       ? true
       : window.matchMedia("(min-width: 1181px)").matches,
   );
+  const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   const [tavernHelperWorkbenchOpen, setTavernHelperWorkbenchOpen] =
     useState(false);
   const [tavernHelperInitialTool, setTavernHelperInitialTool] =
@@ -2784,7 +2786,10 @@ export default function App() {
             </button>
           </div>
 
-          <div className="topbar-action-group" aria-label="内容规则">
+          <div
+            className="topbar-action-group topbar-action-group--secondary"
+            aria-label="内容规则"
+          >
             <button
               className="topbar-button"
               type="button"
@@ -2809,7 +2814,10 @@ export default function App() {
             </button>
           </div>
 
-          <div className="topbar-action-group" aria-label="连接与维护">
+          <div
+            className="topbar-action-group topbar-action-group--secondary"
+            aria-label="连接与维护"
+          >
             <button
               className="topbar-button provider-button"
               type="button"
@@ -2852,6 +2860,109 @@ export default function App() {
               <LockKey size={18} />
               <span>安全</span>
             </button>
+          </div>
+
+          <div className="mobile-actions">
+            <button
+              className="topbar-button mobile-actions__trigger"
+              type="button"
+              aria-label={mobileActionsOpen ? "关闭更多操作" : "打开更多操作"}
+              aria-expanded={mobileActionsOpen}
+              onClick={() => setMobileActionsOpen((open) => !open)}
+            >
+              <DotsThree size={22} weight="bold" />
+              <span>更多</span>
+            </button>
+            {mobileActionsOpen ? (
+              <>
+                <button
+                  className="mobile-actions__scrim"
+                  type="button"
+                  aria-label="关闭更多操作"
+                  onClick={() => setMobileActionsOpen(false)}
+                />
+                <div className="mobile-actions__menu" role="menu">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMobileActionsOpen(false);
+                      dispatch({
+                        type: "modal/set",
+                        modal: { kind: "worldbooks" },
+                      });
+                    }}
+                  >
+                    <BookOpenText size={20} />
+                    <span>世界书</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMobileActionsOpen(false);
+                      dispatch({ type: "modal/set", modal: { kind: "regex" } });
+                    }}
+                  >
+                    <BracketsCurly size={20} />
+                    <span>正则</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMobileActionsOpen(false);
+                      dispatch({
+                        type: "modal/set",
+                        modal: { kind: "providers" },
+                      });
+                    }}
+                  >
+                    <PlugsConnected size={20} />
+                    <span>Provider</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMobileActionsOpen(false);
+                      dispatch({
+                        type: "modal/set",
+                        modal: { kind: "extensions" },
+                      });
+                    }}
+                  >
+                    <PuzzlePiece size={20} />
+                    <span>扩展</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMobileActionsOpen(false);
+                      dispatch({
+                        type: "modal/set",
+                        modal: { kind: "import" },
+                      });
+                    }}
+                  >
+                    <UploadSimple size={20} />
+                    <span>导入</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMobileActionsOpen(false);
+                      openSecurity();
+                    }}
+                  >
+                    <LockKey size={20} />
+                    <span>账户与密码</span>
+                  </button>
+                </div>
+              </>
+            ) : null}
           </div>
 
           <div className="topbar__status">

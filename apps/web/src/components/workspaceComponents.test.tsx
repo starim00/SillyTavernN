@@ -39,6 +39,10 @@ const workspaceStyles = readFileSync(
   new URL("../styles.css", import.meta.url),
   "utf8",
 );
+const appShellHtml = readFileSync(
+  new URL("../../index.html", import.meta.url),
+  "utf8",
+);
 
 function cssBlocks(selector: string): string[] {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -347,6 +351,22 @@ describe("workspace components", () => {
     expect(composerBlocks.length).toBeGreaterThan(0);
     expect(Math.max(...minHeights)).toBeLessThanOrEqual(48);
     expect(composerBlocks.join("\n")).toMatch(/resize:\s*none/);
+  });
+
+  it("keeps iPhone portrait controls reachable inside the safe area", () => {
+    expect(appShellHtml).toContain("viewport-fit=cover");
+    expect(workspaceStyles).toContain(
+      "--safe-area-bottom: env(safe-area-inset-bottom, 0px)",
+    );
+    expect(workspaceStyles).toMatch(
+      /\.topbar-action-group:first-child \.topbar-button,[\s\S]*?width:\s*44px;[\s\S]*?min-height:\s*44px;/,
+    );
+    expect(workspaceStyles).toMatch(
+      /\.message-actions \.icon-button--compact\s*\{[\s\S]*?width:\s*44px;[\s\S]*?height:\s*44px;/,
+    );
+    expect(workspaceStyles).toMatch(
+      /\.composer__primary-action\s*\{[\s\S]*?width:\s*44px;[\s\S]*?min-height:\s*44px;/,
+    );
   });
 
   it("renders zero and multiple participants without a singleton character slot", () => {

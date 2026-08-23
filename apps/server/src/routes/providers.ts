@@ -18,6 +18,7 @@ import type {
 import { StorageError, type AgentRun, type Worldbook } from "@stn/storage";
 
 import { envelope, type ServerContext } from "../context.js";
+import { repairAssistantStructuredContent } from "../assistant-content-repair.js";
 import { prepareConversationPrompt } from "../prompt-service.js";
 import {
   conversationToolsByName,
@@ -980,11 +981,23 @@ export async function registerProviderRoutes(
           )
           .sort(([left], [right]) => left - right)
           .map(([, alternative]) => alternative);
+        const shouldRepairStructuredContent =
+          completed &&
+          !providerFailed &&
+          !providerCancelled &&
+          !controller.signal.aborted &&
+          finishReason !== "length";
+        const persistedContent = shouldRepairStructuredContent
+          ? repairAssistantStructuredContent(content)
+          : content;
+        const persistedAlternatives = shouldRepairStructuredContent
+          ? alternatives.map(repairAssistantStructuredContent)
+          : alternatives;
         persistenceStarted = true;
         const persisted = context.store.persistAssistantGeneration({
           conversationId,
-          content,
-          alternatives,
+          content: persistedContent,
+          alternatives: persistedAlternatives,
           status:
             finishReason === "length"
               ? "partial"
@@ -1041,7 +1054,9 @@ export async function registerProviderRoutes(
             providerLastFrameType: persisted.message.providerLastFrameType,
             providerUpstreamRequestId:
               persisted.message.providerUpstreamRequestId,
-            ...(alternatives.length === 0 ? {} : { alternatives }),
+            ...(persistedAlternatives.length === 0
+              ? {}
+              : { alternatives: persistedAlternatives }),
             ...(incomplete
               ? {
                   incomplete: true,

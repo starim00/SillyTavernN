@@ -409,6 +409,58 @@ describe("ordinary generation worldbook tools", () => {
     });
   });
 
+  it("repairs completed variable-update structures before persistence", async () => {
+    const server = await application();
+    const { conversation } = workspaceFixture(server);
+    const malformed =
+      "<UpdateVariable>\n<Analysis>changed\n<JSONPatch>\n&#x20; { &quot;op&quot;: &quot;replace&quot;, &quot;path&quot;: &quot;/state&quot;, &quot;value&quot;: true }";
+    vi.spyOn(server.context.providers, "get").mockResolvedValue(
+      new DeterministicFakeProvider({ text: malformed }),
+    );
+
+    const response = await server.app.inject({
+      method: "POST",
+      url: `/api/conversations/${conversation.id}/generate`,
+      payload: { connectionId: "structured-repair" },
+    });
+
+    const event = streamEvents(response.body).find(
+      (candidate) => candidate.type === "message-persisted",
+    );
+    expect(event).toBeDefined();
+    const storedContent = server.context.store
+      .listMessages(conversation.id)
+      .at(-1)?.content;
+    expect(storedContent).toContain("</Analysis>");
+    expect(storedContent).toContain("</JSONPatch>");
+    expect(storedContent).toMatch(/<\/UpdateVariable>\s*$/);
+    expect(storedContent).toContain(
+      '[{ "op": "replace", "path": "/state", "value": true }]',
+    );
+  });
+
+  it("preserves an interrupted structured response instead of inventing completion", async () => {
+    const server = await application({
+      generationBudget: { maxEvents: 2 },
+    });
+    const { conversation } = workspaceFixture(server);
+    const interrupted =
+      '<UpdateVariable><Analysis>changed<JSONPatch>[{"op":"replace"}';
+    vi.spyOn(server.context.providers, "get").mockResolvedValue(
+      new DeterministicFakeProvider({ text: interrupted }),
+    );
+
+    await server.app.inject({
+      method: "POST",
+      url: `/api/conversations/${conversation.id}/generate`,
+      payload: { connectionId: "interrupted-structured-repair" },
+    });
+
+    expect(
+      server.context.store.listMessages(conversation.id).at(-1)?.content,
+    ).toBe(interrupted);
+  });
+
   it("persists upstream termination diagnostics with the assistant message", async () => {
     const server = await application();
     const { conversation } = workspaceFixture(server);

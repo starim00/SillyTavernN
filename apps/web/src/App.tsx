@@ -1032,6 +1032,7 @@ export default function App() {
           return;
         }
         regeneratedSwipePersisted = input.mode === "regenerate";
+        let completedContent = receipt.content;
 
         const refreshedMessages = await refreshMessages(input.conversationId);
         const responseIndex =
@@ -1041,6 +1042,8 @@ export default function App() {
               )
             : refreshedMessages.length - 1;
         if (responseIndex >= 0) {
+          completedContent =
+            refreshedMessages[responseIndex]?.content ?? receipt.content;
           if (input.mode === "regenerate") {
             const response = refreshedMessages[responseIndex];
             const activeSwipe =
@@ -1062,9 +1065,9 @@ export default function App() {
             await runtime?.processAssistantMessage(responseIndex);
           }
         }
-        await runtime?.emit("generation_ended", receipt.content);
-        await runtime?.emit("js_stream_token_received_fully", receipt.content);
-        await runtime?.emit("js_generation_ended", receipt.content);
+        await runtime?.emit("generation_ended", completedContent);
+        await runtime?.emit("js_stream_token_received_fully", completedContent);
+        await runtime?.emit("js_generation_ended", completedContent);
         if (receipt.incomplete) {
           const reason =
             receipt.reason === "length"

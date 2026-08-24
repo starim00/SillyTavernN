@@ -32,6 +32,89 @@ afterEach(async () => {
 });
 
 describe("SillyTavern N server", () => {
+  it("persists global preset and Provider selections on the server", async () => {
+    const { app, context } = await application(false);
+    const firstPreset = context.store.createPreset({
+      id: "preset-preference-first",
+      name: "First preset",
+      kind: "chat-completion",
+    });
+    const secondPreset = context.store.createPreset({
+      id: "preset-preference-second",
+      name: "Second preset",
+      kind: "chat-completion",
+    });
+    context.store.createProviderConnection({
+      id: "provider-preference-first",
+      name: "First provider",
+      protocol: "openai-compatible",
+      baseUrl: "https://example.invalid/v1",
+      model: "first-model",
+    });
+    context.store.createProviderConnection({
+      id: "provider-preference-second",
+      name: "Second provider",
+      protocol: "openai-compatible",
+      baseUrl: "https://example.invalid/v1",
+      model: "second-model",
+    });
+
+    const migrated = await app.inject({
+      method: "POST",
+      url: "/api/workspace/preferences/resolve",
+      payload: {
+        selectedPresetId: secondPreset.id,
+        selectedProviderId: "provider-preference-second",
+      },
+    });
+    expect(migrated.statusCode).toBe(200);
+    expect(migrated.json()).toEqual({
+      data: {
+        selectedPresetId: secondPreset.id,
+        selectedProviderId: "provider-preference-second",
+      },
+    });
+
+    const otherBrowser = await app.inject({
+      method: "POST",
+      url: "/api/workspace/preferences/resolve",
+      payload: {
+        selectedPresetId: firstPreset.id,
+        selectedProviderId: "provider-preference-first",
+      },
+    });
+    expect(otherBrowser.json()).toEqual(migrated.json());
+
+    const switched = await app.inject({
+      method: "PATCH",
+      url: "/api/workspace/preferences",
+      payload: {
+        selectedPresetId: firstPreset.id,
+        selectedProviderId: "fake",
+      },
+    });
+    expect(switched.statusCode).toBe(200);
+    expect(switched.json()).toEqual({
+      data: {
+        selectedPresetId: firstPreset.id,
+        selectedProviderId: "fake",
+      },
+    });
+
+    context.store.deletePreset(firstPreset.id, firstPreset.revision);
+    const repaired = await app.inject({
+      method: "POST",
+      url: "/api/workspace/preferences/resolve",
+      payload: {},
+    });
+    expect(repaired.json()).toEqual({
+      data: {
+        selectedPresetId: secondPreset.id,
+        selectedProviderId: "fake",
+      },
+    });
+  });
+
   it("exposes user persona CRUD and conversation switching", async () => {
     const { app, context } = await application(false);
     const card = context.store.createCard({

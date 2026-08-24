@@ -408,11 +408,7 @@ export type WorkspaceState = {
 
 export type PersistedWorkspaceState = Pick<
   WorkspaceState,
-  | "selectedCardId"
-  | "selectedConversationId"
-  | "selectedPresetId"
-  | "selectedProviderId"
-  | "draftByConversation"
+  "selectedCardId" | "selectedConversationId" | "draftByConversation"
 >;
 
 export type ApiEnvelope<T> = {

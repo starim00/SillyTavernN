@@ -29,6 +29,7 @@ import {
   proposalFromGenerationToolEvent,
   reorderPresetPrompts,
   saveProviderConnection,
+  saveWorkspacePreferences,
   saveRegexScope,
   setLegacyPluginEnabled,
   undoAgentProposal,
@@ -381,6 +382,16 @@ describe("workspace API client", () => {
           ),
         );
       }
+      if (url === "/api/workspace/preferences/resolve") {
+        return Promise.resolve(
+          jsonResponse({
+            data: {
+              selectedPresetId: "preset-imported",
+              selectedProviderId: "fake",
+            },
+          }),
+        );
+      }
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -392,6 +403,8 @@ describe("workspace API client", () => {
       revision: 4,
       mode: "chat-completion",
     });
+    expect(workspace.selectedPresetId).toBe("preset-imported");
+    expect(workspace.selectedProviderId).toBe("fake");
     expect(workspace.presets[0]?.prompts).toEqual([
       expect.objectContaining({ id: "main", enabled: true }),
       expect.objectContaining({
@@ -901,6 +914,30 @@ describe("workspace API client", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       "/api/providers/connections/provider%2F1/models",
+    );
+  });
+
+  it("persists workspace selections through the server preference endpoint", async () => {
+    const preferences = {
+      selectedPresetId: "preset-server",
+      selectedProviderId: "provider-server",
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ data: preferences }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      saveWorkspacePreferences({
+        selectedPresetId: preferences.selectedPresetId,
+      }),
+    ).resolves.toEqual(preferences);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workspace/preferences",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ selectedPresetId: "preset-server" }),
+      }),
     );
   });
 

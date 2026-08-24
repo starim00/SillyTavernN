@@ -18,6 +18,79 @@ import {
 
 const entityId = z.string().trim().min(1).max(256);
 
+const workspacePreferencesSchema = z
+  .object({
+    selectedPresetId: entityId.optional(),
+    selectedProviderId: z.union([entityId, z.literal("fake")]).optional(),
+  })
+  .strict();
+
+const workspacePreferencesExtensionId = "stn.workspace";
+const workspacePreferencesKey = "preferences:global";
+
+type WorkspacePreferences = {
+  selectedPresetId: string;
+  selectedProviderId: string;
+};
+
+function workspacePreferences(
+  context: ServerContext,
+  candidates: Partial<WorkspacePreferences> = {},
+): WorkspacePreferences {
+  let stored: unknown;
+  try {
+    stored = context.store.getExtensionSetting(
+      workspacePreferencesExtensionId,
+      workspacePreferencesKey,
+    ).value;
+  } catch (error) {
+    if (!(error instanceof StorageError) || error.code !== "not_found") {
+      throw error;
+    }
+  }
+
+  const storedRecord =
+    stored !== null && typeof stored === "object" && !Array.isArray(stored)
+      ? (stored as Record<string, unknown>)
+      : {};
+  const presets = context.store.listPresets();
+  const presetIds = new Set(presets.map(({ id }) => id));
+  const providerIds = new Set(
+    context.store.listProviderConnections().map(({ id }) => id),
+  );
+  const requestedPresetId =
+    typeof storedRecord.selectedPresetId === "string"
+      ? storedRecord.selectedPresetId
+      : candidates.selectedPresetId;
+  const requestedProviderId =
+    typeof storedRecord.selectedProviderId === "string"
+      ? storedRecord.selectedProviderId
+      : candidates.selectedProviderId;
+  const resolved = {
+    selectedPresetId:
+      requestedPresetId && presetIds.has(requestedPresetId)
+        ? requestedPresetId
+        : (presets[0]?.id ?? ""),
+    selectedProviderId:
+      requestedProviderId === "fake" ||
+      (requestedProviderId && providerIds.has(requestedProviderId))
+        ? requestedProviderId
+        : "fake",
+  };
+
+  if (
+    storedRecord.selectedPresetId !== resolved.selectedPresetId ||
+    storedRecord.selectedProviderId !== resolved.selectedProviderId
+  ) {
+    context.store.setExtensionSetting(
+      workspacePreferencesExtensionId,
+      workspacePreferencesKey,
+      resolved,
+    );
+  }
+  return resolved;
+}
+
 const conversationCreateSchema = z
   .object({
     title: z.string().trim().min(1).max(1024),
@@ -258,6 +331,67 @@ export async function registerWorkspaceRoutes(
       phases: "0-7-active-development",
     }),
   );
+
+  app.post("/api/workspace/preferences/resolve", (request) => {
+    const input = workspacePreferencesSchema.parse(request.body);
+    const candidates: Partial<WorkspacePreferences> = {
+      ...(input.selectedPresetId === undefined
+        ? {}
+        : { selectedPresetId: input.selectedPresetId }),
+      ...(input.selectedProviderId === undefined
+        ? {}
+        : { selectedProviderId: input.selectedProviderId }),
+    };
+    return envelope(workspacePreferences(context, candidates));
+  });
+
+  app.patch("/api/workspace/preferences", (request) => {
+    const input = workspacePreferencesSchema
+      .refine(
+        (value) =>
+          value.selectedPresetId !== undefined ||
+          value.selectedProviderId !== undefined,
+        { message: "At least one workspace preference is required." },
+      )
+      .parse(request.body);
+    const current = workspacePreferences(context);
+    if (
+      input.selectedPresetId !== undefined &&
+      !context.store
+        .listPresets()
+        .some(({ id }) => id === input.selectedPresetId)
+    ) {
+      throw new StorageError(
+        "invalid_workspace_preference",
+        `Preset '${input.selectedPresetId}' is not available.`,
+        400,
+      );
+    }
+    if (
+      input.selectedProviderId !== undefined &&
+      input.selectedProviderId !== "fake" &&
+      !context.store
+        .listProviderConnections()
+        .some(({ id }) => id === input.selectedProviderId)
+    ) {
+      throw new StorageError(
+        "invalid_workspace_preference",
+        `Provider connection '${input.selectedProviderId}' is not available.`,
+        400,
+      );
+    }
+    const updated: WorkspacePreferences = {
+      selectedPresetId: input.selectedPresetId ?? current.selectedPresetId,
+      selectedProviderId:
+        input.selectedProviderId ?? current.selectedProviderId,
+    };
+    context.store.setExtensionSetting(
+      workspacePreferencesExtensionId,
+      workspacePreferencesKey,
+      updated,
+    );
+    return envelope(updated);
+  });
 
   app.get("/api/personas", async () =>
     envelope(

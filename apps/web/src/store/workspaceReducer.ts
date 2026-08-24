@@ -26,6 +26,11 @@ const LEGACY_STORAGE_KEY = "sillytavern-n.workspace.v3";
 const MAX_DRAFT_BYTES = 32 * 1024;
 const MAX_PERSISTED_DRAFTS = 50;
 
+type LegacyPersistedWorkspaceState = Partial<PersistedWorkspaceState> & {
+  selectedPresetId?: unknown;
+  selectedProviderId?: unknown;
+};
+
 type WorkspaceAction =
   | { type: "bootstrap/loading" }
   | { type: "bootstrap/api"; payload: ApiBootstrap }
@@ -75,7 +80,11 @@ type WorkspaceAction =
   | { type: "preset/replace"; preset: PromptPreset }
   | { type: "regexScope/replace"; scope: RegexScope }
   | { type: "provider/select"; id: string }
-  | { type: "provider/upsert"; provider: ProviderConnection }
+  | {
+      type: "provider/upsert";
+      provider: ProviderConnection;
+      select?: boolean;
+    }
   | {
       type: "worldbook/entry-permission";
       worldbookId: string;
@@ -218,17 +227,21 @@ export function workspaceReducer(
           (conversation) => conversation.cardId === selectedCardId,
         )?.id ||
         "";
+      const requestedPresetId =
+        action.payload.selectedPresetId ?? state.selectedPresetId;
       const selectedPresetId = presets.some(
-        (preset) => preset.id === state.selectedPresetId,
+        (preset) => preset.id === requestedPresetId,
       )
-        ? state.selectedPresetId
+        ? requestedPresetId
         : (presets[0]?.id ?? "");
+      const requestedProviderId =
+        action.payload.selectedProviderId ?? state.selectedProviderId;
       const selectedProviderId =
-        state.selectedProviderId === "fake" ||
+        requestedProviderId === "fake" ||
         action.payload.providerConnections.some(
-          (provider) => provider.id === state.selectedProviderId,
+          (provider) => provider.id === requestedProviderId,
         )
-          ? state.selectedProviderId
+          ? requestedProviderId
           : "fake";
       return {
         ...state,
@@ -640,7 +653,10 @@ export function workspaceReducer(
               provider.id === action.provider.id ? action.provider : provider,
             )
           : [...state.providerConnections, action.provider],
-        selectedProviderId: action.provider.id,
+        selectedProviderId:
+          action.select === false
+            ? state.selectedProviderId
+            : action.provider.id,
       };
     case "worldbook/entry-permission": {
       const worldbooks = state.worldbooks.map((worldbook) =>
@@ -898,7 +914,7 @@ export function loadWorkspaceState(): WorkspaceState {
         agentProposal: null,
       };
     }
-    const persisted = parsed.data as Partial<PersistedWorkspaceState>;
+    const persisted = parsed.data as LegacyPersistedWorkspaceState;
 
     return {
       ...base,
@@ -936,8 +952,6 @@ export function persistWorkspaceState(state: WorkspaceState): boolean {
   const persisted: PersistedWorkspaceState = {
     selectedCardId: state.selectedCardId,
     selectedConversationId: state.selectedConversationId,
-    selectedPresetId: state.selectedPresetId,
-    selectedProviderId: state.selectedProviderId,
     draftByConversation: compactDrafts(state.draftByConversation),
   };
 

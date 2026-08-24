@@ -98,7 +98,7 @@ describe("workspaceReducer", () => {
     expect(loadWorkspaceState().agentProposal).toBeNull();
   });
 
-  it("migrates only lightweight selections and drafts from v3", () => {
+  it("reads legacy server-migration candidates and local drafts from v3", () => {
     const state = createDemoWorkspace();
     const legacyPayload = JSON.stringify({
       version: 3,
@@ -158,6 +158,40 @@ describe("workspaceReducer", () => {
 
     expect(next.selectedConversationId).toBe("");
     expect(next.selectedPresetId).toBe("");
+  });
+
+  it("uses server-selected preset and Provider during API bootstrap", () => {
+    const state = createDemoWorkspace();
+    const provider = {
+      id: "provider-server-selected",
+      name: "Server selected",
+      protocol: "openai-compatible" as const,
+      baseUrl: "https://example.invalid/v1",
+      model: "model",
+      headers: {},
+      hasApiKey: false,
+      nativeToolCalling: false,
+      revision: 1,
+    };
+    const selectedPresetId = state.presets.at(-1)!.id;
+    const next = workspaceReducer(state, {
+      type: "bootstrap/api",
+      payload: {
+        conversations: state.conversations,
+        cards: state.cards,
+        participants: state.participants,
+        messagesByConversation: state.messagesByConversation,
+        worldbooks: state.worldbooks,
+        presets: state.presets,
+        regexScopes: state.regexScopes,
+        providerConnections: [provider],
+        selectedPresetId,
+        selectedProviderId: provider.id,
+      },
+    });
+
+    expect(next.selectedPresetId).toBe(selectedPresetId);
+    expect(next.selectedProviderId).toBe(provider.id);
   });
 
   it("represents loading separately without discarding the current workspace", () => {
@@ -782,7 +816,11 @@ describe("workspaceReducer", () => {
 
     const persisted = JSON.parse(setItem.mock.calls[0]?.[1] as string) as {
       version: number;
-      data: { draftByConversation: Record<string, string> };
+      data: {
+        draftByConversation: Record<string, string>;
+        selectedPresetId?: string;
+        selectedProviderId?: string;
+      };
     };
     expect(persisted.version).toBe(4);
     expect(Object.keys(persisted.data.draftByConversation)).toHaveLength(50);
@@ -794,6 +832,8 @@ describe("workspaceReducer", () => {
     expect(original.draftByConversation["conversation-54"]).toHaveLength(
       40_000,
     );
+    expect(persisted.data).not.toHaveProperty("selectedPresetId");
+    expect(persisted.data).not.toHaveProperty("selectedProviderId");
   });
 
   it("swallows local storage quota and security errors", async () => {

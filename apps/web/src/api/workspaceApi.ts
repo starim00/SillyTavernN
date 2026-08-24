@@ -292,6 +292,13 @@ export type ApiBootstrap = {
   presets: PromptPreset[];
   regexScopes: RegexScope[];
   providerConnections: ProviderConnection[];
+  selectedPresetId?: string;
+  selectedProviderId?: string;
+};
+
+export type WorkspacePreferences = {
+  selectedPresetId: string;
+  selectedProviderId: string;
 };
 
 type ApiPage<T> = {
@@ -1191,6 +1198,7 @@ export async function updateCardWorldbooks(
 export async function loadWorkspaceFromApi(
   selectedPresetId?: string,
   selectedConversationId?: string,
+  selectedProviderId?: string,
 ): Promise<ApiBootstrap> {
   await request<ApiEnvelope<{ ok?: boolean }>>("/health", {
     timeoutMs: 1_600,
@@ -1203,6 +1211,7 @@ export async function loadWorkspaceFromApi(
     presetResult,
     regexResult,
     providerResult,
+    preferencesResult,
   ] = await Promise.all([
     request<ApiEnvelope<ApiPage<ApiConversation>>>("/conversations?limit=50"),
     request<ApiEnvelope<ApiCard[]>>("/cards"),
@@ -1211,6 +1220,16 @@ export async function loadWorkspaceFromApi(
     request<ApiEnvelope<ApiPreset[]>>("/presets"),
     request<ApiEnvelope<ApiRegexScope[]>>("/regex/scopes"),
     request<ApiEnvelope<ApiProviderConnection[]>>("/providers/connections"),
+    request<ApiEnvelope<WorkspacePreferences>>(
+      "/workspace/preferences/resolve",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          ...(selectedPresetId ? { selectedPresetId } : {}),
+          ...(selectedProviderId ? { selectedProviderId } : {}),
+        }),
+      },
+    ),
   ]);
 
   const conversationItems = [...conversationResult.data.items];
@@ -1227,8 +1246,9 @@ export async function loadWorkspaceFromApi(
   }
   const conversations = conversationItems.map(normalizeConversation);
   const activePresetId =
-    presetResult.data.find((preset) => preset.id === selectedPresetId)?.id ??
-    presetResult.data[0]?.id;
+    presetResult.data.find(
+      (preset) => preset.id === preferencesResult.data.selectedPresetId,
+    )?.id ?? presetResult.data[0]?.id;
   const activeConversation =
     conversations.find(
       (conversation) => conversation.id === selectedConversationId,
@@ -1282,7 +1302,19 @@ export async function loadWorkspaceFromApi(
     presets: presetResult.data.map(normalizePreset),
     regexScopes: regexResult.data.map(normalizeRegexScope),
     providerConnections: providerResult.data,
+    selectedPresetId: preferencesResult.data.selectedPresetId,
+    selectedProviderId: preferencesResult.data.selectedProviderId,
   };
+}
+
+export async function saveWorkspacePreferences(
+  input: Partial<WorkspacePreferences>,
+): Promise<WorkspacePreferences> {
+  const result = await request<ApiEnvelope<WorkspacePreferences>>(
+    "/workspace/preferences",
+    { method: "PATCH", body: JSON.stringify(input) },
+  );
+  return result.data;
 }
 
 export async function createMessage(

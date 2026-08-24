@@ -63,6 +63,7 @@ import {
   saveProviderConnection,
   saveTavernHelperScripts,
   saveTavernHelperSettings,
+  saveWorkspacePreferences,
   saveRegexScope as saveRegexScopeOnServer,
   selectMessageSwipe,
   setConversationPersona,
@@ -221,6 +222,7 @@ export default function App() {
   const generationControllerRef = useRef<AbortController | null>(null);
   const generationStopRequestedRef = useRef(false);
   const swipeSelectionQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const workspacePreferenceQueueRef = useRef<Promise<void>>(Promise.resolve());
   const workspaceStateRef = useRef(state);
   workspaceStateRef.current = state;
   const bootstrapRequestRef = useRef(0);
@@ -397,6 +399,7 @@ export default function App() {
     void loadWorkspaceFromApi(
       workspaceStateRef.current.selectedPresetId,
       workspaceStateRef.current.selectedConversationId,
+      workspaceStateRef.current.selectedProviderId,
     )
       .then((payload) => {
         if (requestId === bootstrapRequestRef.current) {
@@ -440,7 +443,7 @@ export default function App() {
     dispatch({
       type: "toast/show",
       tone: "warning",
-      message: "本地偏好未保存。当前工作区仍可继续使用。",
+      message: "本地草稿与页面位置未保存。当前工作区仍可继续使用。",
     });
   }, []);
 
@@ -462,8 +465,6 @@ export default function App() {
     state.draftByConversation,
     state.selectedCardId,
     state.selectedConversationId,
-    state.selectedPresetId,
-    state.selectedProviderId,
   ]);
 
   useEffect(() => {
@@ -550,6 +551,20 @@ export default function App() {
   const showToast = useCallback(
     (message: string, tone: "success" | "info" | "warning" = "info") => {
       dispatch({ type: "toast/show", message, tone });
+    },
+    [],
+  );
+
+  const persistWorkspacePreferences = useCallback(
+    (input: Parameters<typeof saveWorkspacePreferences>[0]) => {
+      const request = workspacePreferenceQueueRef.current.then(() =>
+        saveWorkspacePreferences(input),
+      );
+      workspacePreferenceQueueRef.current = request.then(
+        () => undefined,
+        () => undefined,
+      );
+      return request;
     },
     [],
   );
@@ -2734,6 +2749,13 @@ export default function App() {
   const saveProvider = useCallback(
     async (input: ProviderConnectionInput, current?: ProviderConnection) => {
       const saved = await saveProviderConnection(input, current);
+      try {
+        await persistWorkspacePreferences({ selectedProviderId: saved.id });
+      } catch {
+        dispatch({ type: "provider/upsert", provider: saved, select: false });
+        showToast("Provider 连接已保存，但后台未能切换当前连接。", "warning");
+        return saved;
+      }
       dispatch({ type: "provider/upsert", provider: saved });
       showToast(
         current ? "Provider 连接已更新。" : "Provider 连接已创建。",
@@ -2741,7 +2763,46 @@ export default function App() {
       );
       return saved;
     },
-    [showToast],
+    [persistWorkspacePreferences, showToast],
+  );
+
+  const selectProvider = useCallback(
+    async (id: string) => {
+      if (!apiOnline) {
+        dispatch({ type: "provider/select", id });
+        return;
+      }
+      try {
+        const preferences = await persistWorkspacePreferences({
+          selectedProviderId: id,
+        });
+        dispatch({
+          type: "provider/select",
+          id: preferences.selectedProviderId,
+        });
+      } catch {
+        showToast("Provider 切换失败；后台选择没有改变。", "warning");
+      }
+    },
+    [apiOnline, persistWorkspacePreferences, showToast],
+  );
+
+  const selectPromptPreset = useCallback(
+    async (id: string) => {
+      if (!apiOnline) {
+        dispatch({ type: "preset/select", id });
+        return;
+      }
+      try {
+        const preferences = await persistWorkspacePreferences({
+          selectedPresetId: id,
+        });
+        dispatch({ type: "preset/select", id: preferences.selectedPresetId });
+      } catch {
+        showToast("预设切换失败；后台选择没有改变。", "warning");
+      }
+    },
+    [apiOnline, persistWorkspacePreferences, showToast],
   );
 
   const legacyBridgePlugins = useMemo(
@@ -2829,7 +2890,7 @@ export default function App() {
         onConfirmToolProposal={() => void confirmToolProposal()}
         onRejectToolProposal={() => void rejectToolProposal()}
         onUndoToolProposal={() => void undoAppliedToolProposal()}
-        onSelectProvider={(id) => dispatch({ type: "provider/select", id })}
+        onSelectProvider={(id) => void selectProvider(id)}
         onSaveProvider={saveProvider}
         onExportProvider={exportProviderConnection}
         onLoadProviderModels={loadProviderModels}
@@ -3117,7 +3178,7 @@ export default function App() {
           open={presetSettingsOpen}
           presets={state.presets}
           selectedPresetId={state.selectedPresetId}
-          onSelectPreset={(id) => dispatch({ type: "preset/select", id })}
+          onSelectPreset={(id) => void selectPromptPreset(id)}
           onDeletePreset={(presetToDelete) =>
             void removePromptPreset(presetToDelete)
           }

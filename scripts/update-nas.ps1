@@ -192,7 +192,7 @@ if [ "`$data_mount" != "`$DEPLOY_DIR/data" ]; then
   exit 1
 fi
 
-panel_count="`$(sqlite3 -readonly "`$PANEL_DB" "SELECT COUNT(*) FROM compose WHERE name='sillytavern-n' AND path='`$DEPLOY_DIR/compose.yaml';")"
+panel_count="`$(sqlite3 "file:`$PANEL_DB?mode=ro&immutable=1" "SELECT COUNT(*) FROM compose WHERE name='sillytavern-n' AND path='`$DEPLOY_DIR/compose.yaml';")"
 if [ "`$panel_count" != '1' ]; then
   echo 'The project is missing or duplicated in the UGREEN Docker panel database.' >&2
   exit 1

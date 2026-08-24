@@ -118,6 +118,7 @@ import type { TavernHelperTool } from "./components/TavernHelperWorkbench";
 import { WorkspaceConnectionBanner } from "./components/WorkspaceConnectionBanner";
 import { useAuthControls } from "./components/AuthGate";
 import { SurfaceStatus } from "./components/WorkspacePrimitives";
+import { playMessageSoundIfPageUnfocused } from "./messageSound";
 import { WorkspaceModals } from "./components/WorkspaceModals";
 import { createConversationTitle } from "./conversationTitle";
 import type {
@@ -1206,6 +1207,7 @@ export default function App() {
             "warning",
           );
         } else {
+          playMessageSoundIfPageUnfocused();
           showToast(
             input.mode === "regenerate"
               ? "新的 Swipe 已完整生成并保存。"
@@ -1357,6 +1359,7 @@ export default function App() {
             "warning",
           );
         } else {
+          playMessageSoundIfPageUnfocused();
           showToast("后台回复已完整生成并保存。", "success");
         }
       } catch {

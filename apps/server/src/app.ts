@@ -73,6 +73,7 @@ export async function createServer(
   const app = Fastify({
     logger: options.logger ?? false,
     bodyLimit: 34 * 1024 * 1024,
+    trustProxy: true,
   });
   await app.register(cors, {
     origin: options.corsOrigin ?? "http://localhost:4173",

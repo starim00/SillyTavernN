@@ -56,6 +56,47 @@ GIT_PROXY='$GitProxy'
 CHECK_ONLY='$checkOnlyValue'
 PROJECT_NAME='sillytavern-n'
 PANEL_DB='/volume1/@appstore/com.ugreen.docker/db/docker_info_log.db'
+NGINX_CONTAINER='nginx-host'
+NGINX_CONFIG_SOURCE='deploy/nas/nginx/sillytavern-n.conf'
+NGINX_CONFIG_TARGET='/etc/nginx/conf.d/sillytavern-n.conf'
+HTTPS_HOST='philia093.world'
+WEB_HTTPS_PORT='4174'
+LEGACY_HTTPS_PORT='4712'
+
+set_env_value() {
+  key="`$1"
+  value="`$2"
+  env_file="`$DEPLOY_DIR/.env"
+  temp_file="`$env_file.https.tmp"
+
+  if [ -f "`$env_file" ]; then
+    awk -v key="`$key" -v value="`$value" '
+      BEGIN { updated = 0 }
+      index(`$0, key "=") == 1 {
+        if (!updated) print key "=" value
+        updated = 1
+        next
+      }
+      { print }
+      END { if (!updated) print key "=" value }
+    ' "`$env_file" > "`$temp_file"
+  else
+    printf '%s=%s\n' "`$key" "`$value" > "`$temp_file"
+  fi
+
+  chmod 600 "`$temp_file"
+  mv "`$temp_file" "`$env_file"
+}
+
+assert_env_value() {
+  key="`$1"
+  expected="`$2"
+  actual="`$(grep -E "^`$key=" "`$DEPLOY_DIR/.env" | tail -n 1 | cut -d= -f2-)"
+  if [ "`$actual" != "`$expected" ]; then
+    echo "Unexpected `$key value." >&2
+    exit 1
+  fi
+}
 
 cd "`$DEPLOY_DIR"
 
@@ -76,9 +117,40 @@ echo "Current NAS revision: `$before_revision"
 if [ "`$CHECK_ONLY" != '1' ]; then
   git -c http.proxy="`$GIT_PROXY" fetch --no-tags origin main
   git merge --ff-only origin/main
+
+  set_env_value STN_WEB_ORIGIN "https://`$HTTPS_HOST:`$WEB_HTTPS_PORT"
+  set_env_value STN_LEGACY_PUBLIC_ORIGIN "https://`$HTTPS_HOST:`$LEGACY_HTTPS_PORT"
+
   docker compose config --quiet
   docker compose build
   docker compose up -d
+
+  if ! docker inspect "`$NGINX_CONTAINER" >/dev/null 2>&1; then
+    echo "Required Nginx container is not available: `$NGINX_CONTAINER" >&2
+    exit 1
+  fi
+  docker exec "`$NGINX_CONTAINER" sh -c \
+    "if [ -f '`$NGINX_CONFIG_TARGET' ]; then cp '`$NGINX_CONFIG_TARGET' '`$NGINX_CONFIG_TARGET.previous'; else rm -f '`$NGINX_CONFIG_TARGET.previous'; fi"
+  docker cp "`$DEPLOY_DIR/`$NGINX_CONFIG_SOURCE" "`$NGINX_CONTAINER:`$NGINX_CONFIG_TARGET"
+  if ! docker exec "`$NGINX_CONTAINER" nginx -t; then
+    docker exec "`$NGINX_CONTAINER" sh -c \
+      "if [ -f '`$NGINX_CONFIG_TARGET.previous' ]; then mv '`$NGINX_CONFIG_TARGET.previous' '`$NGINX_CONFIG_TARGET'; else rm -f '`$NGINX_CONFIG_TARGET'; fi"
+    docker exec "`$NGINX_CONTAINER" nginx -t
+    echo 'Rejected invalid Nginx HTTPS configuration and restored the previous file.' >&2
+    exit 1
+  fi
+  docker exec "`$NGINX_CONTAINER" rm -f "`$NGINX_CONFIG_TARGET.previous"
+  docker exec "`$NGINX_CONTAINER" nginx -s reload
+fi
+
+assert_env_value STN_WEB_ORIGIN "https://`$HTTPS_HOST:`$WEB_HTTPS_PORT"
+assert_env_value STN_LEGACY_PUBLIC_ORIGIN "https://`$HTTPS_HOST:`$LEGACY_HTTPS_PORT"
+
+source_hash="`$(sha256sum "`$NGINX_CONFIG_SOURCE" | awk '{print `$1}')"
+target_hash="`$(docker exec "`$NGINX_CONTAINER" sha256sum "`$NGINX_CONFIG_TARGET" | awk '{print `$1}')"
+if [ "`$source_hash" != "`$target_hash" ]; then
+  echo 'The live Nginx HTTPS configuration differs from the repository.' >&2
+  exit 1
 fi
 
 expected_services="`$(docker compose config --services | wc -l)"
@@ -110,6 +182,8 @@ done
 
 curl --fail --silent --show-error --output /dev/null http://127.0.0.1:4173/
 curl --fail --silent --show-error --output /dev/null http://127.0.0.1:4711/health
+curl --fail --silent --show-error --output /dev/null --resolve "`$HTTPS_HOST:`$WEB_HTTPS_PORT:127.0.0.1" "https://`$HTTPS_HOST:`$WEB_HTTPS_PORT/"
+curl --fail --silent --show-error --output /dev/null --resolve "`$HTTPS_HOST:`$LEGACY_HTTPS_PORT:127.0.0.1" "https://`$HTTPS_HOST:`$LEGACY_HTTPS_PORT/health"
 
 server_id="`$(docker compose ps -q server)"
 data_mount="`$(docker inspect "`$server_id" --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Source}}{{end}}{{end}}')"
@@ -128,6 +202,8 @@ after_revision="`$(git rev-parse --short HEAD)"
 docker compose ps
 echo "NAS update verified: `$before_revision -> `$after_revision"
 echo "Data mount verified: `$data_mount"
+echo "HTTPS verified: https://`$HTTPS_HOST:`$WEB_HTTPS_PORT"
+echo "Legacy HTTPS verified: https://`$HTTPS_HOST:`$LEGACY_HTTPS_PORT"
 echo 'UGREEN Docker panel registration verified.'
 "@
 

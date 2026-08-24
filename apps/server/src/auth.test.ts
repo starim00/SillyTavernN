@@ -110,4 +110,28 @@ describe("server authentication", () => {
       ).statusCode,
     ).toBe(200);
   });
+
+  it("marks the session cookie secure when the internal proxy reports HTTPS", async () => {
+    const dataDirectory = await mkdtemp(
+      path.join(tmpdir(), "stn-auth-forwarded-https-"),
+    );
+    const initialized = await AuthManager.initialize(dataDirectory);
+    const created = await createServer({
+      dataDirectory,
+      databasePath: ":memory:",
+      seedDevelopmentData: false,
+      authentication: true,
+    });
+    applications.push(created);
+
+    const login = await created.app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      headers: { "x-forwarded-proto": "https" },
+      payload: { password: initialized.generatedPassword! },
+    });
+
+    expect(login.statusCode).toBe(200);
+    expect(login.headers["set-cookie"]).toContain("; Secure");
+  });
 });

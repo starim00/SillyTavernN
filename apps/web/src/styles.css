@@ -1991,6 +1991,15 @@ select:focus-visible {
   background: #e8ecee;
 }
 
+.button--danger {
+  color: #fff;
+  background: #b85b4e;
+}
+
+.button--danger:hover:not(:disabled) {
+  background: #a84e43;
+}
+
 .button--full {
   width: 100%;
 }
@@ -3958,6 +3967,27 @@ select:focus-visible {
   min-width: 0;
   max-width: 100%;
   flex: 1;
+}
+
+.message-delete-dialog {
+  width: min(100%, 440px);
+  overflow: hidden;
+}
+
+.message-delete-dialog__icon {
+  color: #a24f44;
+  background: var(--coral-soft);
+}
+
+.message-delete-dialog__body {
+  padding: 18px 20px;
+  color: var(--text-soft);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.message-delete-dialog .button {
+  min-height: 44px;
 }
 
 .modal-support-content {

@@ -32,6 +32,7 @@ import {
   trustedDisplayDocument,
 } from "./MessageStream";
 import { LegacyManagementModal } from "./LegacyManagementModal";
+import { MessageDeleteDialog } from "./MessageDeleteDialog";
 import { ParticipantChips } from "./WorkspacePrimitives";
 import { WorkspaceModals } from "./WorkspaceModals";
 
@@ -53,6 +54,26 @@ function cssBlocks(selector: string): string[] {
 }
 
 describe("workspace components", () => {
+  it("renders message deletion as an application modal instead of a native confirm", () => {
+    const state = createDemoWorkspace();
+    const message = Object.values(state.messagesByConversation)[0]?.[0];
+    expect(message).toBeDefined();
+
+    const html = renderToStaticMarkup(
+      <MessageDeleteDialog
+        message={message!}
+        deleting={false}
+        onCancel={() => undefined}
+        onConfirm={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('role="dialog"');
+    expect(html).toContain("删除消息");
+    expect(html).toContain("此操作无法撤销");
+    expect(html).toContain("取消");
+  });
+
   it("shows the complete worldbook library beside the current card combination", () => {
     const state = createDemoWorkspace();
     const card = state.cards[0]!;

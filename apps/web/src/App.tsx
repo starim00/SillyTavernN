@@ -104,6 +104,7 @@ import type {
 import { CardConversationEntry } from "./components/CardConversationEntry";
 import { ConversationComposer } from "./components/ConversationComposer";
 import type { LegacyRealmStatus } from "./components/LegacyRealmBridge";
+import { MessageDeleteDialog } from "./components/MessageDeleteDialog";
 import {
   messageDisplayHtml,
   messageDisplayInlineHtml,
@@ -239,6 +240,9 @@ export default function App() {
       : window.matchMedia("(min-width: 1181px)").matches,
   );
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
+  const [pendingMessageDeletion, setPendingMessageDeletion] =
+    useState<WorkspaceMessage | null>(null);
+  const [messageDeletionPending, setMessageDeletionPending] = useState(false);
   const [tavernHelperWorkbenchOpen, setTavernHelperWorkbenchOpen] =
     useState(false);
   const [tavernHelperInitialTool, setTavernHelperInitialTool] =
@@ -1501,12 +1505,16 @@ export default function App() {
     [refreshMessages, showToast, apiOnline],
   );
 
-  const deleteMessage = useCallback(
-    async (message: WorkspaceMessage) => {
-      const actor = message.role === "user" ? "你的这条输入" : "这条模型回复";
-      if (!window.confirm(`删除${actor}及其之后的所有消息？此操作无法撤销。`)) {
-        return;
-      }
+  const deleteMessage = useCallback((message: WorkspaceMessage) => {
+    setPendingMessageDeletion(message);
+  }, []);
+
+  const confirmMessageDeletion = useCallback(async () => {
+    const message = pendingMessageDeletion;
+    if (!message || messageDeletionPending) return;
+
+    setMessageDeletionPending(true);
+    try {
       if (apiOnline) {
         try {
           await deleteWorkspaceMessage(message.id, message.revision);
@@ -1516,10 +1524,12 @@ export default function App() {
         }
       }
       dispatch({ type: "message/delete", messageId: message.id });
+      setPendingMessageDeletion(null);
       showToast("已删除该消息及后续消息。", "success");
-    },
-    [showToast, apiOnline],
-  );
+    } finally {
+      setMessageDeletionPending(false);
+    }
+  }, [apiOnline, messageDeletionPending, pendingMessageDeletion, showToast]);
 
   const regenerateMessage = useCallback(
     async (message: WorkspaceMessage) => {
@@ -3302,6 +3312,12 @@ export default function App() {
         />
       ) : null}
       {workspaceOverlays}
+      <MessageDeleteDialog
+        message={pendingMessageDeletion}
+        deleting={messageDeletionPending}
+        onCancel={() => setPendingMessageDeletion(null)}
+        onConfirm={() => void confirmMessageDeletion()}
+      />
     </div>
   );
 }

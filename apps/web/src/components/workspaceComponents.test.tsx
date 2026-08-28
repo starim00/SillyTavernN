@@ -625,6 +625,59 @@ describe("workspace components", () => {
     expect(html).toContain("第一候选");
   });
 
+  it("labels messages with the active persona, card, and generating Provider", () => {
+    const noop = vi.fn();
+    const assistant = renderToStaticMarkup(
+      <MessageCard
+        message={{
+          id: "message-attributed-assistant",
+          conversationId: "conversation-test",
+          role: "assistant",
+          content: "欢迎回来。",
+          createdLabel: "10:30",
+          revision: 1,
+          providerName: "Claude 主连接",
+        }}
+        userName="旅行者"
+        cardName="雾港档案"
+        isLast
+        onCopy={noop}
+        onUpdate={noop}
+        onDelete={noop}
+        onRegenerate={noop}
+        onContinue={noop}
+        onSelectSwipe={noop}
+      />,
+    );
+    const user = renderToStaticMarkup(
+      <MessageCard
+        message={{
+          id: "message-attributed-user",
+          conversationId: "conversation-test",
+          role: "user",
+          content: "继续。",
+          createdLabel: "10:31",
+          revision: 1,
+        }}
+        userName="旅行者"
+        cardName="雾港档案"
+        isLast={false}
+        onCopy={noop}
+        onUpdate={noop}
+        onDelete={noop}
+        onRegenerate={noop}
+        onContinue={noop}
+        onSelectSwipe={noop}
+      />,
+    );
+
+    expect(assistant).toContain("雾港档案");
+    expect(assistant).toContain("Claude 主连接");
+    expect(assistant).not.toContain(">模型<");
+    expect(user).toContain("旅行者");
+    expect(user).not.toContain("Claude 主连接");
+  });
+
   it("renders Markdown inside a semantic document wrapper", () => {
     const displayContent = `<dream>
 ## 降临方式

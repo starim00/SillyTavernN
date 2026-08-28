@@ -3261,6 +3261,11 @@ export default function App() {
           <MessageStream
             conversationId={conversation.id}
             messages={messages}
+            userName={activePersona?.name ?? "你"}
+            cardName={selectedCard?.name ?? "模型"}
+            {...(selectedProvider
+              ? { currentProviderName: selectedProvider.name }
+              : {})}
             promptTemplateDisplayByMessageId={promptTemplateDisplayByMessageId}
             messageFloorById={tavernHelperMessageFloors}
             hasMore={Boolean(

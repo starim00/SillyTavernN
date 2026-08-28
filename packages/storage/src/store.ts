@@ -120,6 +120,10 @@ export interface PersistAssistantGenerationInput {
   targetMessageId?: string;
   expectedMessageRevision?: number;
   reasoningText?: string;
+  providerAttribution?: {
+    connectionId: string;
+    name: string;
+  };
   providerContext?: {
     connectionId: string;
     items: readonly JsonObject[];
@@ -1413,6 +1417,9 @@ export class AppStore {
             ...(index === 0 && input.reasoningText
               ? { reasoningText: input.reasoningText }
               : {}),
+            ...(input.providerAttribution === undefined
+              ? {}
+              : { providerAttribution: input.providerAttribution }),
           });
           if (index === 0) {
             this.insertProviderSwipeContext(
@@ -1498,6 +1505,9 @@ export class AppStore {
           ...(index === 0 && input.reasoningText
             ? { reasoningText: input.reasoningText }
             : {}),
+          ...(input.providerAttribution === undefined
+            ? {}
+            : { providerAttribution: input.providerAttribution }),
         });
         if (index === 0) {
           this.insertProviderSwipeContext(swipeId, input.providerContext, now);
@@ -2806,18 +2816,25 @@ export class AppStore {
     selected: boolean;
     now: string;
     reasoningText?: string;
+    providerAttribution?: {
+      connectionId: string;
+      name: string;
+    };
   }): string {
     const id = identifier();
     this.database.run(
       `INSERT INTO swipes(
-         id, message_id, position, content, reasoning_text, selected,
+         id, message_id, position, content, reasoning_text,
+         provider_connection_id, provider_name, selected,
          revision, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
       id,
       input.messageId,
       input.position,
       input.content,
       input.reasoningText ?? null,
+      input.providerAttribution?.connectionId ?? null,
+      input.providerAttribution?.name ?? null,
       input.selected ? 1 : 0,
       input.now,
       input.now,
@@ -2887,6 +2904,12 @@ export class AppStore {
       content: String(row.content),
       reasoningText:
         typeof row.reasoning_text === "string" ? row.reasoning_text : null,
+      providerConnectionId:
+        typeof row.provider_connection_id === "string"
+          ? row.provider_connection_id
+          : null,
+      providerName:
+        typeof row.provider_name === "string" ? row.provider_name : null,
       selected: asBoolean(row.selected),
       revision: Number(row.revision),
       createdAt: String(row.created_at),

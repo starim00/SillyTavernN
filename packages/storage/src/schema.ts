@@ -696,4 +696,12 @@ export const migrations: readonly Migration[] = [
         );
     `,
   },
+  {
+    version: 16,
+    name: "swipe-provider-attribution",
+    sql: `
+      ALTER TABLE swipes ADD COLUMN provider_connection_id TEXT;
+      ALTER TABLE swipes ADD COLUMN provider_name TEXT;
+    `,
+  },
 ];

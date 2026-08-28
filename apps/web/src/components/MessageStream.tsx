@@ -409,6 +409,8 @@ function MarkdownMessageContent({
 
 type MessageCardProps = {
   message: WorkspaceMessage;
+  userName?: string;
+  cardName?: string;
   promptTemplateDisplay?: { content: string; trusted: boolean } | undefined;
   messageIndex?: number;
   isLast: boolean;
@@ -429,6 +431,8 @@ type MessageCardProps = {
 
 export const MessageCard = memo(function MessageCard({
   message,
+  userName = "你",
+  cardName = "模型",
   promptTemplateDisplay,
   messageIndex = 0,
   isLast,
@@ -452,7 +456,7 @@ export const MessageCard = memo(function MessageCard({
     Math.max(0, swipes.length - 1),
   );
   const canRegenerate = message.role === "assistant";
-  const actorLabel = message.role === "user" ? "你" : "模型";
+  const actorLabel = message.role === "user" ? userName : cardName;
   const displayContent =
     promptTemplateDisplay?.content ?? message.displayContent ?? message.content;
   const appliedRegexScriptIds = message.appliedRegexScriptIds ?? [];
@@ -494,6 +498,9 @@ export const MessageCard = memo(function MessageCard({
         <span className="message-role">
           {message.role === "user" ? "用户输入" : "模型回复"}
         </span>
+        {message.role === "assistant" && message.providerName ? (
+          <span className="message-provider">{message.providerName}</span>
+        ) : null}
         <time>{message.createdLabel}</time>
       </header>
 
@@ -687,6 +694,9 @@ export const MessageCard = memo(function MessageCard({
 type MessageStreamProps = {
   conversationId: string;
   messages: WorkspaceMessage[];
+  userName?: string;
+  cardName?: string;
+  currentProviderName?: string;
   promptTemplateDisplayByMessageId?: Readonly<
     Record<string, { content: string; trusted: boolean }>
   >;
@@ -717,6 +727,9 @@ type MessageStreamProps = {
 export function MessageStream({
   conversationId,
   messages,
+  userName = "你",
+  cardName = "模型",
+  currentProviderName,
   promptTemplateDisplayByMessageId,
   messageFloorById,
   hasMore = false,
@@ -831,6 +844,8 @@ export function MessageStream({
             <MessageCard
               key={message.id}
               message={message}
+              userName={userName}
+              cardName={cardName}
               promptTemplateDisplay={
                 promptTemplateDisplayByMessageId?.[message.id]
               }
@@ -862,7 +877,7 @@ export function MessageStream({
             >
               <header className="message-item__header">
                 <span className="speaker-mark" aria-hidden="true" />
-                <strong>模型</strong>
+                <strong>{cardName}</strong>
                 <span className="message-role">
                   {generation.status === "stopping"
                     ? "正在停止"
@@ -870,6 +885,11 @@ export function MessageStream({
                       ? "重新生成"
                       : "正在生成"}
                 </span>
+                {currentProviderName ? (
+                  <span className="message-provider">
+                    {currentProviderName}
+                  </span>
+                ) : null}
               </header>
               {generation.reasoningPreview ? (
                 <details className="message-reasoning" open>

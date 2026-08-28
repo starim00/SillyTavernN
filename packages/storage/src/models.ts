@@ -112,6 +112,8 @@ export interface Swipe {
   position: number;
   content: string;
   reasoningText: string | null;
+  providerConnectionId: string | null;
+  providerName: string | null;
   selected: boolean;
   revision: number;
   createdAt: string;

@@ -778,6 +778,15 @@ describe("workspace API client", () => {
                 content: "Welcome.",
                 displayContent: "Displayed welcome.",
                 appliedRegexScriptIds: ["preset-assistant-display"],
+                swipes: [
+                  {
+                    id: "swipe-assistant",
+                    content: "Welcome.",
+                    selected: true,
+                    providerConnectionId: "provider-claude",
+                    providerName: "Claude 主连接",
+                  },
+                ],
               },
               {
                 id: "message-tool",
@@ -810,6 +819,7 @@ describe("workspace API client", () => {
         content: "Welcome.",
         displayContent: "Displayed welcome.",
         appliedRegexScriptIds: ["preset-assistant-display"],
+        providerName: "Claude 主连接",
       }),
     ]);
     expect(fetch).toHaveBeenCalledWith(

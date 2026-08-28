@@ -68,6 +68,7 @@ export type WorkspaceMessage = {
   providerSawDone?: boolean;
   providerLastFrameType?: string;
   providerUpstreamRequestId?: string;
+  providerName?: string;
   swipes?: MessageSwipe[];
   activeSwipeIndex?: number;
 };
@@ -76,6 +77,8 @@ export type MessageSwipe = {
   id: string;
   content: string;
   reasoningText?: string;
+  providerConnectionId?: string;
+  providerName?: string;
 };
 
 export type ProviderProtocol =

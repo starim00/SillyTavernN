@@ -94,6 +94,8 @@ type ApiSwipe = {
   id: string;
   content: string;
   reasoningText?: string | null;
+  providerConnectionId?: string | null;
+  providerName?: string | null;
   selected?: boolean;
   position?: number;
 };
@@ -598,11 +600,15 @@ const normalizeMessage = (item: ApiMessage): WorkspaceMessage => {
       502,
     );
   }
-  const swipes = (item.swipes ?? []).map(({ id, content, reasoningText }) => ({
-    id,
-    content,
-    ...(reasoningText ? { reasoningText } : {}),
-  }));
+  const swipes = (item.swipes ?? []).map(
+    ({ id, content, reasoningText, providerConnectionId, providerName }) => ({
+      id,
+      content,
+      ...(reasoningText ? { reasoningText } : {}),
+      ...(providerConnectionId ? { providerConnectionId } : {}),
+      ...(providerName ? { providerName } : {}),
+    }),
+  );
   const selectedIndex = (item.swipes ?? []).findIndex(
     (swipe) => swipe.selected,
   );
@@ -637,6 +643,9 @@ const normalizeMessage = (item: ApiMessage): WorkspaceMessage => {
       : {}),
     ...(item.providerUpstreamRequestId
       ? { providerUpstreamRequestId: item.providerUpstreamRequestId }
+      : {}),
+    ...(selectedIndex >= 0 && swipes[selectedIndex]?.providerName
+      ? { providerName: swipes[selectedIndex].providerName }
       : {}),
     ...(swipes.length > 0
       ? { swipes, activeSwipeIndex: Math.max(0, selectedIndex) }

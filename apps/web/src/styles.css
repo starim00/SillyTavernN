@@ -1208,6 +1208,20 @@ select:focus-visible {
   font-weight: 670;
 }
 
+.message-provider {
+  max-width: min(180px, 32vw);
+  padding: 2px 7px;
+  overflow: hidden;
+  color: #466774;
+  background: #e8f4f5;
+  border: 1px solid #cde5e7;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .message-item__header time {
   margin-left: auto;
   color: var(--text-faint);

@@ -1179,6 +1179,10 @@ describe("AppStore", () => {
         providerLastFrameType: "chat.completion.chunk",
         providerUpstreamRequestId: "upstream-request-1",
         reasoningText: "Visible reasoning.",
+        providerAttribution: {
+          connectionId: "responses-1",
+          name: "Responses 主连接",
+        },
         providerContext: {
           connectionId: "responses-1",
           items: [{ type: "reasoning", id: "reasoning-1" }],
@@ -1198,10 +1202,14 @@ describe("AppStore", () => {
         expect.objectContaining({
           content: "Primary generated reply.",
           reasoningText: "Visible reasoning.",
+          providerConnectionId: "responses-1",
+          providerName: "Responses 主连接",
           selected: true,
         }),
         expect.objectContaining({
           content: "Alternative reply.",
+          providerConnectionId: "responses-1",
+          providerName: "Responses 主连接",
           selected: false,
         }),
       ]);

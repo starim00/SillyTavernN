@@ -510,6 +510,23 @@ export async function registerProviderRoutes(
         context.generations.delete(generationId);
         throw error;
       });
+    let providerConnection = {
+      id: input.connectionId,
+      name: input.connectionId,
+    };
+    try {
+      const storedConnection = context.store.getProviderConnection(
+        input.connectionId,
+      );
+      providerConnection = {
+        id: storedConnection.id,
+        name: storedConnection.name,
+      };
+    } catch (error) {
+      if (!(error instanceof StorageError) || error.statusCode !== 404) {
+        throw error;
+      }
+    }
     let setup: {
       capabilities: ReturnType<typeof provider.capabilities>;
       prompt: Awaited<ReturnType<typeof prepareConversationPrompt>>;
@@ -1001,6 +1018,10 @@ export async function registerProviderRoutes(
           conversationId,
           content: persistedContent,
           alternatives: persistedAlternatives,
+          providerAttribution: {
+            connectionId: providerConnection.id,
+            name: providerConnection.name,
+          },
           status:
             finishReason === "length"
               ? "partial"
@@ -1108,6 +1129,10 @@ export async function registerProviderRoutes(
           conversationId,
           content,
           alternatives,
+          providerAttribution: {
+            connectionId: providerConnection.id,
+            name: providerConnection.name,
+          },
           status: limitExceeded
             ? "partial"
             : controller.signal.aborted

@@ -97,6 +97,26 @@ function multipartConversationImport(input: {
   ]);
 }
 
+function multipartCardReplacement(input: {
+  boundary: string;
+  filename: string;
+  bytes: Buffer;
+  expectedRevision: number;
+  preserveWorldbooks?: boolean;
+}): Buffer {
+  return Buffer.concat([
+    Buffer.from(
+      `--${input.boundary}\r\nContent-Disposition: form-data; name="file"; filename="${input.filename}"\r\nContent-Type: application/octet-stream\r\n\r\n`,
+    ),
+    input.bytes,
+    Buffer.from(
+      `\r\n--${input.boundary}\r\nContent-Disposition: form-data; name="expectedRevision"\r\n\r\n${String(input.expectedRevision)}\r\n` +
+        `--${input.boundary}\r\nContent-Disposition: form-data; name="preserveWorldbooks"\r\n\r\n${String(input.preserveWorldbooks ?? true)}\r\n` +
+        `--${input.boundary}--\r\n`,
+    ),
+  ]);
+}
+
 function presetRegexScripts(replaceString: string) {
   return [
     {
@@ -1000,6 +1020,154 @@ describe("portable import routes", () => {
       connectionId: "provider-portable",
       items: [{ type: "reasoning", id: "provider-item-portable" }],
     });
+  });
+
+  it("replaces a card transactionally while preserving chats, identities, variables, and worldbooks", async () => {
+    const { app, context } = await application();
+    const initial = context.imports.importCard(
+      JSON.stringify({
+        spec: "chara_card_v3",
+        spec_version: "3.0",
+        data: {
+          id: "card-update-fixture",
+          name: "Original update fixture",
+          description: "Before replacement",
+          first_mes: "Original greeting",
+          character_book: {
+            name: "Retained embedded book",
+            entries: {
+              "0": { uid: 0, key: ["harbor"], content: "Original lore" },
+            },
+          },
+        },
+      }),
+      { filename: "original-update-fixture.json" },
+    );
+    const participantId = initial.participantIds[0]!;
+    const conversation = context.store.createConversation({
+      id: "conversation-card-update",
+      cardId: initial.card.id,
+      title: "Conversation to preserve",
+    });
+    const message = context.store.addAssistantMessage({
+      id: "message-card-update",
+      conversationId: conversation.id,
+      participantId,
+      content: "Historical content",
+    });
+    context.store.setExtensionSetting(
+      "stn.tavern-helper",
+      `variables:card:${initial.card.id}`,
+      { score: 7 },
+    );
+    context.store.setExtensionSetting(
+      "stn.regex",
+      `card:${initial.card.id}`,
+      true,
+    );
+    context.store.setExtensionSetting(
+      "stn.tavern-helper",
+      `card:${initial.card.id}`,
+      true,
+    );
+
+    const replacementSource = {
+      spec: "chara_card_v3",
+      spec_version: "3.0",
+      data: {
+        id: "incoming-id-must-not-replace-target",
+        name: "Updated role card",
+        description: "After replacement",
+        first_mes: "Updated greeting",
+        extensions: {
+          regex_scripts: presetRegexScripts("updated"),
+          tavern_helper: tavernHelperWithContent("/* updated card */"),
+        },
+        character_book: {
+          name: "Incoming embedded book",
+          entries: {
+            "0": { uid: 0, key: ["new"], content: "Incoming lore" },
+          },
+        },
+      },
+    };
+    const boundary = "stn-card-replacement";
+    const replaced = await app.inject({
+      method: "POST",
+      url: `/api/cards/${initial.card.id}/replace`,
+      headers: {
+        "content-type": `multipart/form-data; boundary=${boundary}`,
+      },
+      payload: multipartCardReplacement({
+        boundary,
+        filename: "updated-role-card.json",
+        bytes: Buffer.from(JSON.stringify(replacementSource)),
+        expectedRevision: initial.card.revision,
+      }),
+    });
+
+    expect(replaced.statusCode).toBe(200);
+    expect(replaced.json()).toMatchObject({
+      data: {
+        card: {
+          id: initial.card.id,
+          name: "Updated role card",
+          worldbookIds: initial.worldbookIds,
+        },
+        conversations: [{ id: conversation.id, cardId: initial.card.id }],
+        participantIds: [participantId],
+        worldbookIds: initial.worldbookIds,
+        regexScriptCount: 1,
+        tavernHelperScriptCount: 1,
+      },
+    });
+    expect(context.store.getMessage(message.id)).toMatchObject({
+      content: "Historical content",
+      participantId,
+    });
+    expect(context.store.listCardConversations(initial.card.id)).toHaveLength(
+      1,
+    );
+    expect(
+      context.store.getExtensionSetting(
+        "stn.tavern-helper",
+        `variables:card:${initial.card.id}`,
+      ).value,
+    ).toEqual({ score: 7 });
+    expect(
+      context.store.getExtensionSetting("stn.regex", `card:${initial.card.id}`)
+        .value,
+    ).toBe(false);
+    expect(
+      context.store.getExtensionSetting(
+        "stn.tavern-helper",
+        `card:${initial.card.id}`,
+      ).value,
+    ).toBe(false);
+
+    const staleBoundary = "stn-card-replacement-stale";
+    const stale = await app.inject({
+      method: "POST",
+      url: `/api/cards/${initial.card.id}/replace`,
+      headers: {
+        "content-type": `multipart/form-data; boundary=${staleBoundary}`,
+      },
+      payload: multipartCardReplacement({
+        boundary: staleBoundary,
+        filename: "stale-role-card.json",
+        bytes: Buffer.from(
+          JSON.stringify({
+            ...replacementSource,
+            data: { ...replacementSource.data, name: "Stale overwrite" },
+          }),
+        ),
+        expectedRevision: initial.card.revision,
+      }),
+    });
+    expect(stale.statusCode).toBe(409);
+    expect(context.store.getCard(initial.card.id).name).toBe(
+      "Updated role card",
+    );
   });
 });
 

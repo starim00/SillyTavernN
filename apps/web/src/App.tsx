@@ -59,6 +59,7 @@ import {
   preparePromptTemplate,
   countPreparedPromptTokens,
   proposalFromGenerationToolEvent,
+  replaceRoleCard,
   reorderPresetPrompts as reorderPresetPromptsOnServer,
   saveProviderConnection,
   saveTavernHelperScripts,
@@ -1834,6 +1835,53 @@ export default function App() {
     [showToast, apiOnline, state.selectedPresetId],
   );
 
+  const updateRoleCard = useCallback(
+    async (card: RoleCard, file: File, preserveWorldbooks: boolean) => {
+      if (!apiOnline) {
+        showToast("离线工作区不能更新角色卡。", "warning");
+        throw new Error("Card update requires the local service.");
+      }
+      try {
+        const replaced = await replaceRoleCard({
+          card,
+          file,
+          preserveWorldbooks,
+        });
+        const payload = await loadWorkspaceFromApi(
+          state.selectedPresetId,
+          state.selectedConversationId,
+          state.selectedProviderId,
+        );
+        dispatch({ type: "bootstrap/api", payload });
+        const executableCount =
+          replaced.regexScriptCount + replaced.tavernHelperScriptCount;
+        showToast(
+          `角色卡已更新为“${replaced.card.name}”；${String(replaced.conversations.length)} 个历史对话保持不变。${
+            executableCount > 0
+              ? ` 检测到 ${String(executableCount)} 项正则或脚本，已保持禁用。`
+              : ""
+          }`,
+          "success",
+        );
+      } catch (error) {
+        showToast(
+          error instanceof WorkspaceApiError && error.status === 409
+            ? "角色卡正在生成内容或已被其他页面修改；请结束生成并刷新后重试。"
+            : "角色卡更新失败；原角色卡和历史对话没有改变。",
+          "warning",
+        );
+        throw new Error("Card update failed", { cause: error });
+      }
+    },
+    [
+      apiOnline,
+      showToast,
+      state.selectedConversationId,
+      state.selectedPresetId,
+      state.selectedProviderId,
+    ],
+  );
+
   const removePromptPreset = useCallback(
     async (presetToDelete: PromptPreset) => {
       if (!apiOnline) {
@@ -2874,6 +2922,7 @@ export default function App() {
         onDeletePersona={removePersona}
         onCreateConversation={createConversationSpace}
         onImport={importFile}
+        onReplaceCard={updateRoleCard}
         onInstallPlugin={installPlugin}
         onTogglePlugin={togglePlugin}
         onPermission={changePermission}
@@ -3352,6 +3401,12 @@ export default function App() {
             dispatch({
               type: "modal/set",
               modal: { kind: "create_conversation", cardId },
+            })
+          }
+          onUpdateCard={(card) =>
+            dispatch({
+              type: "modal/set",
+              modal: { kind: "update_card", cardId: card.id },
             })
           }
           onDeleteCard={(card) => void removeRoleCard(card)}

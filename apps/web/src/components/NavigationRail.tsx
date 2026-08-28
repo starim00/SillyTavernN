@@ -1,4 +1,11 @@
-import { Books, MagnifyingGlass, Plus, Trash, X } from "@phosphor-icons/react";
+import {
+  ArrowClockwise,
+  Books,
+  MagnifyingGlass,
+  Plus,
+  Trash,
+  X,
+} from "@phosphor-icons/react";
 import { useDeferredValue, useMemo, useState } from "react";
 
 import type { RoleCard } from "../domain/workspace";
@@ -10,6 +17,7 @@ type NavigationRailProps = {
   selectedCardId: string;
   onSelectCard: (id: string) => void;
   onCreateConversation: (cardId: string) => void;
+  onUpdateCard: (card: RoleCard) => void;
   onDeleteCard: (card: RoleCard) => void;
   onClose: () => void;
 };
@@ -20,6 +28,7 @@ export function NavigationRail({
   selectedCardId,
   onSelectCard,
   onCreateConversation,
+  onUpdateCard,
   onDeleteCard,
   onClose,
 }: NavigationRailProps) {
@@ -100,6 +109,13 @@ export function NavigationRail({
               </button>
               {selected ? (
                 <>
+                  <IconButton
+                    compact
+                    className="character-row__update"
+                    label={`更新角色卡 ${card.name}`}
+                    icon={<ArrowClockwise size={15} />}
+                    onClick={() => onUpdateCard(card)}
+                  />
                   <IconButton
                     compact
                     className="character-row__new"

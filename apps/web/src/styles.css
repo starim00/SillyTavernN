@@ -711,10 +711,11 @@ select:focus-visible {
 }
 
 .character-row.is-selected .world-row {
-  padding-right: 72px;
+  padding-right: 104px;
 }
 
 .character-row__new,
+.character-row__update,
 .character-row__delete {
   position: absolute;
   top: 50%;
@@ -723,6 +724,10 @@ select:focus-visible {
 
 .character-row__new {
   right: 38px;
+}
+
+.character-row__update {
+  right: 69px;
 }
 
 .character-row__delete {

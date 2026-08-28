@@ -27,6 +27,7 @@ import {
   loadWorkspaceFromApi,
   preparePromptTemplate,
   proposalFromGenerationToolEvent,
+  replaceRoleCard,
   reorderPresetPrompts,
   saveProviderConnection,
   saveWorkspacePreferences,
@@ -1422,6 +1423,54 @@ describe("workspace API client", () => {
       expectedWorldbookIds: card.worldbookIds,
       worldbookIds: nextWorldbookIds,
     });
+  });
+
+  it("uploads a replacement card with revision and worldbook preservation intent", async () => {
+    const state = createDemoWorkspace();
+    const card = state.cards[0]!;
+    const file = new File(["{}"], "updated-card.json", {
+      type: "application/json",
+    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        data: {
+          card: { ...card, name: "Updated card" },
+          conversations: [
+            {
+              id: "conversation-preserved",
+              title: "Preserved",
+              cardId: card.id,
+            },
+          ],
+          regexScriptCount: 2,
+          tavernHelperScriptCount: 1,
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await replaceRoleCard({
+      card,
+      file,
+      preserveWorldbooks: true,
+    });
+
+    expect(result).toMatchObject({
+      card: { id: card.id, name: "Updated card" },
+      conversations: [{ id: "conversation-preserved" }],
+      regexScriptCount: 2,
+      tavernHelperScriptCount: 1,
+    });
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ];
+    expect(url).toBe(`/api/cards/${encodeURIComponent(card.id)}/replace`);
+    expect(init).toEqual(expect.objectContaining({ method: "POST" }));
+    const body = (init as RequestInit).body as FormData;
+    expect(body.get("file")).toBe(file);
+    expect(body.get("expectedRevision")).toBe(String(card.revision));
+    expect(body.get("preserveWorldbooks")).toBe("true");
   });
 
   it("blocks chat import until a role card is selected", async () => {

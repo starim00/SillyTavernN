@@ -2641,6 +2641,40 @@ export async function importPortableFile(
   return { kind, result: response.data };
 }
 
+export async function replaceRoleCard(input: {
+  card: RoleCard;
+  file: File;
+  preserveWorldbooks: boolean;
+}): Promise<{
+  card: RoleCard;
+  conversations: ConversationSpace[];
+  regexScriptCount: number;
+  tavernHelperScriptCount: number;
+}> {
+  const formData = new FormData();
+  formData.set("file", input.file);
+  formData.set("expectedRevision", String(input.card.revision));
+  formData.set("preserveWorldbooks", String(input.preserveWorldbooks));
+  const response = await request<
+    ApiEnvelope<{
+      card: ApiCard;
+      conversations: ApiConversation[];
+      regexScriptCount: number;
+      tavernHelperScriptCount: number;
+    }>
+  >(`/cards/${encodeURIComponent(input.card.id)}/replace`, {
+    method: "POST",
+    body: formData,
+    timeoutMs: 20_000,
+  });
+  return {
+    card: normalizeCard(response.data.card, response.data.conversations),
+    conversations: response.data.conversations.map(normalizeConversation),
+    regexScriptCount: response.data.regexScriptCount,
+    tavernHelperScriptCount: response.data.tavernHelperScriptCount,
+  };
+}
+
 export async function exportConversationArchive(
   conversationId: string,
 ): Promise<ConversationArchive> {

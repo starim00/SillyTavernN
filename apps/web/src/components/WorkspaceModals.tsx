@@ -144,6 +144,96 @@ function ImportModal({
   );
 }
 
+function UpdateCardModal({
+  card,
+  online,
+  onClose,
+  onReplace,
+}: {
+  card: RoleCard;
+  online: boolean;
+  onClose: () => void;
+  onReplace: (
+    card: RoleCard,
+    file: File,
+    preserveWorldbooks: boolean,
+  ) => Promise<void>;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [preserveWorldbooks, setPreserveWorldbooks] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!file || submitting) return;
+    setSubmitting(true);
+    try {
+      await onReplace(card, file, preserveWorldbooks);
+      onClose();
+    } catch {
+      // The parent reports the server failure and keeps this modal open.
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <WorkspaceModalFrame
+      title="更新角色卡"
+      description={`用新文件替换“${card.name}”的角色卡内容，同时保留卡片身份和全部历史对话。`}
+      icon={<ArrowClockwise size={22} />}
+      onClose={onClose}
+    >
+      <form className="modal-form" onSubmit={submit}>
+        <label className="file-drop">
+          <FileArrowUp size={28} aria-hidden="true" />
+          <strong>{file?.name ?? "选择新版角色卡文件"}</strong>
+          <span>支持 JSON、PNG 与 CharX 角色卡</span>
+          <input
+            type="file"
+            accept=".json,.png,.charx,.zip"
+            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+          />
+        </label>
+        <label className="check-row">
+          <input
+            type="checkbox"
+            checked={preserveWorldbooks}
+            onChange={(event) => setPreserveWorldbooks(event.target.checked)}
+          />
+          <span>保留当前已绑定的世界书组合</span>
+        </label>
+        <div className="modal-note">
+          <ShieldWarning size={17} />
+          <span>
+            名称、描述、开场白、提示词、参与者与卡内扩展会由新文件替换；聊天、变量和已保存的本地资源不会删除。新文件中的正则与脚本需要重新授权。
+          </span>
+        </div>
+        {!online ? (
+          <p className="offline-note">连接本地服务后才能更新角色卡。</p>
+        ) : null}
+        <footer className="modal-actions">
+          <button
+            className="button button--quiet"
+            type="button"
+            onClick={onClose}
+          >
+            取消
+          </button>
+          <button
+            className="button button--primary"
+            type="submit"
+            disabled={!file || submitting || !online}
+          >
+            <ArrowClockwise size={17} />
+            {submitting ? "正在更新" : "确认更新"}
+          </button>
+        </footer>
+      </form>
+    </WorkspaceModalFrame>
+  );
+}
+
 function ProviderEditor({
   current,
   online,
@@ -1424,6 +1514,11 @@ type WorkspaceModalsProps = {
     cardId: string;
   }) => Promise<void>;
   onImport: (file: File) => Promise<void>;
+  onReplaceCard?: (
+    card: RoleCard,
+    file: File,
+    preserveWorldbooks: boolean,
+  ) => Promise<void>;
   onInstallPlugin: (plugin: CompatibilityPlugin) => Promise<void>;
   onTogglePlugin: (plugin: CompatibilityPlugin) => Promise<void>;
   onPermission: (
@@ -1483,6 +1578,7 @@ export function WorkspaceModals({
   onDeletePersona,
   onCreateConversation,
   onImport,
+  onReplaceCard = async () => undefined,
   onInstallPlugin,
   onTogglePlugin,
   onPermission,
@@ -1505,6 +1601,17 @@ export function WorkspaceModals({
     return (
       <ImportModal online={apiOnline} onClose={onClose} onImport={onImport} />
     );
+  }
+  if (modal.kind === "update_card") {
+    const card = cards.find((candidate) => candidate.id === modal.cardId);
+    return card ? (
+      <UpdateCardModal
+        card={card}
+        online={apiOnline}
+        onClose={onClose}
+        onReplace={onReplaceCard}
+      />
+    ) : null;
   }
   if (modal.kind === "plugins") {
     return (

@@ -586,6 +586,60 @@ export async function registerWorkspaceRoutes(
     }
   });
 
+  app.post<{ Params: { id: string } }>(
+    "/api/cards/:id/replace",
+    async (request) => {
+      const cardId = entityId.parse(request.params.id);
+      const file = await receiveImportUpload(request);
+      try {
+        const input = z
+          .object({
+            expectedRevision: z.coerce.number().int().nonnegative(),
+            preserveWorldbooks: z
+              .enum(["true", "false"])
+              .transform((value) => value === "true")
+              .default(true),
+          })
+          .strict()
+          .parse(file.fields);
+        const conversationIds = new Set(
+          context.store
+            .listCardConversations(cardId)
+            .map((conversation) => conversation.id),
+        );
+        if (
+          Array.from(context.generations.values()).some((generation) =>
+            conversationIds.has(generation.conversationId),
+          )
+        ) {
+          throw new StorageError(
+            "card_generation_active",
+            "A card cannot be replaced while one of its conversations is generating.",
+            409,
+            { cardId },
+          );
+        }
+        const replaced = await context.imports.replaceCardFile(file.path, {
+          cardId,
+          expectedRevision: input.expectedRevision,
+          preserveWorldbooks: input.preserveWorldbooks,
+          options: {
+            ...(file.filename === undefined ? {} : { filename: file.filename }),
+          },
+        });
+        return envelope({
+          ...replaced,
+          card: cardDto(context, cardId),
+          conversations: context.store
+            .listCardConversations(cardId)
+            .map((conversation) => conversationDto(context, conversation.id)),
+        });
+      } finally {
+        await file.cleanup();
+      }
+    },
+  );
+
   app.get<{
     Querystring: { cardId?: string; limit?: string; cursor?: string };
   }>("/api/conversations", async (request) => {

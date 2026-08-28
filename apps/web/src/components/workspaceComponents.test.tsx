@@ -114,6 +114,42 @@ describe("workspace components", () => {
     }
   });
 
+  it("explains the preserved and replaced scopes before updating a role card", () => {
+    const state = createDemoWorkspace();
+    const card = state.cards[0]!;
+    const html = renderToStaticMarkup(
+      <WorkspaceModals
+        modal={{ kind: "update_card", cardId: card.id }}
+        apiOnline
+        cards={state.cards}
+        selectedCard={card}
+        plugins={state.plugins}
+        legacyHostPlugins={{}}
+        worldbooks={state.worldbooks}
+        providerConnections={state.providerConnections}
+        selectedProviderId={state.selectedProviderId}
+        onClose={vi.fn()}
+        onCreateConversation={vi.fn()}
+        onImport={vi.fn()}
+        onReplaceCard={vi.fn()}
+        onInstallPlugin={vi.fn()}
+        onTogglePlugin={vi.fn()}
+        onPermission={vi.fn()}
+        onSelectProvider={vi.fn()}
+        onSaveProvider={vi.fn()}
+        onExportProvider={vi.fn()}
+        onLoadProviderModels={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain("更新角色卡");
+    expect(html).toContain(card.name);
+    expect(html).toContain("保留卡片身份和全部历史对话");
+    expect(html).toContain("保留当前已绑定的世界书组合");
+    expect(html).toContain("新文件中的正则与脚本需要重新授权");
+    expect(html).toContain('accept=".json,.png,.charx,.zip"');
+  });
+
   it("keeps the Provider editor aligned with the selected connection", () => {
     const first: ProviderConnection = {
       id: "provider-first",

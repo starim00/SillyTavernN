@@ -14,6 +14,7 @@ import { CardSchema, type JsonObject, type JsonValue } from "@stn/contracts";
 import type { AppStore } from "@stn/storage";
 
 import { parseImportFile } from "./import-worker.js";
+import { normalizedCard as readNormalizedCard } from "./normalized-content.js";
 
 function jsonObject(value: unknown): JsonObject {
   return JSON.parse(JSON.stringify(value)) as JsonObject;
@@ -184,6 +185,226 @@ export class ImportService {
       source,
       options,
     );
+  }
+
+  replaceCard(
+    source: string | Uint8Array,
+    input: {
+      cardId: string;
+      expectedRevision: number;
+      preserveWorldbooks?: boolean;
+      options?: ImportOptions;
+    },
+  ) {
+    const imported = importPortableCard(source, input.options ?? {});
+    return this.persistCardReplacement(imported, source, input);
+  }
+
+  async replaceCardFile(
+    filePath: string,
+    input: {
+      cardId: string;
+      expectedRevision: number;
+      preserveWorldbooks?: boolean;
+      options?: ImportOptions;
+    },
+  ): Promise<ReturnType<ImportService["replaceCard"]>> {
+    const [source, imported] = await Promise.all([
+      readFile(filePath),
+      parseImportFile(filePath, "card", input.options ?? {}),
+    ]);
+    return this.persistCardReplacement(
+      imported as ReturnType<typeof importPortableCard>,
+      source,
+      input,
+    );
+  }
+
+  private persistCardReplacement(
+    imported: ReturnType<typeof importPortableCard>,
+    source: string | Uint8Array,
+    input: {
+      cardId: string;
+      expectedRevision: number;
+      preserveWorldbooks?: boolean;
+      options?: ImportOptions;
+    },
+  ) {
+    const current = this.store.getCard(input.cardId);
+    const previousNormalized = readNormalizedCard(current);
+    const parsedCard = CardSchema.parse(imported.value);
+    const stagedPngAsset = this.stageImportedPngAsset(
+      source,
+      input.options?.filename,
+    );
+    const sourceAsset = stagedPngAsset?.asset;
+    const previousParticipants = this.store.listCardParticipants(current.id);
+    const previousNormalizedParticipants = previousNormalized
+      ? [
+          ...previousNormalized.participants,
+          ...(previousNormalized.narrator ? [previousNormalized.narrator] : []),
+        ]
+      : [];
+    const incomingParticipants = [
+      ...parsedCard.participants,
+      ...(parsedCard.narrator ? [parsedCard.narrator] : []),
+    ];
+    const retainedParticipants = incomingParticipants.map(
+      (participant, index) => ({
+        ...participant,
+        id:
+          previousNormalizedParticipants[index]?.id ??
+          previousParticipants[index]?.id ??
+          `participant-${randomUUID()}`,
+        ...(participant.avatarAssetId !== undefined
+          ? {}
+          : previousNormalizedParticipants[index]?.avatarAssetId === undefined
+            ? {}
+            : {
+                avatarAssetId:
+                  previousNormalizedParticipants[index].avatarAssetId,
+              }),
+      }),
+    );
+    if (sourceAsset !== undefined && retainedParticipants[0] !== undefined) {
+      retainedParticipants[0] = {
+        ...retainedParticipants[0],
+        avatarAssetId: sourceAsset.id,
+      };
+    }
+    const incomingAssets =
+      sourceAsset === undefined
+        ? parsedCard.assets
+        : [
+            sourceAsset,
+            ...parsedCard.assets.filter((asset) => asset.id !== sourceAsset.id),
+          ];
+    const incomingAssetIds = new Set(incomingAssets.map((asset) => asset.id));
+    const assets = [
+      ...incomingAssets,
+      ...(previousNormalized?.assets ?? []).filter(
+        (asset) => !incomingAssetIds.has(asset.id),
+      ),
+    ];
+    let normalizedCard;
+    try {
+      normalizedCard = CardSchema.parse({
+        ...parsedCard,
+        id: current.id,
+        participants: retainedParticipants.slice(
+          0,
+          parsedCard.participants.length,
+        ),
+        ...(parsedCard.narrator === undefined
+          ? { narrator: undefined }
+          : { narrator: retainedParticipants.at(-1) }),
+        assets,
+        createdAt: previousNormalized?.createdAt ?? current.createdAt,
+      });
+      this.publishStagedPngAsset(stagedPngAsset);
+    } catch (error) {
+      this.cleanupStagedPngAsset(stagedPngAsset);
+      throw error;
+    }
+
+    try {
+      return this.store.database.transaction(() => {
+        const locked = this.store.getCard(input.cardId);
+        this.store.assertRevision(
+          "card",
+          locked.id,
+          locked.revision,
+          input.expectedRevision,
+        );
+        const currentWorldbookIds = this.store.database
+          .all<{ worldbook_id: string }>(
+            `SELECT worldbook_id
+             FROM worldbook_bindings
+             WHERE scope_type = 'card' AND scope_id = ?
+             ORDER BY created_at, id`,
+            locked.id,
+          )
+          .map((binding) => binding.worldbook_id);
+        const worldbookIds =
+          input.preserveWorldbooks !== false
+            ? currentWorldbookIds
+            : imported.embeddedWorldbooks.map((worldbook) => {
+                const rekeyed = {
+                  ...worldbook,
+                  id: `worldbook-${randomUUID()}`,
+                  entries: worldbook.entries.map((entry) => ({
+                    ...entry,
+                    id: `worldbook-entry-${randomUUID()}`,
+                    agentEditable: false,
+                  })),
+                  bindings: [],
+                };
+                return this.persistWorldbook(rekeyed).id;
+              });
+        const persistedNormalized = CardSchema.parse({
+          ...normalizedCard,
+          worldbookIds,
+          updatedAt: new Date().toISOString(),
+        });
+        const replaced = this.store.replaceCardContent({
+          id: locked.id,
+          expectedRevision: input.expectedRevision,
+          card: {
+            kind: persistedNormalized.kind,
+            name: persistedNormalized.name,
+            description: persistedNormalized.description,
+            legacyPayload: jsonObject({
+              normalized: persistedNormalized,
+              compatibility: persistedNormalized.compatibility ?? {},
+            }),
+          },
+          participants: retainedParticipants.map((participant) => ({
+            id: participant.id,
+            name: participant.name,
+            role: participant.kind,
+            profile: jsonObject(participant),
+            legacyPayload: jsonObject(
+              participant.compatibility?.unknownFields ?? {},
+            ),
+          })),
+        });
+        if (input.preserveWorldbooks === false) {
+          this.store.replaceCardWorldbooks({
+            cardId: locked.id,
+            expectedWorldbookIds: currentWorldbookIds,
+            worldbookIds,
+          });
+        }
+        this.store.setExtensionSetting("stn.regex", `card:${locked.id}`, false);
+        this.store.setExtensionSetting(
+          "stn.tavern-helper",
+          `card:${locked.id}`,
+          false,
+        );
+        const tavernHelper = inspectTavernHelperScripts(persistedNormalized);
+        return {
+          card: replaced.card,
+          participantIds: replaced.participants.map(
+            (participant) => participant.id,
+          ),
+          worldbookIds,
+          regexScriptCount: Array.isArray(
+            persistedNormalized.extensions.regex_scripts,
+          )
+            ? persistedNormalized.extensions.regex_scripts.length
+            : 0,
+          tavernHelperScriptCount: tavernHelper.scriptCount,
+          enabledTavernHelperScriptCount: tavernHelper.enabledScriptCount,
+          diagnostics: imported.diagnostics.map((diagnostic) =>
+            jsonObject(diagnostic),
+          ),
+          sourceFormat: imported.sourceFormat,
+        };
+      });
+    } catch (error) {
+      this.cleanupStagedPngAsset(stagedPngAsset);
+      throw error;
+    }
   }
 
   private persistCardImport(

@@ -1647,6 +1647,84 @@ describe("AppStore", () => {
       store.close();
     }
   });
+
+  it("replaces card content while retaining participant identity for historical messages", () => {
+    const store = new AppStore();
+    try {
+      const created = store.createCard({
+        id: "card-replace-content",
+        kind: "character",
+        name: "Original card",
+        participants: [
+          {
+            id: "participant-retained",
+            name: "Original participant",
+            role: "character",
+            profile: {
+              id: "participant-retained",
+              name: "Original participant",
+            },
+          },
+          {
+            id: "participant-detached",
+            name: "Removed participant",
+            role: "character",
+          },
+        ],
+      });
+      const conversation = store.createConversation({
+        id: "conversation-retained",
+        cardId: created.card.id,
+        title: "Historical chat",
+      });
+      const message = store.addAssistantMessage({
+        id: "message-retained-author",
+        conversationId: conversation.id,
+        participantId: "participant-retained",
+        content: "Historical reply",
+      });
+
+      const replaced = store.replaceCardContent({
+        id: created.card.id,
+        expectedRevision: created.card.revision,
+        card: {
+          kind: "ensemble",
+          name: "Updated card",
+          description: "Updated description",
+          legacyPayload: { normalized: { fixture: "updated" } },
+        },
+        participants: [
+          {
+            id: "participant-retained",
+            name: "Updated participant",
+            role: "narrator",
+            profile: {
+              id: "participant-retained",
+              name: "Updated participant",
+            },
+          },
+        ],
+      });
+
+      expect(replaced.card).toMatchObject({
+        id: created.card.id,
+        kind: "ensemble",
+        name: "Updated card",
+        revision: created.card.revision + 1,
+      });
+      expect(replaced.participants).toMatchObject([
+        { id: "participant-retained", name: "Updated participant" },
+      ]);
+      expect(store.getMessage(message.id).participantId).toBe(
+        "participant-retained",
+      );
+      expect(store.listCardConversations(created.card.id)).toHaveLength(1);
+      expect(store.listCardParticipants(created.card.id)).toHaveLength(1);
+      expect(store.getParticipant("participant-detached").cardId).toBeNull();
+    } finally {
+      store.close();
+    }
+  });
 });
 
 describe("AgentStore", () => {

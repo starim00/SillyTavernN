@@ -358,6 +358,7 @@ export type PanelId = "preset" | "regex" | "worldbooks";
 export type ModalState =
   | { kind: "closed" }
   | { kind: "import" }
+  | { kind: "update_card"; cardId: string }
   | { kind: "plugins" }
   | { kind: "extensions" }
   | { kind: "regex" }

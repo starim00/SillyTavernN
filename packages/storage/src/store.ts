@@ -94,6 +94,18 @@ export interface CreateParticipantInput {
   legacyPayload?: JsonObject;
 }
 
+export interface ReplaceCardContentInput {
+  id: string;
+  expectedRevision: number;
+  card: {
+    kind: CardKind;
+    name: string;
+    description: string;
+    legacyPayload: JsonObject;
+  };
+  participants: CreateParticipantInput[];
+}
+
 export interface PersistAssistantGenerationInput {
   conversationId: string;
   content: string;
@@ -268,6 +280,84 @@ export class AppStore {
         throw new ConflictError(`Card '${current.id}' changed concurrently.`);
       }
       return this.getCard(current.id);
+    });
+  }
+
+  replaceCardContent(input: ReplaceCardContentInput): {
+    card: Card;
+    participants: Participant[];
+  } {
+    return this.database.transaction(() => {
+      const current = this.getCard(input.id);
+      this.assertRevision(
+        "card",
+        current.id,
+        current.revision,
+        input.expectedRevision,
+      );
+      const now = timestamp();
+      const existing = this.listCardParticipants(current.id);
+      const retainedIds = new Set<string>();
+      const participants = input.participants.map((participant) => {
+        const retained =
+          existing.find(
+            (candidate) =>
+              candidate.id === participant.id && !retainedIds.has(candidate.id),
+          ) ?? existing.find((candidate) => !retainedIds.has(candidate.id));
+        if (!retained) {
+          return this.createParticipantInternal(
+            { ...participant, cardId: current.id },
+            now,
+          );
+        }
+        retainedIds.add(retained.id);
+        const profile = {
+          ...(participant.profile ?? {}),
+          id: retained.id,
+        };
+        this.database.run(
+          `UPDATE participants
+           SET card_id = ?, name = ?, role = ?, profile_json = ?,
+               legacy_payload_json = ?, updated_at = ?
+           WHERE id = ?`,
+          current.id,
+          participant.name,
+          participant.role ?? "participant",
+          encode(profile),
+          encode(participant.legacyPayload ?? {}),
+          now,
+          retained.id,
+        );
+        return this.getParticipant(retained.id);
+      });
+      for (const participant of existing) {
+        if (retainedIds.has(participant.id)) continue;
+        this.database.run(
+          "UPDATE participants SET card_id = NULL, updated_at = ? WHERE id = ?",
+          now,
+          participant.id,
+        );
+      }
+      this.database.run(
+        `UPDATE cards
+         SET kind = ?, name = ?, description = ?, legacy_payload_json = ?,
+             revision = revision + 1, updated_at = ?
+         WHERE id = ? AND revision = ?`,
+        input.card.kind,
+        input.card.name,
+        input.card.description,
+        encode(input.card.legacyPayload),
+        now,
+        current.id,
+        input.expectedRevision,
+      );
+      const changed = this.database.get<{ count: number }>(
+        "SELECT changes() AS count",
+      );
+      if ((changed?.count ?? 0) !== 1) {
+        throw new ConflictError(`Card '${current.id}' changed concurrently.`);
+      }
+      return { card: this.getCard(current.id), participants };
     });
   }
 

@@ -124,6 +124,9 @@ if [ "`$CHECK_ONLY" != '1' ]; then
   docker compose config --quiet
   docker compose build
   docker compose up -d
+  # The Web Nginx resolves the server container only at startup. Restart it
+  # after a server-only image change so it cannot retain the old container IP.
+  docker compose restart web
 
   if ! docker inspect "`$NGINX_CONTAINER" >/dev/null 2>&1; then
     echo "Required Nginx container is not available: `$NGINX_CONTAINER" >&2

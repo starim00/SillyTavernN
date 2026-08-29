@@ -107,7 +107,7 @@ class PoolWorker {
         current?.reject(new Error("REGEX_TIMEOUT"));
         this.pool.drain();
       });
-    }, EXECUTION_TIMEOUT_MS);
+    }, this.pool.executionTimeoutMs);
     this.worker.postMessage(pending.request);
   }
 
@@ -166,7 +166,10 @@ export class RegexWorkerPool {
   readonly #queue: Pending[] = [];
   #nextId = 1;
 
-  constructor(size = 2) {
+  constructor(
+    size = 2,
+    readonly executionTimeoutMs = EXECUTION_TIMEOUT_MS,
+  ) {
     this.#workers = Array.from({ length: size }, () => new PoolWorker(this));
   }
 
@@ -208,32 +211,40 @@ export class RegexWorkerPool {
         diagnostics: [limitDiagnostic("REGEX_INPUT_LIMIT")],
       };
     }
-    try {
-      const result = (await this.request({
-        operation: "apply",
-        text,
-        scripts,
-        options,
-      })) as RegexApplyResult;
-      if (byteLength(result.text) > MAX_OUTPUT_BYTES) {
-        return {
-          text,
-          appliedScriptIds: [],
-          diagnostics: [limitDiagnostic("REGEX_OUTPUT_LIMIT")],
-        };
+    let output = text;
+    const appliedScriptIds: string[] = [];
+    const diagnostics: Diagnostic[] = [];
+    for (const script of scripts) {
+      try {
+        const result = (await this.request({
+          operation: "apply",
+          text: output,
+          scripts: [script],
+          options,
+        })) as RegexApplyResult;
+        if (byteLength(result.text) > MAX_OUTPUT_BYTES) {
+          return {
+            text,
+            appliedScriptIds: [],
+            diagnostics: [limitDiagnostic("REGEX_OUTPUT_LIMIT")],
+          };
+        }
+        output = result.text;
+        appliedScriptIds.push(...result.appliedScriptIds);
+        diagnostics.push(...result.diagnostics);
+      } catch (error) {
+        const code =
+          error instanceof Error && error.message === "REGEX_TIMEOUT"
+            ? "REGEX_TIMEOUT"
+            : "REGEX_WORKER_FAILURE";
+        diagnostics.push(limitDiagnostic(code));
       }
-      return result;
-    } catch (error) {
-      const code =
-        error instanceof Error && error.message === "REGEX_TIMEOUT"
-          ? "REGEX_TIMEOUT"
-          : "REGEX_WORKER_FAILURE";
-      return {
-        text,
-        appliedScriptIds: [],
-        diagnostics: [limitDiagnostic(code)],
-      };
     }
+    return {
+      text: output,
+      appliedScriptIds,
+      diagnostics,
+    };
   }
 
   async assemble(input: PromptAssemblyInput): Promise<PromptAssemblyResult> {

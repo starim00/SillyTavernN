@@ -32,7 +32,7 @@ afterEach(async () => {
 
 describe("RegexWorkerPool", () => {
   it("terminates catastrophic regex execution and recovers with a new worker", async () => {
-    const pool = new RegexWorkerPool(1);
+    const pool = new RegexWorkerPool(1, 25);
     pools.push(pool);
     const dangerous = await pool.apply(
       `${"a".repeat(80_000)}!`,
@@ -50,6 +50,30 @@ describe("RegexWorkerPool", () => {
         target: "markdown",
       }),
     ).resolves.toMatchObject({ text: "safe" });
+  });
+
+  it("keeps successful replacements around a timed-out script", async () => {
+    const pool = new RegexWorkerPool(1, 25);
+    pools.push(pool);
+    const input = `${"a".repeat(80_000)}!`;
+    const result = await pool.apply(
+      input,
+      [
+        { ...script("^", "prefix:"), id: "before-timeout" },
+        { ...script("(a+)+$"), id: "timed-out" },
+        { ...script("!$", "?"), id: "after-timeout" },
+      ],
+      { placement: 2, target: "markdown" },
+    );
+
+    expect(result.text).toBe(`prefix:${"a".repeat(80_000)}?`);
+    expect(result.appliedScriptIds).toEqual([
+      "before-timeout",
+      "after-timeout",
+    ]);
+    expect(result.diagnostics.map((item) => item.code)).toContain(
+      "REGEX_TIMEOUT",
+    );
   });
 
   it("returns the original input when input or output limits are exceeded", async () => {

@@ -1676,6 +1676,24 @@ export class AppStore {
     return { ...this.getWorldbook(id), entries: this.listWorldbookEntries(id) };
   }
 
+  deleteWorldbook(id: string, expectedRevision: number): Worldbook {
+    return this.database.transaction(() => {
+      const current = this.getWorldbook(id);
+      this.assertRevision(
+        "worldbook",
+        current.id,
+        current.revision,
+        expectedRevision,
+      );
+      this.database.run(
+        "DELETE FROM worldbooks WHERE id = ? AND revision = ?",
+        id,
+        expectedRevision,
+      );
+      return current;
+    });
+  }
+
   /**
    * @deprecated Retained for compatibility metadata only. Agent write
    * authorization is evaluated per worldbook entry.

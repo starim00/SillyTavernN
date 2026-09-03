@@ -1169,6 +1169,33 @@ describe("portable import routes", () => {
       "Updated role card",
     );
   });
+
+  it("deletes an imported worldbook through the workspace API", async () => {
+    const { app, context } = await application();
+    const worldbook = context.store.createWorldbook({
+      id: "worldbook-delete-api",
+      name: "Delete API fixture",
+      source: "import",
+      entries: [{ content: "temporary" }],
+    });
+
+    const stale = await app.inject({
+      method: "DELETE",
+      url: `/api/worldbooks/${worldbook.id}`,
+      payload: { expectedRevision: worldbook.revision + 1 },
+    });
+    expect(stale.statusCode).toBe(409);
+
+    const response = await app.inject({
+      method: "DELETE",
+      url: `/api/worldbooks/${worldbook.id}`,
+      payload: { expectedRevision: worldbook.revision },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(context.store.listWorldbooks()).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: worldbook.id })]),
+    );
+  });
 });
 
 describe("prompt preset routes", () => {

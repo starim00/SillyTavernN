@@ -1202,6 +1202,7 @@ function WorldbookModal({
   onPermission,
   onSave,
   onSaveCardWorldbooks,
+  onDeleteWorldbook,
 }: {
   card: RoleCard | null;
   worldbooks: Worldbook[];
@@ -1217,6 +1218,7 @@ function WorldbookModal({
     patch: WorldbookEntryUpdate,
   ) => Promise<void>;
   onSaveCardWorldbooks: (worldbookIds: string[]) => Promise<void>;
+  onDeleteWorldbook: (worldbook: Worldbook) => Promise<void>;
 }) {
   const [query, setQuery] = useState("");
   const [selectedIds, setSelectedIds] = useState(
@@ -1292,31 +1294,48 @@ function WorldbookModal({
             {visibleWorldbooks.map((worldbook) => {
               const selected = selectedIds.has(worldbook.id);
               return (
-                <label
+                <div
                   className={`worldbook-library__option${
                     selected ? " worldbook-library__option--selected" : ""
                   }`}
                   key={worldbook.id}
                 >
-                  <input
-                    type="checkbox"
-                    checked={selected}
-                    onChange={() => toggleWorldbook(worldbook.id)}
-                  />
-                  <span className="worldbook-library__check" aria-hidden="true">
-                    {selected ? <CheckCircle size={17} weight="fill" /> : null}
-                  </span>
-                  <span className="worldbook-library__identity">
-                    <strong>{worldbook.name}</strong>
-                    <small>
-                      {worldbook.entries.length} 个条目
-                      {worldbook.imported ? " · 已导入" : " · 本地"}
-                    </small>
-                    {worldbook.description ? (
-                      <span>{worldbook.description}</span>
-                    ) : null}
-                  </span>
-                </label>
+                  <label className="worldbook-library__select">
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      onChange={() => toggleWorldbook(worldbook.id)}
+                    />
+                    <span
+                      className="worldbook-library__check"
+                      aria-hidden="true"
+                    >
+                      {selected ? (
+                        <CheckCircle size={17} weight="fill" />
+                      ) : null}
+                    </span>
+                    <span className="worldbook-library__identity">
+                      <strong>{worldbook.name}</strong>
+                      <small>
+                        {worldbook.entries.length} 个条目
+                        {worldbook.imported ? " · 已导入" : " · 本地"}
+                      </small>
+                      {worldbook.description ? (
+                        <span>{worldbook.description}</span>
+                      ) : null}
+                    </span>
+                  </label>
+                  {worldbook.imported ? (
+                    <IconButton
+                      compact
+                      className="worldbook-library__delete"
+                      label={`删除世界书 ${worldbook.name}`}
+                      icon={<Trash size={15} />}
+                      disabled={!online}
+                      onClick={() => void onDeleteWorldbook(worldbook)}
+                    />
+                  ) : null}
+                </div>
               );
             })}
             {visibleWorldbooks.length === 0 ? (
@@ -1538,6 +1557,7 @@ type WorkspaceModalsProps = {
     patch: WorldbookEntryUpdate,
   ) => Promise<void>;
   onSaveCardWorldbooks?: (worldbookIds: string[]) => Promise<void>;
+  onDeleteWorldbook?: (worldbook: Worldbook) => Promise<void>;
   onOpenPlugins?: () => void;
   onConfirmToolProposal?: () => void;
   onRejectToolProposal?: () => void;
@@ -1587,6 +1607,7 @@ export function WorkspaceModals({
   onSaveRegexScope = async () => undefined,
   onSaveWorldbookEntry = async () => undefined,
   onSaveCardWorldbooks = async () => undefined,
+  onDeleteWorldbook = async () => undefined,
   onOpenPlugins = () => undefined,
   onConfirmToolProposal = () => undefined,
   onRejectToolProposal = () => undefined,
@@ -1667,6 +1688,7 @@ export function WorkspaceModals({
         onPermission={onRequestWorldbookPermission}
         onSave={onSaveWorldbookEntry}
         onSaveCardWorldbooks={onSaveCardWorldbooks}
+        onDeleteWorldbook={onDeleteWorldbook}
       />
     );
   }

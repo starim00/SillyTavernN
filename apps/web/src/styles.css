@@ -3254,7 +3254,7 @@ select:focus-visible {
 .worldbook-library__option {
   position: relative;
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr);
+  grid-template-columns: 22px minmax(0, 1fr) auto;
   gap: 7px;
   padding: 9px;
   background: var(--surface-strong);
@@ -3267,6 +3267,17 @@ select:focus-visible {
     box-shadow 120ms ease;
 }
 
+.worldbook-library__select {
+  display: contents;
+  cursor: pointer;
+}
+
+.worldbook-library__delete {
+  align-self: center;
+  color: var(--color-coral-strong);
+  flex: 0 0 auto;
+}
+
 .worldbook-library__option:hover {
   border-color: #b9d1dc;
 }
@@ -3277,7 +3288,7 @@ select:focus-visible {
   box-shadow: 0 0 0 1px rgba(99, 182, 155, 0.08);
 }
 
-.worldbook-library__option > input {
+.worldbook-library__select > input {
   position: absolute;
   width: 1px;
   height: 1px;

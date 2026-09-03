@@ -13,6 +13,7 @@ import {
   callLegacyRpc,
   confirmAgentProposal,
   createConversationSpace,
+  deleteWorldbook,
   exportConversationArchive,
   generateConversation,
   importPortableFile,
@@ -48,6 +49,26 @@ const jsonResponse = (value: unknown, status = 200) =>
     status,
     headers: { "Content-Type": "application/json" },
   });
+
+describe("deleteWorldbook", () => {
+  it("sends the expected revision to the worldbook endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ data: {} }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await deleteWorldbook({
+      worldbookId: "book / imported",
+      expectedRevision: 4,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/worldbooks/book%20%2F%20imported",
+      expect.objectContaining({
+        method: "DELETE",
+        body: JSON.stringify({ expectedRevision: 4 }),
+      }),
+    );
+  });
+});
 
 const jsSlashRunnerProfile = LEGACY_PLUGIN_PROFILES["js-slash-runner"];
 const legacyHostPluginFixture = (

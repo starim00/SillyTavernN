@@ -2830,6 +2830,16 @@ export async function deletePromptPreset(input: {
   });
 }
 
+export async function deleteWorldbook(input: {
+  worldbookId: string;
+  expectedRevision: number;
+}): Promise<void> {
+  await request(`/worldbooks/${encodeURIComponent(input.worldbookId)}`, {
+    method: "DELETE",
+    body: JSON.stringify({ expectedRevision: input.expectedRevision }),
+  });
+}
+
 type ApiLegacyCapabilityGrant = {
   plugin_id?: unknown;
   pluginId?: unknown;

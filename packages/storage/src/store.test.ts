@@ -1608,6 +1608,52 @@ describe("AppStore", () => {
     }
   });
 
+  it("deletes a worldbook and all of its bindings and entries", () => {
+    const store = new AppStore();
+    try {
+      const { card } = store.createCard({
+        id: "card-worldbook-delete",
+        kind: "character",
+        name: "Delete fixture",
+      });
+      const worldbook = store.createWorldbook({
+        id: "book-delete",
+        name: "Delete me",
+        source: "import",
+        entries: [{ id: "entry-delete", content: "temporary" }],
+      });
+      store.bindWorldbook({
+        worldbookId: worldbook.id,
+        scopeType: "card",
+        scopeId: card.id,
+      });
+
+      expect(() =>
+        store.deleteWorldbook(worldbook.id, worldbook.revision + 1),
+      ).toThrowError(/revision/iu);
+      expect(store.getWorldbook(worldbook.id)).toEqual(worldbook);
+
+      expect(store.deleteWorldbook(worldbook.id, worldbook.revision)).toEqual(
+        worldbook,
+      );
+      expect(store.listWorldbooks()).toEqual([]);
+      expect(
+        store.database.get(
+          "SELECT id FROM worldbook_entries WHERE id = ?",
+          "entry-delete",
+        ),
+      ).toBeUndefined();
+      expect(
+        store.database.get(
+          "SELECT id FROM worldbook_bindings WHERE worldbook_id = ?",
+          worldbook.id,
+        ),
+      ).toBeUndefined();
+    } finally {
+      store.close();
+    }
+  });
+
   it("rolls nested repository writes back with the enclosing transaction", () => {
     const store = new AppStore();
     try {

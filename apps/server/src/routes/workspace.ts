@@ -997,6 +997,22 @@ export async function registerWorkspaceRoutes(
     ),
   );
 
+  app.delete<{ Params: { worldbookId: string } }>(
+    "/api/worldbooks/:worldbookId",
+    async (request) => {
+      const input = z
+        .object({ expectedRevision: z.number().int().nonnegative() })
+        .strict()
+        .parse(request.body);
+      return envelope(
+        context.store.deleteWorldbook(
+          request.params.worldbookId,
+          input.expectedRevision,
+        ),
+      );
+    },
+  );
+
   app.patch<{ Params: { worldbookId: string; entryId: string } }>(
     "/api/worldbooks/:worldbookId/entries/:entryId/permission",
     async (request) => {

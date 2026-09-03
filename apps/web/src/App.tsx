@@ -39,6 +39,7 @@ import {
   deletePromptPreset,
   deleteRoleCard,
   deletePersona,
+  deleteWorldbook,
   deleteWorkspaceMessage,
   exportConversationArchive,
   exportProviderConnection,
@@ -2499,6 +2500,43 @@ export default function App() {
     [apiOnline, showToast],
   );
 
+  const removeWorldbook = useCallback(
+    async (worldbook: Worldbook) => {
+      if (!apiOnline) {
+        showToast("离线工作区不能删除服务器世界书。", "warning");
+        return;
+      }
+      if (
+        !window.confirm(
+          `永久删除世界书“${worldbook.name}”？其中的全部条目以及角色卡、会话上的关联都会一并删除。`,
+        )
+      ) {
+        return;
+      }
+      try {
+        await deleteWorldbook({
+          worldbookId: worldbook.id,
+          expectedRevision: worldbook.revision,
+        });
+        const payload = await loadWorkspaceFromApi(
+          workspaceStateRef.current.selectedPresetId,
+          workspaceStateRef.current.selectedConversationId,
+          workspaceStateRef.current.selectedProviderId,
+        );
+        dispatch({ type: "bootstrap/api", payload });
+        showToast(`世界书“${worldbook.name}”已删除。`, "success");
+      } catch (error) {
+        showToast(
+          error instanceof WorkspaceApiError && error.status === 409
+            ? "世界书已在其他位置发生变化，请刷新后再删除。"
+            : "世界书删除失败；服务器内容没有改变。",
+          "warning",
+        );
+      }
+    },
+    [apiOnline, showToast],
+  );
+
   const changePresetPrompt = useCallback(
     async (
       promptId: string,
@@ -2936,6 +2974,7 @@ export default function App() {
         onSaveRegexScope={changeRegexScope}
         onSaveWorldbookEntry={saveWorldbookEntry}
         onSaveCardWorldbooks={saveCardWorldbookCombination}
+        onDeleteWorldbook={removeWorldbook}
         onOpenPlugins={() =>
           dispatch({ type: "modal/set", modal: { kind: "plugins" } })
         }

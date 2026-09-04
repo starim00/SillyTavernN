@@ -27,6 +27,135 @@ afterEach(async () => {
 });
 
 describe("native Tavern Helper compatibility routes", () => {
+  it("projects and persists the active preset for same-page helper scripts", async () => {
+    const server = await application();
+    const card = server.context.store.createCard({
+      id: "card-helper-preset-api",
+      kind: "character",
+      name: "Preset API fixture",
+    }).card;
+    const conversation = server.context.store.createConversation({
+      id: "conversation-helper-preset-api",
+      title: "Preset API",
+      cardId: card.id,
+    });
+    const timestamp = new Date().toISOString();
+    const preset = server.context.store.createPreset({
+      id: "preset-helper-preset-api",
+      name: "Izumi fixture",
+      kind: "chat-completion",
+      payload: {
+        id: "preset-helper-preset-api",
+        name: "Izumi fixture",
+        mode: "chat-completion",
+        prompts: [
+          {
+            id: "main-prompt",
+            name: "Main prompt",
+            role: "system",
+            content: "Original",
+            enabled: true,
+            order: 0,
+            systemPrompt: true,
+            metadata: { promptOrderMember: true },
+          },
+        ],
+        generation: {
+          temperature: 0.7,
+          maxOutputTokens: 2048,
+          stop: [],
+          samplerOrder: [],
+          additional: { maxContextTokens: 32768 },
+        },
+        extensions: { tavern_helper: { scripts: [] } },
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      },
+    });
+
+    const loaded = await server.app.inject({
+      method: "GET",
+      url: `/api/compatibility/tavern-helper?conversationId=${conversation.id}&presetId=${preset.id}`,
+    });
+    expect(loaded.statusCode).toBe(200);
+    expect(loaded.json()).toMatchObject({
+      data: {
+        preset: {
+          id: preset.id,
+          name: preset.name,
+          revision: preset.revision,
+          value: {
+            settings: {
+              temperature: 0.7,
+              max_completion_tokens: 2048,
+              max_context: 32768,
+            },
+            prompts: [
+              {
+                id: "main-prompt",
+                name: "Main prompt",
+                content: "Original",
+                enabled: true,
+              },
+            ],
+          },
+        },
+        presetNames: ["Izumi fixture"],
+      },
+    });
+
+    const loadedBody = loaded.json() as {
+      data: {
+        preset: {
+          value: {
+            prompts: Array<{
+              enabled: boolean;
+              content: string;
+            }>;
+          };
+        };
+      };
+    };
+    const value = loadedBody.data.preset.value;
+    value.prompts[0]!.enabled = false;
+    value.prompts[0]!.content = "Updated from helper";
+    const saved = await server.app.inject({
+      method: "PUT",
+      url: "/api/compatibility/tavern-helper/preset",
+      payload: {
+        presetId: preset.id,
+        expectedRevision: preset.revision,
+        preset: value,
+      },
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json()).toMatchObject({
+      data: {
+        id: preset.id,
+        revision: preset.revision + 1,
+        value: {
+          prompts: [
+            {
+              id: "main-prompt",
+              content: "Updated from helper",
+              enabled: false,
+            },
+          ],
+        },
+      },
+    });
+    expect(server.context.store.getPreset(preset.id).payload).toMatchObject({
+      prompts: [
+        {
+          id: "main-prompt",
+          content: "Updated from helper",
+          enabled: false,
+        },
+      ],
+      extensions: { tavern_helper: { scripts: [] } },
+    });
+  });
+
   it("persists the native workbench settings and global scripts", async () => {
     const server = await application();
     const card = server.context.store.createCard({

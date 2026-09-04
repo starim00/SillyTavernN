@@ -82,6 +82,7 @@ import {
   updateWorldbookEntryPermission,
   updatePersona,
   saveTavernHelperState,
+  replaceTavernHelperPreset,
   type LegacyHostPluginStatus,
   type ConversationVariableRestoreSummary,
   WorkspaceApiError,
@@ -804,8 +805,27 @@ export default function App() {
             }
             return history;
           };
+          const selectedConnection =
+            workspaceStateRef.current.providerConnections.find(
+              (connection) => connection.id === selectedProviderId,
+            );
           const adapter: TavernHelperRuntimeAdapter = {
             connectionId: selectedProviderId,
+            ...(selectedConnection ? { connection: selectedConnection } : {}),
+            replacePreset: async (input) => {
+              const updated = await replaceTavernHelperPreset(input);
+              dispatch({
+                type: "preset/replace",
+                preset: updated.workspacePreset,
+              });
+              setTavernHelperRevision((revision) => revision + 1);
+              return {
+                id: updated.id,
+                name: updated.name,
+                revision: updated.revision,
+                value: updated.value,
+              };
+            },
             getMessages: () => runtimeMessages,
             createMessage: async (input) => {
               const created = await createTavernHelperMessage(

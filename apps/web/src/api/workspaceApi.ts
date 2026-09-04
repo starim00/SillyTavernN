@@ -1103,6 +1103,35 @@ export async function saveTavernHelperState(input: {
   });
 }
 
+export async function replaceTavernHelperPreset(input: {
+  presetId: string;
+  expectedRevision: number;
+  preset: Record<string, unknown>;
+}): Promise<{
+  id: string;
+  name: string;
+  revision: number;
+  value: Record<string, unknown>;
+  workspacePreset: PromptPreset;
+}> {
+  const result = await request<
+    ApiEnvelope<{
+      id: string;
+      name: string;
+      revision: number;
+      value: Record<string, unknown>;
+      workspacePreset: ApiPreset;
+    }>
+  >("/compatibility/tavern-helper/preset", {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+  return {
+    ...result.data,
+    workspacePreset: normalizePreset(result.data.workspacePreset),
+  };
+}
+
 export async function generateWithTavernHelper(input: {
   conversationId: string;
   connectionId: string;

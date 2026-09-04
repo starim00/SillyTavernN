@@ -6,12 +6,19 @@ import {
   readTavernHelperBundle,
   sanitizeJsonValue,
 } from "@stn/core";
-import type { JsonObject } from "@stn/contracts";
+import {
+  PromptPresetSchema,
+  type JsonObject,
+  type PromptPreset,
+} from "@stn/contracts";
 import type { ProviderMessage } from "@stn/providers";
 import { StorageError } from "@stn/storage";
 
 import { envelope, type ServerContext } from "../context.js";
-import { normalizedCardPayload } from "../normalized-content.js";
+import {
+  normalizedCardPayload,
+  normalizedPreset,
+} from "../normalized-content.js";
 import { prepareConversationPrompt } from "../prompt-service.js";
 import { resolveRegexScope, updateRegexScope } from "../regex-service.js";
 
@@ -132,6 +139,14 @@ const tavernHelperContextQuerySchema = z
   .object({
     conversationId: z.string().trim().min(1).max(256),
     presetId: z.string().trim().min(1).max(256).optional(),
+  })
+  .strict();
+
+const tavernHelperPresetWriteSchema = z
+  .object({
+    presetId: z.string().trim().min(1).max(256),
+    expectedRevision: z.number().int().nonnegative(),
+    preset: z.record(z.string(), z.unknown()),
   })
   .strict();
 
@@ -269,6 +284,246 @@ function sanitizedObject(value: unknown): JsonObject {
   return isJsonObject(sanitized) ? sanitized : {};
 }
 
+function tavernHelperPrompt(prompt: PromptPreset["prompts"][number]) {
+  const extra = isJsonObject(prompt.metadata.extra)
+    ? { ...prompt.metadata.extra }
+    : {};
+  for (const key of ["izumi_layer", "izumi_function_section"] as const) {
+    const value = prompt.metadata[key];
+    if (value !== undefined) extra[key] = value;
+  }
+  const inChat = prompt.metadata.injectionPosition === 1;
+  return {
+    id: prompt.id,
+    name: prompt.name,
+    enabled: prompt.enabled,
+    position: inChat
+      ? {
+          type: "in_chat",
+          depth:
+            typeof prompt.metadata.injectionDepth === "number"
+              ? prompt.metadata.injectionDepth
+              : 4,
+          order:
+            typeof prompt.metadata.injectionOrder === "number"
+              ? prompt.metadata.injectionOrder
+              : 100,
+        }
+      : { type: "relative" },
+    role: prompt.role,
+    content: prompt.content,
+    ...(Object.keys(extra).length > 0 ? { extra } : {}),
+    ...(prompt.marker === undefined ? {} : { marker: true }),
+    ...(prompt.systemPrompt ? { system_prompt: true } : {}),
+  };
+}
+
+function tavernHelperPresetValue(preset: PromptPreset): JsonObject {
+  const generation = preset.generation;
+  const settings = sanitizeJsonValue(
+    Object.fromEntries(
+      Object.entries({
+        max_context: generation.additional.maxContextTokens,
+        max_completion_tokens: generation.maxOutputTokens,
+        reply_count: generation.n,
+        should_stream: generation.stream,
+        temperature: generation.temperature,
+        frequency_penalty: generation.frequencyPenalty,
+        presence_penalty: generation.presencePenalty,
+        repetition_penalty: generation.repetitionPenalty,
+        top_p: generation.topP,
+        min_p: generation.minP,
+        top_k: generation.topK,
+        top_a: generation.topA,
+        seed: generation.seed,
+      }).filter(([, field]) => field !== undefined),
+    ),
+  );
+  const ordered = [...preset.prompts].sort(
+    (left, right) => left.order - right.order,
+  );
+  return sanitizedObject({
+    settings: isJsonObject(settings) ? settings : {},
+    prompts: ordered
+      .filter((prompt) => prompt.metadata.promptOrderMember !== false)
+      .map(tavernHelperPrompt),
+    prompts_unused: ordered
+      .filter((prompt) => prompt.metadata.promptOrderMember === false)
+      .map(tavernHelperPrompt),
+    extensions: preset.extensions,
+  });
+}
+
+function numberField(
+  primary: JsonObject,
+  secondary: JsonObject,
+  ...keys: string[]
+): number | undefined {
+  for (const key of keys) {
+    const value = primary[key] ?? secondary[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+  }
+  return undefined;
+}
+
+function booleanField(
+  primary: JsonObject,
+  secondary: JsonObject,
+  ...keys: string[]
+): boolean | undefined {
+  for (const key of keys) {
+    const value = primary[key] ?? secondary[key];
+    if (typeof value === "boolean") return value;
+  }
+  return undefined;
+}
+
+function tavernHelperPresetUpdate(
+  previous: PromptPreset,
+  value: JsonObject,
+): PromptPreset {
+  const settings = isJsonObject(value.settings) ? value.settings : {};
+  const previousById = new Map(
+    previous.prompts.map((prompt) => [prompt.id, prompt]),
+  );
+  const promptValues = [
+    ...(Array.isArray(value.prompts)
+      ? value.prompts.map((prompt) => ({ prompt, inserted: true }))
+      : []),
+    ...(Array.isArray(value.prompts_unused)
+      ? value.prompts_unused.map((prompt) => ({ prompt, inserted: false }))
+      : []),
+  ];
+  const prompts = promptValues.flatMap(({ prompt, inserted }, order) => {
+    if (!isJsonObject(prompt)) return [];
+    const id =
+      typeof prompt.id === "string"
+        ? prompt.id.trim()
+        : typeof prompt.identifier === "string"
+          ? prompt.identifier.trim()
+          : "";
+    if (!id) return [];
+    const old = previousById.get(id);
+    const position = isJsonObject(prompt.position) ? prompt.position : {};
+    const role =
+      typeof prompt.role === "string" &&
+      ["system", "user", "assistant", "tool"].includes(prompt.role)
+        ? prompt.role
+        : (old?.role ?? "system");
+    const metadata: JsonObject = {
+      ...(old?.metadata ?? {}),
+      promptOrderMember: inserted,
+      promptOrderIndex: order,
+      injectionPosition:
+        position.type === "in_chat" || position.type === "absolute" ? 1 : 0,
+      ...(typeof position.depth === "number"
+        ? { injectionDepth: position.depth }
+        : {}),
+      ...(typeof position.order === "number"
+        ? { injectionOrder: position.order }
+        : {}),
+      ...(isJsonObject(prompt.extra) ? { extra: prompt.extra } : {}),
+    };
+    return [
+      {
+        id,
+        name:
+          typeof prompt.name === "string" && prompt.name.trim()
+            ? prompt.name.trim()
+            : (old?.name ?? id),
+        role,
+        content:
+          typeof prompt.content === "string"
+            ? prompt.content
+            : (old?.content ?? ""),
+        enabled: prompt.enabled !== false,
+        ...(old?.marker === undefined ? {} : { marker: old.marker }),
+        order,
+        systemPrompt:
+          prompt.system_prompt === true || old?.systemPrompt === true,
+        metadata,
+      },
+    ];
+  });
+  const maxContextTokens = numberField(
+    settings,
+    value,
+    "max_context",
+    "openai_max_context",
+  );
+  const generation = {
+    ...previous.generation,
+    ...(numberField(settings, value, "temperature") === undefined
+      ? {}
+      : { temperature: numberField(settings, value, "temperature") }),
+    ...(numberField(settings, value, "top_p") === undefined
+      ? {}
+      : { topP: numberField(settings, value, "top_p") }),
+    ...(numberField(settings, value, "top_k") === undefined
+      ? {}
+      : { topK: numberField(settings, value, "top_k") }),
+    ...(numberField(settings, value, "min_p") === undefined
+      ? {}
+      : { minP: numberField(settings, value, "min_p") }),
+    ...(numberField(settings, value, "top_a") === undefined
+      ? {}
+      : { topA: numberField(settings, value, "top_a") }),
+    ...(numberField(settings, value, "frequency_penalty") === undefined
+      ? {}
+      : {
+          frequencyPenalty: numberField(settings, value, "frequency_penalty"),
+        }),
+    ...(numberField(settings, value, "presence_penalty") === undefined
+      ? {}
+      : {
+          presencePenalty: numberField(settings, value, "presence_penalty"),
+        }),
+    ...(numberField(settings, value, "repetition_penalty") === undefined
+      ? {}
+      : {
+          repetitionPenalty: numberField(settings, value, "repetition_penalty"),
+        }),
+    ...(numberField(
+      settings,
+      value,
+      "max_completion_tokens",
+      "openai_max_tokens",
+    ) === undefined
+      ? {}
+      : {
+          maxOutputTokens: numberField(
+            settings,
+            value,
+            "max_completion_tokens",
+            "openai_max_tokens",
+          ),
+        }),
+    ...(numberField(settings, value, "reply_count") === undefined
+      ? {}
+      : { n: numberField(settings, value, "reply_count") }),
+    ...(numberField(settings, value, "seed") === undefined
+      ? {}
+      : { seed: numberField(settings, value, "seed") }),
+    ...(booleanField(settings, value, "should_stream", "stream") === undefined
+      ? {}
+      : {
+          stream: booleanField(settings, value, "should_stream", "stream"),
+        }),
+    additional: {
+      ...previous.generation.additional,
+      ...(maxContextTokens === undefined ? {} : { maxContextTokens }),
+    },
+  };
+  return PromptPresetSchema.parse({
+    ...previous,
+    prompts,
+    generation,
+    extensions: isJsonObject(value.extensions)
+      ? { ...previous.extensions, ...value.extensions }
+      : previous.extensions,
+  });
+}
+
 function extensionBoolean(context: ServerContext, key: string): boolean {
   try {
     return (
@@ -399,6 +654,8 @@ function tavernHelperContext(
       : context.store.getPreset(input.presetId);
   const presetBundle =
     preset === undefined ? undefined : readTavernHelperBundle(preset.payload);
+  const activeNormalizedPreset =
+    preset === undefined ? undefined : normalizedPreset(preset);
   const messages = context.store.listChatMessages(conversation.id);
   const globalScripts = scriptOverride(context, "global", "global") ?? [];
   const cardScripts = scriptOverride(context, "card", card.id);
@@ -515,6 +772,17 @@ function tavernHelperContext(
       presetId: preset?.id ?? null,
     },
     settings: tavernHelperSettings(context),
+    ...(preset === undefined || activeNormalizedPreset === undefined
+      ? {}
+      : {
+          preset: {
+            id: preset.id,
+            name: preset.name,
+            revision: preset.revision,
+            value: tavernHelperPresetValue(activeNormalizedPreset),
+          },
+          presetNames: context.store.listPresets().map((item) => item.name),
+        }),
     sources,
     worldbooks,
     variables: {
@@ -754,6 +1022,46 @@ export async function registerCompatibilityRoutes(
       namespace: input.namespace,
       variables: updated.value,
       updatedAt: updated.updatedAt,
+    });
+  });
+
+  app.put("/api/compatibility/tavern-helper/preset", (request) => {
+    const input = tavernHelperPresetWriteSchema.parse(request.body);
+    const result = context.store.database.transaction(() => {
+      const current = context.store.getPreset(input.presetId);
+      const previous = normalizedPreset(current);
+      if (!previous) {
+        throw invalidTavernHelperState(
+          "The selected preset is not normalized.",
+        );
+      }
+      const next = tavernHelperPresetUpdate(
+        previous,
+        sanitizedObject(input.preset),
+      );
+      const updated = context.store.updatePreset({
+        id: current.id,
+        expectedRevision: input.expectedRevision,
+        patch: { payload: sanitizedObject(next) },
+      });
+      if (
+        JSON.stringify(readTavernHelperBundle(previous)) !==
+        JSON.stringify(readTavernHelperBundle(next))
+      ) {
+        context.store.setExtensionSetting(
+          tavernHelperExtensionId,
+          `preset:${current.id}`,
+          false,
+        );
+      }
+      return { updated, next };
+    });
+    return envelope({
+      id: result.updated.id,
+      name: result.updated.name,
+      revision: result.updated.revision,
+      value: tavernHelperPresetValue(result.next),
+      workspacePreset: result.updated,
     });
   });
 

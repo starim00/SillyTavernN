@@ -70,6 +70,13 @@ export type TavernHelperContext = {
     presetId: string | null;
   };
   settings?: TavernHelperSettings;
+  preset?: {
+    id: string;
+    name: string;
+    revision: number;
+    value: Record<string, unknown>;
+  };
+  presetNames?: string[];
   sources: TavernHelperSource[];
   worldbooks?: Array<{
     id: string;

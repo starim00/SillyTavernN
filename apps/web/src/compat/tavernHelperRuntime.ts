@@ -181,6 +181,24 @@ Object.defineProperty(scriptToastr, "options", {
 
 export type TavernHelperRuntimeAdapter = {
   connectionId: string;
+  connection?: {
+    name: string;
+    protocol:
+      "openai-compatible" | "openai-responses" | "text-completion" | "fake";
+    baseUrl: string;
+    model: string;
+    hasApiKey: boolean;
+  };
+  replacePreset?: (input: {
+    presetId: string;
+    expectedRevision: number;
+    preset: Record<string, unknown>;
+  }) => Promise<{
+    id: string;
+    name: string;
+    revision: number;
+    value: Record<string, unknown>;
+  }>;
   getMessages: () => WorkspaceMessage[];
   createMessage: (input: {
     content: string;
@@ -1960,6 +1978,51 @@ export class TavernHelperRuntime {
     const presetSources = this.context.sources.filter(
       (source) => source.scope === "preset",
     );
+    const currentPreset = () => this.context.preset;
+    const getPreset = (name = "in_use") => {
+      const preset = currentPreset();
+      if (!preset) return null;
+      if (name !== "in_use" && name !== preset.name) return null;
+      return clone(preset.value);
+    };
+    const replacePreset = async (
+      name: string,
+      value: Record<string, unknown>,
+    ) => {
+      const preset = currentPreset();
+      if (!preset || (name !== "in_use" && name !== preset.name)) {
+        throw new Error(`Unknown preset '${name}'.`);
+      }
+      if (!this.adapter.replacePreset) {
+        throw new Error(
+          "The current host cannot persist Tavern Helper presets.",
+        );
+      }
+      const updated = await this.adapter.replacePreset({
+        presetId: preset.id,
+        expectedRevision: preset.revision,
+        preset: clone(value),
+      });
+      this.context.preset = updated;
+      const source = presetSources.find(
+        (candidate) => candidate.id === updated.id,
+      );
+      if (source) {
+        source.name = updated.name;
+        source.revision = updated.revision;
+      }
+      return clone(updated.value);
+    };
+    const updatePresetWith = async (
+      name: string,
+      updater: (
+        preset: Record<string, unknown>,
+      ) => Record<string, unknown> | Promise<Record<string, unknown>>,
+    ) => {
+      const preset = getPreset(name);
+      if (!preset) throw new Error(`Unknown preset '${name}'.`);
+      return replacePreset(name, await updater(preset));
+    };
     const helper = {
       getChatMessages,
       setChatMessages: (
@@ -2008,8 +2071,18 @@ export class TavernHelperRuntime {
       getCharacterIds: () => cardSources.map((source) => source.id),
       getCurrentCharacterName: () => cardSources[0]?.name ?? null,
       getCurrentCharacterId: () => cardSources[0]?.id ?? null,
-      getPresetNames: () => presetSources.map((source) => source.name),
-      getLoadedPresetName: () => presetSources[0]?.name ?? "",
+      getPreset,
+      getPresetNames: () =>
+        clone(
+          this.context.presetNames ??
+            presetSources.map((source) => source.name),
+        ),
+      getLoadedPresetName: () =>
+        currentPreset()?.name ?? presetSources[0]?.name ?? "",
+      loadPreset: (name: string) => name === currentPreset()?.name,
+      replacePreset,
+      createOrReplacePreset: replacePreset,
+      updatePresetWith,
       getVariables,
       replaceVariables,
       updateVariablesWith,
@@ -2182,7 +2255,28 @@ export class TavernHelperRuntime {
     };
     const extensionSettings = this.extensionVariables.get("sillytavern") ?? {};
     this.extensionVariables.set("sillytavern", extensionSettings);
+    const connection = this.adapter.connection;
+    const chatCompletionSettings: JsonRecord = {
+      chat_completion_source: "custom",
+      custom_url: connection?.baseUrl ?? "",
+      custom_model: connection?.model ?? "",
+      openai_model: connection?.model ?? "",
+      stream_openai:
+        this.context.preset?.value.settings &&
+        typeof this.context.preset.value.settings === "object" &&
+        !Array.isArray(this.context.preset.value.settings)
+          ? asRecord(this.context.preset.value.settings).should_stream !== false
+          : true,
+      ...(connection?.hasApiKey ? { api_key_present: true } : {}),
+    };
+    const presetSettings = asRecord(this.context.preset?.value.settings);
+    chatCompletionSettings.openai_max_tokens =
+      presetSettings.max_completion_tokens;
+    chatCompletionSettings.temp_openai = presetSettings.temperature;
+    chatCompletionSettings.top_p_openai = presetSettings.top_p;
     const sillyTavern = {
+      mainApi: "openai",
+      chatCompletionSettings,
       name1: "User",
       name2:
         this.context.sources.find((source) => source.scope === "card")?.name ??
@@ -2192,7 +2286,10 @@ export class TavernHelperRuntime {
         .map((source) => ({ name: source.name, avatar: source.id })),
       extensionSettings,
       getCurrentChatId: () => this.context.conversation.id,
-      getChatCompletionModel: () => this.adapter.connectionId,
+      getChatCompletionModel: () =>
+        typeof chatCompletionSettings.custom_model === "string"
+          ? chatCompletionSettings.custom_model
+          : "",
       saveChat: async () => {
         this.persistLegacyChatVariables();
         await this.flushPersistence();

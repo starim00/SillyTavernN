@@ -32,6 +32,146 @@ const assistantMessage: WorkspaceMessage = {
 };
 
 describe("Tavern Helper message compatibility", () => {
+  it("exposes the active preset and public connection through legacy globals", async () => {
+    const roster = {
+      id: "",
+      hidden: false,
+      dataset: {} as Record<string, string>,
+      append: () => undefined,
+      querySelectorAll: () => [] as unknown[],
+      hasChildNodes: () => false,
+      remove: () => undefined,
+    };
+    vi.stubGlobal("window", globalThis);
+    vi.stubGlobal("document", {
+      body: { append: () => undefined },
+      getElementById: () => null,
+      createElement: () => roster,
+    });
+    const context: TavernHelperContext = {
+      conversation: {
+        id: "conversation-preset",
+        cardId: "card-preset",
+        presetId: "preset-izumi",
+      },
+      preset: {
+        id: "preset-izumi",
+        name: "Izumi",
+        revision: 2,
+        value: {
+          settings: { temperature: 0.7, max_completion_tokens: 2048 },
+          prompts: [
+            {
+              id: "main",
+              name: "Main",
+              role: "system",
+              content: "Original",
+              enabled: true,
+              position: { type: "relative" },
+            },
+          ],
+          prompts_unused: [],
+          extensions: {},
+        },
+      },
+      presetNames: ["Izumi", "Other"],
+      sources: [],
+      variables: {
+        global: {},
+        character: {},
+        preset: {},
+        chat: {},
+        messages: {},
+        scripts: {},
+      },
+    };
+    const replacePreset: NonNullable<
+      TavernHelperRuntimeAdapter["replacePreset"]
+    > = vi.fn(
+      async (input: {
+        presetId: string;
+        expectedRevision: number;
+        preset: Record<string, unknown>;
+      }) => ({
+        id: input.presetId,
+        name: "Izumi",
+        revision: input.expectedRevision + 1,
+        value: structuredClone(input.preset),
+      }),
+    );
+    const adapter: TavernHelperRuntimeAdapter = {
+      connectionId: "provider-izumi",
+      connection: {
+        name: "Custom endpoint",
+        protocol: "openai-compatible",
+        baseUrl: "https://example.invalid/v1",
+        model: "model-izumi",
+        hasApiKey: true,
+      },
+      replacePreset,
+      getMessages: () => [],
+      createMessage: async () => {
+        throw new Error("not used");
+      },
+      deleteMessage: async () => undefined,
+      updateMessage: async (message) => message,
+      refreshMessages: async () => [],
+      generate: async () => "",
+      saveState: async () => undefined,
+      onButtonsChanged: () => undefined,
+      onStatusChanged: () => undefined,
+      notify: () => undefined,
+    };
+    const runtime = new TavernHelperRuntime(context, adapter);
+    const cleanup = (
+      runtime as unknown as { installGlobals: () => () => void }
+    ).installGlobals();
+    try {
+      const globals = window as unknown as {
+        getPreset: (name: string) => Record<string, unknown>;
+        getLoadedPresetName: () => string;
+        getPresetNames: () => string[];
+        replacePreset: (
+          name: string,
+          value: Record<string, unknown>,
+        ) => Promise<Record<string, unknown>>;
+        SillyTavern: {
+          getContext: () => {
+            mainApi: string;
+            chatCompletionSettings: Record<string, unknown>;
+          };
+        };
+      };
+      expect(globals.getLoadedPresetName()).toBe("Izumi");
+      expect(globals.getPresetNames()).toEqual(["Izumi", "Other"]);
+      expect(globals.getPreset("in_use")).toMatchObject({
+        settings: { temperature: 0.7 },
+        prompts: [{ id: "main", content: "Original" }],
+      });
+      expect(globals.SillyTavern.getContext()).toMatchObject({
+        mainApi: "openai",
+        chatCompletionSettings: {
+          chat_completion_source: "custom",
+          custom_url: "https://example.invalid/v1",
+          custom_model: "model-izumi",
+          api_key_present: true,
+        },
+      });
+      const edited = globals.getPreset("in_use");
+      (edited.prompts as Array<Record<string, unknown>>)[0]!.content = "Edited";
+      await globals.replacePreset("in_use", edited);
+      expect(replacePreset).toHaveBeenCalledWith({
+        presetId: "preset-izumi",
+        expectedRevision: 2,
+        preset: edited,
+      });
+      expect(context.preset?.revision).toBe(3);
+    } finally {
+      cleanup();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("isolates event listener failures and attributes them to their script", async () => {
     const statuses: Array<{
       errors: Array<{ scriptName: string; message: string }>;

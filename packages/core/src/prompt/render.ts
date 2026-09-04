@@ -33,7 +33,9 @@ export function renderChatPrompt(
       previousSegment.source.detail.insertionDepth ===
         segment.source.detail.insertionDepth;
     if (
-      (mergeAdjacent || mergeWorldbookAtDepth) &&
+      (mergeAdjacent ||
+        (options.mergeSystemMessages === true && segment.role === "system") ||
+        mergeWorldbookAtDepth) &&
       previous &&
       previous.role === segment.role &&
       previous.name === name

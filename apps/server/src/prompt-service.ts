@@ -676,6 +676,15 @@ function mergeGeneration(
   };
 }
 
+function squashSystemMessages(preset: PromptPreset | undefined): boolean {
+  const unknownFields = preset?.compatibility?.unknownFields;
+  const legacySource = preset?.extensions.legacySource;
+  return (
+    unknownFields?.squash_system_messages === true ||
+    (isJsonObject(legacySource) && legacySource.squash_system_messages === true)
+  );
+}
+
 function presetContextLimit(
   generation: Partial<GenerationSettings>,
 ): number | undefined {
@@ -838,6 +847,7 @@ export async function prepareConversationPrompt(
   );
   const renderedMessages = renderChatPrompt(assembled.segments, {
     mergeAdjacent: false,
+    mergeSystemMessages: squashSystemMessages(preset),
     mergeWorldbookAtDepth: true,
   }).map((message): ProviderMessage => {
     const sourceSegments = message.sourceSegmentIds

@@ -246,6 +246,33 @@ describe("prompt assembly goldens", () => {
     ]);
   });
 
+  it("squashes adjacent system messages without merging chat history", () => {
+    const aria = participant("aria", "Aria");
+    const result = assemblePrompt({
+      card: card("character", [aria]),
+      conversation: conversation([aria]),
+      participants: [aria],
+      messages: [
+        message("m1", 0, "assistant", "First.", "Aria"),
+        message("m2", 1, "assistant", "Second.", "Aria"),
+      ],
+    });
+
+    const rendered = renderChatPrompt(result.segments, {
+      mergeAdjacent: false,
+      mergeSystemMessages: true,
+    });
+
+    expect(rendered.map((item) => [item.role, item.content])).toEqual([
+      [
+        "system",
+        "A scene for User with Aria.\n\nScenario: A deterministic test.\n\n[Aria]\nDescription: Aria description\nPersonality: Aria personality",
+      ],
+      ["assistant", "First."],
+      ["assistant", "Second."],
+    ]);
+  });
+
   it("uses conversation speaking order for an ensemble", () => {
     const alpha = participant("alpha", "Alpha");
     const beta = participant("beta", "Beta");

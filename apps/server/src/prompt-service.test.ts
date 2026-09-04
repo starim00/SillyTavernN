@@ -474,6 +474,38 @@ describe("server prompt integration", () => {
     ).toContain("Beta profile");
   });
 
+  it("honors the legacy squash_system_messages preset setting", async () => {
+    const created = await application();
+    const fixture = await richWorkspace(created);
+    const stored = created.context.store.getPreset(fixture.preset.id);
+    created.context.store.updatePreset({
+      id: stored.id,
+      expectedRevision: stored.revision,
+      patch: {
+        payload: jsonObject({
+          ...fixture.preset,
+          compatibility: {
+            sourceFormat: "openai",
+            unknownFields: { squash_system_messages: true },
+          },
+        }),
+      },
+    });
+
+    const prompt = await prepareConversationPrompt(created.context.store, {
+      conversationId: fixture.conversation.id,
+      presetId: fixture.preset.id,
+    });
+
+    expect(
+      prompt.messages.filter((message) => message.role === "system"),
+    ).toHaveLength(1);
+    expect(prompt.messages[0]?.content).toContain("PRESET_MARKER");
+    for (const scope of ["GLOBAL", "CARD", "CONVERSATION", "PARTICIPANT"]) {
+      expect(prompt.messages[0]?.content).toContain(`LORE_${scope}`);
+    }
+  });
+
   it("returns preview trace and sends assembled chat/text prompts to the provider", async () => {
     const created = await application();
     const fixture = await richWorkspace(created);

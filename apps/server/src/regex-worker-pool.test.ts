@@ -31,6 +31,49 @@ afterEach(async () => {
 });
 
 describe("RegexWorkerPool", () => {
+  it("runs variable guards before display replacement on expanded HTML", async () => {
+    const pool = new RegexWorkerPool(1);
+    pools.push(pool);
+    const rules = [
+      script(
+        String.raw`/<StatusSlot\/>(?=[\s\S]*?<UpdateVariable>)|(?<=<\/UpdateVariable>[\s\S]*?)<StatusSlot\/>/g`,
+        "<StatusReady/>",
+      ),
+      script("<StatusReady/>", "<section>status loaded</section>"),
+      script(
+        String.raw`/<UpdateVariable>[\s\S]*?<\/UpdateVariable>/g`,
+        "update log",
+      ),
+      script(String.raw`<StatusSlot\/>`, "VAR_DESYNC"),
+    ].map((rule, index) => ({
+      ...rule,
+      id: `rule-${index}`,
+      sourceIndex: index,
+    }));
+    const decoration = "<span>display decoration</span>".repeat(800);
+    for (const content of [
+      `${decoration}<UpdateVariable>update</UpdateVariable><StatusSlot/>`,
+      `<StatusSlot/>${decoration}<UpdateVariable>update</UpdateVariable>`,
+    ]) {
+      const result = await pool.apply(content, rules, {
+        placement: 2,
+        target: "markdown",
+      });
+      expect(result.diagnostics).toEqual([]);
+      expect(result.text).toContain("<section>status loaded</section>");
+      expect(result.text).toContain("update log");
+      expect(result.text).not.toContain("VAR_DESYNC");
+      expect(result.appliedScriptIds).toEqual(["rule-0", "rule-1", "rule-2"]);
+    }
+    const missing = await pool.apply(`${decoration}<StatusSlot/>`, rules, {
+      placement: 2,
+      target: "markdown",
+    });
+    expect(missing.diagnostics).toEqual([]);
+    expect(missing.text).toContain("VAR_DESYNC");
+    expect(missing.text).not.toContain("status loaded");
+  });
+
   it("terminates catastrophic regex execution and recovers with a new worker", async () => {
     const pool = new RegexWorkerPool(1, 25);
     pools.push(pool);

@@ -55,6 +55,10 @@ for display run as trusted, unsandboxed same-origin iframes. Their source is not
 rewritten and can directly access `window.parent`, main DOM, local storage,
 Tavern Helper/MVU globals, and external networks.
 
+Server display regexes run sequentially in workers with a one-second budget per
+rule, allowing lookbehind guards to inspect expanded HTML on NAS CPUs. A timed-out
+rule is terminated while later rules continue; successful replacements are kept.
+
 ## ST-Prompt-Template
 
 - Repository: `https://github.com/zonde306/ST-Prompt-Template`

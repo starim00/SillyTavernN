@@ -1,4 +1,9 @@
-# Phase plan and acceptance
+# Capability acceptance
+
+The numbered groups organize acceptance requirements, not a delivery schedule
+or a record of checks already passed. Apply them to the affected behavior in
+the current checkout, together with [the design principles](DESIGN_PRINCIPLES.md)
+and [test strategy](TESTING.md).
 
 ## Phase 0 — Foundation
 
@@ -13,10 +18,11 @@ Exit: `npm run verify` succeeds and no code imports from SillyTavernNG.
 
 - SQLite/WAL schema and migrations.
 - Cards use one product type and retain legacy format distinctions only as
-  compatibility metadata.
+  compatibility/internal fields without exposing card categories in the UI.
 - JSON, character PNG, CharX, lorebook, and chat import adapters.
 - Unknown compatible fields preserved in `legacyPayload`.
-- Imported lorebooks always force `agentEditable=false`.
+- Imported lorebook entries always force `agentEditable=false`; book-level
+  metadata cannot authorize writes.
 
 Exit: round-trip, transaction rollback, malicious archive, unknown-field, and revision-conflict tests pass.
 
@@ -24,11 +30,13 @@ Exit: round-trip, transaction rollback, malicious archive, unknown-field, and re
 
 - Card-first library with per-card chat history.
 - Conversation creation always starts from and remains bound to one card.
-- Message, swipe, and branch persistence.
-- Lorebook permission UI and collapsible context rail.
+- Message and swipe persistence.
+- Per-entry lorebook permission UI and collapsible context rail.
 - Responsive desktop-first interface.
 
-Exit: the core offline flow works without a Provider and refreshes without state loss.
+Exit: with the local API running, card/history management works without an
+external Provider and refreshes without persisted data loss. The browser alone
+is not an offline database.
 
 ## Phase 3 — Prompt engine
 
@@ -43,7 +51,7 @@ several people, a narrator, or a world without changing the card/chat model.
 ## Phase 4 — Providers and streaming
 
 - Provider capability model.
-- OpenAI-compatible chat adapter and deterministic fake adapter.
+- OpenAI-compatible Chat Completions and Responses adapters, plus a deterministic fake adapter.
 - SSE text deltas, structured tool-call events, abort, timeout, and error handling.
 - Server-owned generation continues after an SSE client disconnect; a reloaded
   client restores task state and consumes the persisted result.
@@ -85,6 +93,8 @@ and trusted sources can use the old browser capability surface.
 - Revision guard, confirmation, cancellation, idempotency, audit, diff, and undo.
 - Permission is stored per lorebook entry; model tools cannot toggle it and
   imported permission metadata is ignored.
+- All non-read tools require confirmation. New entries default to non-editable;
+  updates and deletions additionally require the existing entry's permission.
 - Tool definitions travel with ordinary chat generation; there is no separate
   Agent chat, objective, or planning surface. Pending writes are recovered from
   the server-side waiting run and reviewed in the shared proposal modal.

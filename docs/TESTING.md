@@ -1,4 +1,4 @@
-# Test strategy and suite audit
+# Test strategy
 
 The repository uses three feedback levels. Choose the narrowest level that can
 disprove the change, and reserve the complete gate for integration, release,
@@ -45,32 +45,13 @@ assertion at the same layer, assert private implementation structure with no
 observable contract, cover behavior that no longer exists, or cannot fail when
 the protected behavior is broken.
 
-## 2026-08-20 inventory
+## Reporting checks
 
-Before this audit, the default collector reported 590 passing tests. Of those,
-239 came from generated `dist` files and matched source test names one-for-one.
-The authored source suite contains 351 passing Vitest tests; the generated
-duplicates are now outside the collection boundary.
+Report the commands actually run, their results, and any skipped credentialed
+or platform-specific checks. Test counts belong to that run's output, not to a
+permanent capability claim in this document.
 
-| Area                 |   Tests | Why it remains                                                                                                                                              |
-| -------------------- | ------: | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Legacy host          |      23 | Pin/hash verification, path and origin rejection, safe mode, atomic install, and persisted enablement                                                       |
-| Server               |      62 | Public API contracts, prompt assembly, imports, trusted compatibility routes, tool continuations, streaming failure states, workers, and secret persistence |
-| Web                  |     112 | API/SSE normalization, reducer invariants, prompt and Tavern Helper compatibility, realm isolation, and rendered workspace behavior                         |
-| Core                 |      83 | Portable imports, preset format round-trips, prompt goldens, macro behavior, token budgets, worldbook activation, and regex compatibility                   |
-| Extension SDK        |      11 | Capabilities, worker quarantine, manifests, commands, settings, events, and ordered UI slots                                                                |
-| Legacy compatibility |      10 | Exact locked surfaces, import rewriting, event ordering, and actor/capability enforcement                                                                   |
-| Providers            |      21 | Chat/Responses payloads, stream termination, reasoning/tool continuations, diagnostics, and token estimates                                                 |
-| Storage              |      29 | Migrations, revisions, transactions, cascades, Swipes, generation persistence, Agent authorization, and undo                                                |
-| **Total**            | **351** | Authored deterministic Vitest regression suite                                                                                                              |
-
-The four Sites tests are unique packaging/runtime checks and are counted only in
-the complete `verify` gate. The live Responses suite contributes a dynamic
-provider case for each complete credentialed configuration and is not included
-in the deterministic count above.
-
-Static review found no identical authored test bodies, no focused `.only`
-tests, no pending `todo` placeholders, and no Vitest case without a direct
-assertion. Similar behavior tested at different layers was retained only where
-the layer adds a distinct contract—for example parser normalization, server
-persistence, and web API normalization are separate failure boundaries.
+For documentation-only changes, inspect referenced implementation contracts,
+check local Markdown links, run Prettier on the changed documents, and run
+`git diff --check`. Source tests and browser QA are needed when executable
+behavior or rendered UI changes, not solely because a design document changes.

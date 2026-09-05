@@ -1,5 +1,10 @@
 # Project instructions
 
+Product and interaction rules are collected in
+[docs/DESIGN_PRINCIPLES.md](docs/DESIGN_PRINCIPLES.md). Keep architecture,
+compatibility, and acceptance documents aligned with those rules and the
+verified implementation; do not retain contradictory implementation plans.
+
 ## Clean-room boundary
 
 - This repository is a new implementation. Do not import, copy, or vendor source code from `/Users/hutiance/SillyTavernNG`.
@@ -10,7 +15,7 @@
 ## Product model
 
 - The user-facing primary object is a role card. A card is one unified content
-  bundle containing persona, opening content, prompt fields, and any embedded
+  bundle containing setting, opening content, prompt fields, and any embedded
   worldbook; do not expose card kinds such as character, ensemble, scenario, or
   world.
 - Every conversation belongs to exactly one card. The primary flow is card
@@ -28,7 +33,7 @@
 - Palette: warm white, pale blue, mint status, coral primary action, cool grey borders, deep blue-grey text.
 - Keep the message stream dominant. Context, prompt trace, worldbook hits, and Agent activity are collapsible supporting surfaces.
 - Use Phosphor icons. Do not use emoji, hand-drawn SVGs, CSS illustration, or decorative placeholder art.
-- Durable user feedback on 2026-07-29: fresh light-novel tone, but platform-general and suitable for multi-character or world-only cards.
+- Keep a fresh light-novel tone, platform-general and suitable for multi-character or world-only cards.
 
 ## Browser validation
 

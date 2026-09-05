@@ -4,7 +4,8 @@
 
 - Compatibility means accepting portable content and reproducing the old
   browser execution path for sources the user explicitly trusts.
-- Old JSON shapes terminate at adapters. Internal code uses normalized types.
+- Adapters normalize old JSON shapes while preserving compatibility payloads
+  for export and the trusted runtime. Core operations use normalized types.
 - Executable templates and scripts are detected during import and remain disabled until explicitly trusted.
 - Trust is source-wide for card, preset, regex, and Tavern Helper scripts; there
   are no per-capability grants inside a trusted source. Conversation model-tool
@@ -59,7 +60,11 @@ Tavern Helper/MVU globals, and external networks.
 - Realm URL tree: `/scripts/extensions/third-party/ST-Prompt-Template/`
 - Distribution: user-installed; do not vendor its AGPL bundle into the core build.
 
-The compatibility contract covers EJS 3.1.9 syntax, variable scopes, prompt lifecycle events, lorebook decorators, stable imported object references, and its exact worker/chunk paths.
+The native template pipeline implements EJS rendering, variable scopes, prompt
+lifecycle events, and lorebook directives; its dependency version is declared
+in `apps/web/package.json`. Pinned plugin asset contracts separately preserve
+the reviewed worker/chunk paths. The native runtime does not execute through
+the optional legacy host, and these contracts do not promise every upstream API.
 
 ## Trust posture
 

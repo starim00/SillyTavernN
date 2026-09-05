@@ -4,7 +4,7 @@ SillyTavern N is a clean-room, compatibility-first AI role-playing workspace. It
 
 ## Status
 
-Development currently covers the Phase 0–7 vertical slice:
+The repository implements a working conversation workspace with:
 
 - clean-room monorepo and compatibility fixtures;
 - normalized cards, conversations, lorebooks, presets, and artifacts;
@@ -17,7 +17,11 @@ Development currently covers the Phase 0–7 vertical slice:
   regex frontends, and ST-Prompt-Template;
 - Ordinary conversation worldbook, message-list, summary, and participant-profile tools with confirmation, audit, and undo.
 
-See [docs/PHASES.md](docs/PHASES.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
+Start with [product and design principles](docs/DESIGN_PRINCIPLES.md) and
+[the development document map](docs/PROJECT_DEVELOPMENT_PLAN.md).
+See [capability acceptance](docs/PHASES.md), [architecture](docs/ARCHITECTURE.md),
+and [compatibility contracts](docs/COMPATIBILITY.md) for details. Acceptance
+criteria are not a claim that every scenario has passed in the current checkout.
 
 ## Development
 
@@ -80,8 +84,7 @@ release work:
 npm run verify
 ```
 
-See [docs/TESTING.md](docs/TESTING.md) for the test tiers and the latest suite
-audit.
+See [docs/TESTING.md](docs/TESTING.md) for test tiers and regression criteria.
 
 ## Docker Compose
 

@@ -27,26 +27,30 @@ This is a greenfield implementation. The upstream repository is not a source dep
 
 ### Cards and conversations
 
-`Card` is one user-facing content type. It collects the persona, opening
+The role card is one user-facing content type. It collects the setting, opening
 messages, prompt fields, compatible extension data, and any embedded lorebook
 needed to start a chat. Legacy format tags may be retained inside compatibility
-payloads, but they do not create separate card categories in the product.
+payloads and internal schemas, but they do not create separate card categories
+in the product. Persona is the user's separate identity configuration.
 
 Every conversation belongs to exactly one card. The primary navigation is:
 select a card, then open one of that card's histories or create a new chat.
 Participants found inside a card are prompt inputs, not independently selected
-chat owners or separate message-stream speakers.
+chat owners or separate message-stream speakers. The live storage model uses
+`Conversation.cardId`; broader compatibility schemas are not the UI or database
+contract.
 
 ### Lorebooks
 
-SQLite is authoritative. Compatibility JSON lives only in import/export
-adapters. Every lorebook has:
+SQLite is authoritative. Import/export adapters interpret legacy JSON shapes;
+preserved compatibility payloads also remain in storage and are consumed by the
+compatibility runtime. Every lorebook has:
 
 - monotonically increasing `revision`;
 - entries with independent revision, stable legacy UID, and their own
   `agentEditable` permission whose default and imported value is always
   `false`;
-- explicit bindings to cards, conversations, personas, or global scope.
+- explicit bindings to cards, conversations, participants, personas, or global scope.
 
 The deprecated book-level `agentEditable` value is retained only as
 compatibility metadata and never authorizes a model tool write.
@@ -58,8 +62,9 @@ priority, token estimate, and truncation policy. Imported presets retain every
 prompt definition, including disabled and legacy unordered options. Users edit
 and enable entries individually; only enabled entries enter assembly. Enabling
 an unordered legacy entry assigns it a stable final order so current execution,
-SillyTavern export, and re-import agree. Extensions modify segments through
-deterministic hooks rather than raw global mutation.
+SillyTavern export, and re-import agree. Native extensions modify segments through
+ordered hooks. Trusted legacy scripts have their separate browser runtime and
+prompt lifecycle contract described below.
 
 ### Providers
 
@@ -81,8 +86,9 @@ honor stream backpressure, while writes become no-ops after the client detaches.
 
 Conversation and message collections use versioned opaque cursors rather than
 unbounded responses. Conversation cursors are ordered by `updated_at DESC, id`;
-message cursors use `created_at DESC, id` and each returned page is restored to
-chronological display order. Message swipes and compatibility context are
+message pages use `created_at DESC, rowid DESC`, with the cursor's message ID
+resolving the insertion-order tie-breaker. Each returned page is reversed for
+display. Message swipes and compatibility context are
 loaded in batches so query count does not grow per message. The web client
 loads only the selected conversation's latest page and prepends older pages
 while preserving the scroll anchor.
@@ -109,6 +115,12 @@ revision-guarded transactions perform the change; the audit record and inverse
 patch commit atomically with it. `AgentStore` and the Agent run tables are
 internal execution names, not a separate user-facing Agent or objective flow.
 
+Every non-read tool requires human confirmation. New worldbook entries are
+read-only by default; updating or deleting an existing entry also requires its
+own `agentEditable` permission. Book-level compatibility metadata never grants
+that permission. The model cannot toggle it. Undo is a human-requested action,
+not a tool offered to the model.
+
 ### Extensions
 
 Native extensions use an `ExtensionRuntimeTransport`; production registration
@@ -131,7 +143,11 @@ never placed in the browser runtime.
 
 - SQLite: normalized metadata, messages, prompt presets, permissions, revisions, artifacts, Agent runs, and audit records.
 - Files: imported originals, PNG/CharX assets, user-provided images, and locally installed extension bundles.
-- Browser storage: ephemeral UI preferences only.
+- Server configuration: authentication and Provider secrets; keep the data directory private.
+- Shared preset/Provider selection: server-side workspace preferences in SQLite.
+- Browser storage: selected card/conversation and unsent drafts. Trusted legacy
+  scripts can also use ordinary browser storage; it is not isolated or restricted
+  to application UI preferences.
 
 ## Runtime ports
 

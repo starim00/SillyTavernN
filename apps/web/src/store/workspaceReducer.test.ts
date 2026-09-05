@@ -31,6 +31,26 @@ describe("workspaceReducer", () => {
     vi.unstubAllGlobals();
   });
 
+  it("starts without demo content and keeps failed initial loading empty", () => {
+    vi.stubGlobal("window", { localStorage: { getItem: () => null } });
+    const state = loadWorkspaceState();
+    expect(state.availability).toBe("loading");
+    for (const next of [
+      state,
+      workspaceReducer(state, {
+        type: "bootstrap/error",
+        error: "offline",
+      }),
+    ]) {
+      expect(next.cards).toEqual([]);
+      expect(next.conversations).toEqual([]);
+      expect(next.messagesByConversation).toEqual({});
+      expect(next.worldbooks).toEqual([]);
+      expect(next.presets).toEqual([]);
+      expect(next.plugins).toEqual([]);
+    }
+  });
+
   it("models the ordinary chat stream as user input and model replies only", () => {
     const state = createDemoWorkspace();
     const messages = Object.values(state.messagesByConversation).flat();
@@ -72,7 +92,7 @@ describe("workspaceReducer", () => {
 
     expect(hydrated.selectedCardId).toBe("");
     expect(hydrated.selectedConversationId).toBe("");
-    expect(hydrated.worldbooks).toEqual(state.worldbooks);
+    expect(hydrated.worldbooks).toEqual([]);
   });
 
   it("ignores a legacy persisted agent proposal", () => {
@@ -99,7 +119,6 @@ describe("workspaceReducer", () => {
   });
 
   it("reads legacy server-migration candidates and local drafts from v3", () => {
-    const state = createDemoWorkspace();
     const legacyPayload = JSON.stringify({
       version: 3,
       data: {
@@ -132,9 +151,9 @@ describe("workspaceReducer", () => {
     expect(hydrated.draftByConversation).toEqual({
       "conversation-live": "正在编辑",
     });
-    expect(hydrated.cards).toEqual(state.cards);
-    expect(hydrated.worldbooks).toEqual(state.worldbooks);
-    expect(hydrated.plugins).toEqual(state.plugins);
+    expect(hydrated.cards).toEqual([]);
+    expect(hydrated.worldbooks).toEqual([]);
+    expect(hydrated.plugins).toEqual([]);
     expect(getItem).toHaveBeenNthCalledWith(1, "sillytavern-n.workspace.v4");
     expect(getItem).toHaveBeenNthCalledWith(2, "sillytavern-n.workspace.v3");
   });

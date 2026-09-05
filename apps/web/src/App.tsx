@@ -3001,6 +3001,34 @@ export default function App() {
     </>
   );
 
+  if (
+    state.cards.length === 0 &&
+    (state.availability === "loading" || state.availability === "error")
+  ) {
+    return (
+      <main className="auth-screen">
+        <section className="auth-card" aria-label="加载工作区">
+          {state.availability === "loading" ? (
+            <div className="auth-card__checking" role="status">
+              正在加载工作区…
+            </div>
+          ) : (
+            <>
+              <p role="alert">{state.bootstrapError || "工作区加载失败"}</p>
+              <button
+                className="button button--primary button--full"
+                type="button"
+                onClick={bootstrapWorkspace}
+              >
+                重新连接
+              </button>
+            </>
+          )}
+        </section>
+      </main>
+    );
+  }
+
   if (!conversation) {
     return (
       <>

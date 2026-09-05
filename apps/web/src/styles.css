@@ -4797,8 +4797,8 @@ select:focus-visible {
 }
 
 .card-entry__search {
-  max-width: 480px;
-  margin-bottom: 20px;
+  width: min(480px, 100%);
+  margin: 0 auto 20px;
 }
 
 @media (max-width: 1020px) {

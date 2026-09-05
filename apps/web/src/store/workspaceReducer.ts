@@ -883,9 +883,33 @@ const compactDrafts = (value: unknown): Record<string, string> => {
 
 export function loadWorkspaceState(): WorkspaceState {
   const base: WorkspaceState = {
-    ...createDemoWorkspace(),
     availability: "loading",
     bootstrapError: null,
+    conversations: [],
+    cards: [],
+    personas: [],
+    participants: [],
+    messagesByConversation: {},
+    conversationNextCursor: null,
+    messageNextCursorByConversation: {},
+    messageHistoryLoading: {},
+    worldbooks: [],
+    presets: [],
+    regexScopes: [],
+    providerConnections: [],
+    selectedProviderId: "fake",
+    plugins: [],
+    agentProposal: null,
+    agentRun: null,
+    generation: idleGeneration(),
+    selectedCardId: "",
+    selectedConversationId: "",
+    selectedPresetId: "",
+    expandedPanels: { preset: false, regex: true, worldbooks: true },
+    draftByConversation: {},
+    navOpen: false,
+    modal: { kind: "closed" },
+    toast: null,
   };
   if (typeof window === "undefined") return base;
 

@@ -735,5 +735,21 @@ describe("prompt assembly goldens", () => {
         .filter((segment) => segment.position === "after-card")
         .map((segment) => segment.content),
     ).toEqual(["Lore after 20", "Prompt 106"]);
+    const rendered = renderChatPrompt(result.segments, {
+      mergeAdjacent: false,
+      mergeSystemMessages: false,
+      mergeWorldbookAtCard: true,
+    });
+    const worldBefore = rendered.find((item) =>
+      item.content.startsWith("Lore before 10"),
+    );
+    expect(worldBefore?.role).toBe("user");
+    expect(worldBefore?.content).toBe("Lore before 10\nLore before 30");
+    expect(worldBefore?.sourceSegmentIds).toHaveLength(2);
+    expect(rendered.some((item) => item.content === "Prompt 104")).toBe(true);
+    expect(rendered.some((item) => item.content === "Lore after 20")).toBe(
+      true,
+    );
+    expect(rendered.some((item) => item.content === "Prompt 106")).toBe(true);
   });
 });

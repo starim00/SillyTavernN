@@ -7,6 +7,10 @@
 - Adapters normalize old JSON shapes while preserving compatibility payloads
   for export and the trusted runtime. Core operations use normalized types.
 - Executable templates and scripts are detected during import and remain disabled until explicitly trusted.
+- Worldbook hits in each before-card or after-card prompt slot are joined into
+  one message in insertion order, retaining their individual trace sources.
+  This grouping applies even when `squash_system_messages` is false; separate
+  preset entries and chat messages keep their own boundaries.
 - Trust is source-wide for card, preset, regex, and Tavern Helper scripts; there
   are no per-capability grants inside a trusted source. Conversation model-tool
   writes remain a distinct server-authorized actor.

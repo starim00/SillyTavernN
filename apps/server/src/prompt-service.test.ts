@@ -474,6 +474,61 @@ describe("server prompt integration", () => {
     ).toContain("Beta profile");
   });
 
+  it("groups worldbook slots while system squashing is disabled", async () => {
+    const created = await application();
+    const fixture = await richWorkspace(created);
+    const stored = created.context.store.getPreset(fixture.preset.id);
+    created.context.store.updatePreset({
+      id: stored.id,
+      expectedRevision: stored.revision,
+      patch: {
+        payload: jsonObject({
+          ...fixture.preset,
+          compatibility: {
+            sourceFormat: "openai",
+            unknownFields: { squash_system_messages: false },
+          },
+        }),
+      },
+    });
+    const book = created.context.store.createWorldbook({
+      name: "Slot grouping fixture",
+      entries: ["before-card", "after-card"].flatMap((position) =>
+        [1, 2].map((index) => ({
+          id: `${position}-${index}`,
+          keys: ["signal"],
+          content: `${position}-${index}`,
+          metadata: { insertionPosition: position, order: index },
+        })),
+      ),
+    });
+    created.context.store.bindWorldbook({
+      worldbookId: book.id,
+      scopeType: "global",
+    });
+    const prompt = await prepareConversationPrompt(created.context.store, {
+      conversationId: fixture.conversation.id,
+      presetId: fixture.preset.id,
+    });
+    expect(
+      prompt.messages.some((item) => item.content === "PRESET_MARKER"),
+    ).toBe(true);
+    for (const position of ["before-card", "after-card"]) {
+      expect(
+        prompt.messages.filter((item) =>
+          item.content.includes(`${position}-1`),
+        ),
+      ).toMatchObject([
+        { role: "system", content: `${position}-1\n${position}-2` },
+      ]);
+    }
+    expect(
+      prompt.segments.filter(
+        (segment) => segment.source.detail.worldbookId === book.id,
+      ),
+    ).toHaveLength(4);
+  });
+
   it("honors the legacy squash_system_messages preset setting", async () => {
     const created = await application();
     const fixture = await richWorkspace(created);

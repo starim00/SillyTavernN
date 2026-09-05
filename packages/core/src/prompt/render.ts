@@ -22,6 +22,15 @@ export function renderChatPrompt(
   for (const segment of segments) {
     const name = speakerName(segment);
     const previous = messages.at(-1);
+    // Legacy worldInfoBefore/worldInfoAfter are each one prompt slot,
+    // independently of the optional adjacent-system-message squash setting.
+    const mergeWorldbookAtCard =
+      options.mergeWorldbookAtCard === true &&
+      previousSegment?.source.kind === "worldbook" &&
+      segment.source.kind === "worldbook" &&
+      (segment.position === "before-card" ||
+        segment.position === "after-card") &&
+      previousSegment.position === segment.position;
     const mergeWorldbookAtDepth =
       options.mergeWorldbookAtDepth === true &&
       previousSegment?.source.kind === "worldbook" &&
@@ -35,14 +44,15 @@ export function renderChatPrompt(
     if (
       (mergeAdjacent ||
         (options.mergeSystemMessages === true && segment.role === "system") ||
-        mergeWorldbookAtDepth) &&
+        mergeWorldbookAtDepth ||
+        mergeWorldbookAtCard) &&
       previous &&
       previous.role === segment.role &&
       previous.name === name
     ) {
       messages[messages.length - 1] = {
         ...previous,
-        content: `${previous.content}\n\n${segment.content}`,
+        content: `${previous.content}${mergeWorldbookAtCard ? "\n" : "\n\n"}${segment.content}`,
         sourceSegmentIds: [...previous.sourceSegmentIds, segment.id],
       };
       previousSegment = segment;

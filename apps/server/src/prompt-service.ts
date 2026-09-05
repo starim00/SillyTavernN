@@ -849,6 +849,7 @@ export async function prepareConversationPrompt(
     mergeAdjacent: false,
     mergeSystemMessages: squashSystemMessages(preset),
     mergeWorldbookAtDepth: true,
+    mergeWorldbookAtCard: true,
   }).map((message): ProviderMessage => {
     const sourceSegments = message.sourceSegmentIds
       .map((id) => segmentsById.get(id))

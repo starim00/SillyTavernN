@@ -1,5 +1,6 @@
 import {
   BookOpenText,
+  PlugsConnected,
   SlidersHorizontal,
   Trash,
   X,
@@ -27,6 +28,8 @@ type PresetSettingsRailProps = {
   onDetachPrompt: (promptId: string) => Promise<void>;
   onReorderPrompts: (promptIds: string[]) => Promise<void>;
   onClose: () => void;
+  providerName?: string;
+  onOpenProvider?: () => void;
 };
 
 export function PresetSettingsRail({
@@ -42,6 +45,8 @@ export function PresetSettingsRail({
   onDetachPrompt,
   onReorderPrompts,
   onClose,
+  providerName,
+  onOpenProvider,
 }: PresetSettingsRailProps) {
   const preset = presets.find((candidate) => candidate.id === selectedPresetId);
 
@@ -56,8 +61,8 @@ export function PresetSettingsRail({
         <div>
           <SlidersHorizontal size={18} />
           <span>
-            <strong>AI 响应配置</strong>
-            <small>预设与提示词条目</small>
+            <strong>预设与生成</strong>
+            <small>调整参数与提示词</small>
           </span>
         </div>
         <IconButton
@@ -70,6 +75,21 @@ export function PresetSettingsRail({
       </div>
 
       <div className="preset-settings-rail__scroll">
+        {onOpenProvider ? (
+          <button
+            type="button"
+            className="preset-provider"
+            onClick={onOpenProvider}
+            aria-label="管理 Provider 连接"
+          >
+            <PlugsConnected size={18} />
+            <span>
+              <small>模型连接</small>
+              <strong>{providerName ?? "本地 Provider"}</strong>
+            </span>
+            <span className="preset-provider__action">管理</span>
+          </button>
+        ) : null}
         <div className="preset-settings-rail__select">
           <span>
             <BookOpenText size={15} />

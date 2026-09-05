@@ -237,7 +237,7 @@ describe("ContextRail", () => {
   it("shows enabled and optional preset entries with editable content", () => {
     const html = renderRail(null);
 
-    expect(html).toContain("AI 响应配置");
+    expect(html).toContain("预设与生成");
     expect(html).toContain("1/2 启用");
     expect(html).toContain("主要指令");
     expect(html).toContain("回合摘要（可选）");

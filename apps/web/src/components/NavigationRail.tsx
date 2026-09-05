@@ -1,6 +1,7 @@
 import {
   ArrowClockwise,
   Books,
+  DotsThree,
   MagnifyingGlass,
   Plus,
   Trash,
@@ -10,6 +11,7 @@ import { useDeferredValue, useMemo, useState } from "react";
 
 import type { RoleCard } from "../domain/workspace";
 import { IconButton } from "./WorkspacePrimitives";
+import { ActionPopover } from "./ActionPopover";
 
 type NavigationRailProps = {
   open: boolean;
@@ -108,29 +110,46 @@ export function NavigationRail({
                 </span>
               </button>
               {selected ? (
-                <>
-                  <IconButton
-                    compact
-                    className="character-row__update"
-                    label={`更新角色卡 ${card.name}`}
-                    icon={<ArrowClockwise size={15} />}
-                    onClick={() => onUpdateCard(card)}
-                  />
-                  <IconButton
-                    compact
-                    className="character-row__new"
-                    label={`在 ${card.name} 下新建对话`}
-                    icon={<Plus size={15} />}
+                <div className="character-row__actions">
+                  <button
+                    type="button"
+                    className="topbar-button"
+                    aria-label={`在 ${card.name} 下新建对话`}
                     onClick={() => onCreateConversation(card.id)}
-                  />
-                  <IconButton
-                    compact
-                    className="character-row__delete"
-                    label={`删除角色卡 ${card.name}`}
-                    icon={<Trash size={15} />}
-                    onClick={() => onDeleteCard(card)}
-                  />
-                </>
+                  >
+                    <Plus size={16} />
+                    <span>新建对话</span>
+                  </button>
+                  <ActionPopover label="更多" icon={<DotsThree size={19} />}>
+                    {(close) => (
+                      <>
+                        <button
+                          type="button"
+                          aria-label={`更新角色卡 ${card.name}`}
+                          onClick={() => {
+                            close();
+                            onUpdateCard(card);
+                          }}
+                        >
+                          <ArrowClockwise size={17} />
+                          <span>更新角色卡</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="action-popover__danger"
+                          aria-label={`删除角色卡 ${card.name}`}
+                          onClick={() => {
+                            close();
+                            onDeleteCard(card);
+                          }}
+                        >
+                          <Trash size={17} />
+                          <span>删除角色卡</span>
+                        </button>
+                      </>
+                    )}
+                  </ActionPopover>
+                </div>
               ) : null}
             </div>
           );

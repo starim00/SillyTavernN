@@ -1,5 +1,5 @@
-import { Books, UploadSimple } from "@phosphor-icons/react";
-import type { ReactNode } from "react";
+import { Books, MagnifyingGlass, UploadSimple } from "@phosphor-icons/react";
+import { useDeferredValue, useState, type ReactNode } from "react";
 
 import type { RoleCard } from "../domain/workspace";
 
@@ -16,6 +16,11 @@ export function CardConversationEntry({
   onImport,
   notice,
 }: CardConversationEntryProps) {
+  const [query, setQuery] = useState("");
+  const search = useDeferredValue(query.trim().toLocaleLowerCase());
+  const filteredCards = cards.filter((card) =>
+    `${card.name} ${card.description}`.toLocaleLowerCase().includes(search),
+  );
   return (
     <main className="card-entry" aria-labelledby="card-entry-title">
       {notice}
@@ -38,8 +43,20 @@ export function CardConversationEntry({
       </div>
 
       {cards.length > 0 ? (
+        <label className="rail-search card-entry__search">
+          <MagnifyingGlass size={18} aria-hidden="true" />
+          <span className="sr-only">搜索角色卡</span>
+          <input
+            type="search"
+            placeholder="搜索角色卡"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </label>
+      ) : null}
+      {cards.length > 0 ? (
         <div className="card-entry__grid">
-          {cards.map((card) => (
+          {filteredCards.map((card) => (
             <button
               className="card-entry-item"
               type="button"
@@ -60,6 +77,9 @@ export function CardConversationEntry({
               </span>
             </button>
           ))}
+          {filteredCards.length === 0 ? (
+            <p role="status">没有匹配的角色卡，请尝试其他关键词。</p>
+          ) : null}
         </div>
       ) : (
         <div className="card-entry__empty">

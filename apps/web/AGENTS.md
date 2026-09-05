@@ -10,6 +10,10 @@ Follow the repository [development rules](../../AGENTS.md) and
 - Keep navigation card-first and the message stream dominant. Card content may
   describe several people or a world without introducing separate card kinds
   or model-message speakers.
+- Preset adjustments are frequent: keep the desktop preset editor directly
+  visible on the left. History switching needs a menu entry, not a persistent
+  sidebar. Put infrequent Persona switching in workspace settings, outside the
+  primary toolbar and composer.
 - Messages use natural content height in one continuous stream. Keep one
   conversation scrollbar and a compact composer that grows with its draft.
 - Use code-native layout. Do not add generated character art or decorative

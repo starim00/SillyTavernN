@@ -416,7 +416,7 @@ describe("workspace components", () => {
       "--safe-area-bottom: env(safe-area-inset-bottom, 0px)",
     );
     expect(workspaceStyles).toMatch(
-      /\.topbar-action-group:first-child \.topbar-button,[\s\S]*?width:\s*44px;[\s\S]*?min-height:\s*44px;/,
+      /\.topbar \.topbar-button[\s\S]*?width:\s*44px;[\s\S]*?min-height:\s*44px;/,
     );
     expect(workspaceStyles).toMatch(
       /\.message-actions \.icon-button--compact\s*\{[\s\S]*?width:\s*44px;[\s\S]*?height:\s*44px;/,

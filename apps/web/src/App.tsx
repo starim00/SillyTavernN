@@ -1,18 +1,5 @@
-import {
-  BracketsCurly,
-  BookOpenText,
-  Books,
-  ChatCircleDots,
-  CloudCheck,
-  CloudSlash,
-  DotsThree,
-  LockKey,
-  PlugsConnected,
-  PuzzlePiece,
-  SlidersHorizontal,
-  UploadSimple,
-  UserCircle,
-} from "@phosphor-icons/react";
+import { WorkspaceHeader } from "./components/WorkspaceHeader";
+
 import { getLegacyPluginProfile } from "@stn/legacy-compat/profiles";
 import {
   useCallback,
@@ -120,7 +107,6 @@ import type { PresetGenerationPatch } from "./components/PresetGenerationControl
 import type { TavernHelperTool } from "./components/TavernHelperWorkbench";
 import { WorkspaceConnectionBanner } from "./components/WorkspaceConnectionBanner";
 import { useAuthControls } from "./components/AuthGate";
-import { SurfaceStatus } from "./components/WorkspacePrimitives";
 import { playMessageSoundIfPageUnfocused } from "./messageSound";
 import { WorkspaceModals } from "./components/WorkspaceModals";
 import { createConversationTitle } from "./conversationTitle";
@@ -243,9 +229,8 @@ export default function App() {
   const [presetSettingsOpen, setPresetSettingsOpen] = useState(() =>
     typeof window === "undefined" || typeof window.matchMedia !== "function"
       ? true
-      : window.matchMedia("(min-width: 1181px)").matches,
+      : window.matchMedia("(min-width: 1021px)").matches,
   );
-  const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   const [pendingMessageDeletion, setPendingMessageDeletion] =
     useState<WorkspaceMessage | null>(null);
   const [messageDeletionPending, setMessageDeletionPending] = useState(false);
@@ -490,7 +475,7 @@ export default function App() {
   );
 
   useEffect(() => {
-    const compactLayout = window.matchMedia("(max-width: 1180px)");
+    const compactLayout = window.matchMedia("(max-width: 1020px)");
     const closeSupportingDrawers = (matches: boolean) => {
       if (!matches) return;
       dispatch({ type: "nav/set", open: false });
@@ -3043,249 +3028,30 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <header className="topbar">
-        <div className="topbar__leading">
-          <div className="topbar__brand" aria-label="SillyTavern N">
-            <span className="brand-mark" aria-hidden="true">
-              <ChatCircleDots size={19} weight="fill" />
-            </span>
-            <strong>SillyTavern N</strong>
-          </div>
-          <div className="topbar__conversation">
-            <h1 title={conversation.title}>{conversation.title}</h1>
-            <p>
-              角色卡 · {selectedCard?.name}
-              {activePersona ? ` · 你是${activePersona.name}` : ""}
-            </p>
-          </div>
-        </div>
-        <nav className="topbar__actions" aria-label="工作区操作">
-          <div className="topbar-action-group" aria-label="角色与生成配置">
-            <button
-              className="topbar-button"
-              type="button"
-              aria-label={state.navOpen ? "关闭角色卡选择" : "打开角色卡选择"}
-              aria-expanded={state.navOpen}
-              onClick={() =>
-                dispatch({ type: "nav/set", open: !state.navOpen })
-              }
-            >
-              <Books size={18} />
-              <span>角色卡</span>
-            </button>
-            <button
-              className="topbar-button persona-button"
-              type="button"
-              aria-label="管理用户人设"
-              onClick={() =>
-                dispatch({ type: "modal/set", modal: { kind: "personas" } })
-              }
-            >
-              <UserCircle size={18} />
-              <span>{activePersona?.name ?? "用户人设"}</span>
-            </button>
-            <button
-              className="topbar-button"
-              type="button"
-              aria-label={presetSettingsOpen ? "关闭预设设置" : "打开预设设置"}
-              aria-expanded={presetSettingsOpen}
-              onClick={() => setPresetSettingsOpen((open) => !open)}
-            >
-              <SlidersHorizontal size={18} />
-              <span>预设</span>
-            </button>
-          </div>
-
-          <div
-            className="topbar-action-group topbar-action-group--secondary"
-            aria-label="内容规则"
-          >
-            <button
-              className="topbar-button"
-              type="button"
-              aria-label="打开世界书菜单"
-              onClick={() =>
-                dispatch({ type: "modal/set", modal: { kind: "worldbooks" } })
-              }
-            >
-              <BookOpenText size={18} />
-              <span>世界书</span>
-            </button>
-            <button
-              className="topbar-button"
-              type="button"
-              aria-label="打开正则菜单"
-              onClick={() =>
-                dispatch({ type: "modal/set", modal: { kind: "regex" } })
-              }
-            >
-              <BracketsCurly size={18} />
-              <span>正则</span>
-            </button>
-          </div>
-
-          <div
-            className="topbar-action-group topbar-action-group--secondary"
-            aria-label="连接与维护"
-          >
-            <button
-              className="topbar-button provider-button"
-              type="button"
-              aria-label="管理 Provider 连接"
-              onClick={() =>
-                dispatch({ type: "modal/set", modal: { kind: "providers" } })
-              }
-            >
-              <PlugsConnected size={18} />
-              <span>{selectedProvider?.name ?? "本地 Provider"}</span>
-            </button>
-            <button
-              className="topbar-button"
-              type="button"
-              aria-label="打开扩展菜单"
-              onClick={() =>
-                dispatch({ type: "modal/set", modal: { kind: "extensions" } })
-              }
-            >
-              <PuzzlePiece size={18} />
-              <span>扩展</span>
-            </button>
-            <button
-              className="topbar-button"
-              type="button"
-              aria-label="导入便携内容"
-              onClick={() =>
-                dispatch({ type: "modal/set", modal: { kind: "import" } })
-              }
-            >
-              <UploadSimple size={18} />
-              <span>导入</span>
-            </button>
-            <button
-              className="topbar-button"
-              type="button"
-              aria-label="账户与密码"
-              onClick={openSecurity}
-            >
-              <LockKey size={18} />
-              <span>安全</span>
-            </button>
-          </div>
-
-          <div className="mobile-actions">
-            <button
-              className="topbar-button mobile-actions__trigger"
-              type="button"
-              aria-label={mobileActionsOpen ? "关闭更多操作" : "打开更多操作"}
-              aria-expanded={mobileActionsOpen}
-              onClick={() => setMobileActionsOpen((open) => !open)}
-            >
-              <DotsThree size={22} weight="bold" />
-              <span>更多</span>
-            </button>
-            {mobileActionsOpen ? (
-              <>
-                <button
-                  className="mobile-actions__scrim"
-                  type="button"
-                  aria-label="关闭更多操作"
-                  onClick={() => setMobileActionsOpen(false)}
-                />
-                <div className="mobile-actions__menu" role="menu">
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMobileActionsOpen(false);
-                      dispatch({
-                        type: "modal/set",
-                        modal: { kind: "worldbooks" },
-                      });
-                    }}
-                  >
-                    <BookOpenText size={20} />
-                    <span>世界书</span>
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMobileActionsOpen(false);
-                      dispatch({ type: "modal/set", modal: { kind: "regex" } });
-                    }}
-                  >
-                    <BracketsCurly size={20} />
-                    <span>正则</span>
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMobileActionsOpen(false);
-                      dispatch({
-                        type: "modal/set",
-                        modal: { kind: "providers" },
-                      });
-                    }}
-                  >
-                    <PlugsConnected size={20} />
-                    <span>Provider</span>
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMobileActionsOpen(false);
-                      dispatch({
-                        type: "modal/set",
-                        modal: { kind: "extensions" },
-                      });
-                    }}
-                  >
-                    <PuzzlePiece size={20} />
-                    <span>扩展</span>
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMobileActionsOpen(false);
-                      dispatch({
-                        type: "modal/set",
-                        modal: { kind: "import" },
-                      });
-                    }}
-                  >
-                    <UploadSimple size={20} />
-                    <span>导入</span>
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMobileActionsOpen(false);
-                      openSecurity();
-                    }}
-                  >
-                    <LockKey size={20} />
-                    <span>账户与密码</span>
-                  </button>
-                </div>
-              </>
-            ) : null}
-          </div>
-
-          <div className="topbar__status">
-            <SurfaceStatus tone={apiOnline ? "mint" : "slate"}>
-              {apiOnline ? <CloudCheck size={14} /> : <CloudSlash size={14} />}
-              {loading ? "正在连接" : apiOnline ? "本地服务在线" : "离线工作区"}
-            </SurfaceStatus>
-          </div>
-        </nav>
-      </header>
+      <WorkspaceHeader
+        title={conversation.title}
+        cardName={selectedCard?.name ?? "角色卡"}
+        personaName={activePersona?.name ?? "未选择人设"}
+        navOpen={state.navOpen}
+        presetOpen={presetSettingsOpen}
+        online={apiOnline}
+        loading={loading}
+        onToggleCards={() =>
+          dispatch({ type: "nav/set", open: !state.navOpen })
+        }
+        onTogglePreset={() => setPresetSettingsOpen((open) => !open)}
+        onOpenSettings={(kind) =>
+          dispatch({ type: "modal/set", modal: { kind } })
+        }
+        onOpenSecurity={openSecurity}
+      />
 
       <div className="workspace-layout">
         <PresetSettingsRail
+          providerName={selectedProvider?.name ?? "本地 Provider"}
+          onOpenProvider={() =>
+            dispatch({ type: "modal/set", modal: { kind: "providers" } })
+          }
           open={presetSettingsOpen}
           presets={state.presets}
           selectedPresetId={state.selectedPresetId}

@@ -1,3 +1,10 @@
+import { WorldbookEntryEditor } from "./WorldbookEntryEditor";
+import {
+  editableWorldbookEntry,
+  insertionPositionLabel,
+  worldbookEntryModeLabel,
+  worldbookEntryPlacementLabel,
+} from "./worldbookFields";
 import {
   BookOpenText,
   BracketsCurly,
@@ -12,14 +19,12 @@ import {
   PencilSimple,
   Power,
   Plus,
-  X,
 } from "@phosphor-icons/react";
 import {
   useDeferredValue,
   useEffect,
   useMemo,
   useState,
-  type FormEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
@@ -38,7 +43,7 @@ import {
   PresetGenerationControls,
   type PresetGenerationPatch,
 } from "./PresetGenerationControls";
-import { IconButton, SurfaceStatus } from "./WorkspacePrimitives";
+import { SurfaceStatus } from "./WorkspacePrimitives";
 import { RegexManager } from "./RegexManager";
 
 function SupportPanel({
@@ -625,146 +630,6 @@ export function PresetDetail({
   );
 }
 
-type ExplicitInsertionPosition = Exclude<
-  WorldbookEntry["insertionPosition"],
-  null
->;
-
-const insertionPositionOptions: ReadonlyArray<{
-  value: ExplicitInsertionPosition;
-  label: string;
-}> = [
-  { value: "before-card", label: "角色卡之前" },
-  { value: "after-card", label: "角色卡之后" },
-  { value: "examples-top", label: "示例对话之前" },
-  { value: "examples-bottom", label: "示例对话之后" },
-  { value: "author-note-top", label: "作者注释之前" },
-  { value: "author-note-bottom", label: "作者注释之后" },
-  { value: "at-depth", label: "对话历史指定深度" },
-  { value: "outlet", label: "命名出口" },
-];
-
-const insertionPositionLabels = Object.fromEntries(
-  insertionPositionOptions.map(({ value, label }) => [value, label]),
-) as Record<ExplicitInsertionPosition, string>;
-
-function insertionPositionLabel(
-  value: WorldbookEntry["insertionPosition"],
-): string {
-  return value === null
-    ? "默认（沿用原始位置）"
-    : insertionPositionLabels[value];
-}
-
-const insertionRoleLabels: Record<WorldbookEntry["insertionRole"], string> = {
-  system: "系统",
-  user: "用户",
-  assistant: "助手",
-};
-
-function worldbookEntryModeLabel(entry: WorldbookEntry): string {
-  return entry.constant ? "永久启用" : "关键词匹配";
-}
-
-function worldbookEntryPlacementLabel(entry: WorldbookEntry): string {
-  if (entry.insertionPosition === "at-depth") {
-    return `@D ${insertionRoleLabels[entry.insertionRole]}在深度`;
-  }
-  if (entry.insertionPosition === "outlet") {
-    return entry.outletName ? `出口 · ${entry.outletName}` : "命名出口";
-  }
-  return insertionPositionLabel(entry.insertionPosition);
-}
-
-function compactKeywordRows(values: string[]): string[] {
-  return [...new Set(values.filter((keyword) => keyword.length > 0))];
-}
-
-function KeywordListEditor({
-  label,
-  values,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  values: string[];
-  disabled: boolean;
-  onChange: (values: string[]) => void;
-}) {
-  const rows = values.length > 0 ? values : [""];
-  return (
-    <fieldset className="keyword-list-editor">
-      <legend>{label}</legend>
-      {rows.map((value, index) => (
-        <div
-          className="keyword-list-editor__row"
-          key={`${label}-${String(index)}`}
-        >
-          <input
-            aria-label={`${label} ${String(index + 1)}`}
-            value={value}
-            disabled={disabled}
-            placeholder={index === 0 ? "输入关键词或 /表达式/flags" : ""}
-            onChange={(event) =>
-              onChange(
-                rows.map((keyword, rowIndex) =>
-                  rowIndex === index ? event.target.value : keyword,
-                ),
-              )
-            }
-          />
-          <IconButton
-            compact
-            label={`删除${label} ${String(index + 1)}`}
-            icon={<X size={14} />}
-            disabled={disabled || values.length === 0}
-            onClick={() =>
-              onChange(values.filter((_, rowIndex) => rowIndex !== index))
-            }
-          />
-        </div>
-      ))}
-      <button
-        className="text-button keyword-list-editor__add"
-        type="button"
-        disabled={disabled}
-        onClick={() => onChange([...values, ""])}
-      >
-        <Plus size={13} />
-        添加一项
-      </button>
-    </fieldset>
-  );
-}
-
-function editableWorldbookEntry(entry: WorldbookEntry): WorldbookEntryUpdate {
-  return {
-    title: entry.title,
-    primaryKeys: entry.primaryKeys,
-    secondaryKeys: entry.secondaryKeys,
-    secondaryLogic: entry.secondaryLogic,
-    selective: entry.selective,
-    content: entry.content,
-    enabled: entry.enabled,
-    constant: entry.constant,
-    caseSensitive: entry.caseSensitive,
-    matchWholeWords: entry.matchWholeWords,
-    useRegex: entry.useRegex,
-    scanDepth: entry.scanDepth,
-    recursion: entry.recursion,
-    preventRecursion: entry.preventRecursion,
-    excludeRecursion: entry.excludeRecursion,
-    delayUntilRecursion: entry.delayUntilRecursion,
-    insertionPosition: entry.insertionPosition,
-    outletName: entry.outletName,
-    insertionDepth: entry.insertionDepth,
-    insertionRole: entry.insertionRole,
-    order: entry.order,
-    priority: entry.priority,
-    probability: entry.probability,
-  };
-}
-
 function WorldbookEntryItem({
   worldbook,
   entry,
@@ -782,12 +647,6 @@ function WorldbookEntryItem({
 }) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [draft, setDraft] = useState(() => editableWorldbookEntry(entry));
-  const [primaryKeys, setPrimaryKeys] = useState(() => [...entry.primaryKeys]);
-  const [secondaryKeys, setSecondaryKeys] = useState(() => [
-    ...entry.secondaryKeys,
-  ]);
-
   const toggleEnabled = async () => {
     if (saving || editing) return;
     const enabled = !entry.enabled;
@@ -797,7 +656,6 @@ function WorldbookEntryItem({
         ...editableWorldbookEntry(entry),
         enabled,
       });
-      setDraft((current) => ({ ...current, enabled }));
     } catch {
       // The parent surface reports the durable server error.
     } finally {
@@ -815,30 +673,6 @@ function WorldbookEntryItem({
         constant,
         selective: !constant,
       });
-      setDraft((current) => ({
-        ...current,
-        constant,
-        selective: !constant,
-      }));
-    } catch {
-      // The parent surface reports the durable server error.
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    if (saving || !draft.title.trim()) return;
-    setSaving(true);
-    try {
-      await onSave(worldbook, entry, {
-        ...draft,
-        title: draft.title.trim(),
-        primaryKeys: compactKeywordRows(primaryKeys),
-        secondaryKeys: compactKeywordRows(secondaryKeys),
-      });
-      setEditing(false);
     } catch {
       // The parent surface reports the durable server error.
     } finally {
@@ -887,6 +721,7 @@ function WorldbookEntryItem({
             aria-pressed={entry.agentEditable}
             aria-label={`${entry.agentEditable ? "禁止" : "允许"} AI 编辑条目 ${entry.title}`}
             title={`${entry.agentEditable ? "禁止" : "允许"} AI 编辑此条目`}
+            disabled={saving || editing}
             onClick={() => onPermission(worldbook.id, entry.id)}
           >
             {entry.agentEditable ? <LockOpen size={13} /> : <Lock size={13} />}
@@ -895,309 +730,14 @@ function WorldbookEntryItem({
         </div>
       </div>
       {editing ? (
-        <form className="worldbook-entry-editor" onSubmit={submit}>
-          <label className="field">
-            <span>条目名称</span>
-            <input
-              value={draft.title}
-              disabled={saving}
-              onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  title: event.target.value,
-                }))
-              }
-            />
-          </label>
-          <KeywordListEditor
-            label="主要关键词"
-            values={primaryKeys}
-            disabled={saving || draft.constant}
-            onChange={setPrimaryKeys}
-          />
-          <KeywordListEditor
-            label="辅助关键词"
-            values={secondaryKeys}
-            disabled={saving || draft.constant || !draft.selective}
-            onChange={setSecondaryKeys}
-          />
-          <div className="worldbook-entry-editor__checks">
-            <label className="check-row">
-              <input
-                type="checkbox"
-                checked={draft.enabled}
-                disabled={saving}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    enabled: event.target.checked,
-                  }))
-                }
-              />
-              <span>启用此条目</span>
-            </label>
-            <label className="check-row">
-              <input
-                type="checkbox"
-                checked={draft.constant}
-                disabled={saving}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    constant: event.target.checked,
-                  }))
-                }
-              />
-              <span>永久启用，不依赖关键词</span>
-            </label>
-            <label className="check-row">
-              <input
-                type="checkbox"
-                checked={draft.selective}
-                disabled={saving || draft.constant}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    selective: event.target.checked,
-                  }))
-                }
-              />
-              <span>使用辅助关键词</span>
-            </label>
-          </div>
-          {draft.selective && !draft.constant ? (
-            <label className="field">
-              <span>辅助关键词逻辑</span>
-              <select
-                value={draft.secondaryLogic}
-                disabled={saving}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    secondaryLogic: event.target
-                      .value as WorldbookEntry["secondaryLogic"],
-                  }))
-                }
-              >
-                <option value="any">命中任意一个</option>
-                <option value="all">命中全部</option>
-                <option value="not-any">全部都不能命中</option>
-                <option value="not-all">不能全部命中</option>
-              </select>
-            </label>
-          ) : null}
-          <label className="field">
-            <span>条目正文</span>
-            <textarea
-              value={draft.content}
-              rows={9}
-              disabled={saving}
-              onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  content: event.target.value,
-                }))
-              }
-            />
-          </label>
-          <div className="worldbook-entry-editor__grid">
-            <label className="field">
-              <span>插入位置</span>
-              <select
-                value={draft.insertionPosition ?? ""}
-                disabled={saving}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    insertionPosition:
-                      event.target.value === ""
-                        ? null
-                        : (event.target.value as ExplicitInsertionPosition),
-                  }))
-                }
-              >
-                <option value="">默认（沿用原始位置）</option>
-                {insertionPositionOptions.map(({ value, label }) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span>插入顺序</span>
-              <input
-                type="number"
-                value={draft.order}
-                disabled={saving}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    order: event.target.valueAsNumber || 0,
-                  }))
-                }
-              />
-            </label>
-            <label className="field">
-              <span>优先级</span>
-              <input
-                type="number"
-                value={draft.priority}
-                disabled={saving}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    priority: event.target.valueAsNumber || 0,
-                  }))
-                }
-              />
-            </label>
-            <label className="field">
-              <span>扫描深度</span>
-              <input
-                type="number"
-                min={1}
-                max={10_000}
-                value={draft.scanDepth ?? ""}
-                placeholder="使用世界书默认值"
-                disabled={saving}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    scanDepth:
-                      event.target.value === ""
-                        ? null
-                        : event.target.valueAsNumber,
-                  }))
-                }
-              />
-            </label>
-            <label className="field">
-              <span>触发概率 %</span>
-              <input
-                type="number"
-                min={0}
-                max={100}
-                value={draft.probability ?? 100}
-                disabled={saving}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    probability: event.target.valueAsNumber || 0,
-                  }))
-                }
-              />
-            </label>
-          </div>
-          {draft.insertionPosition === "outlet" ? (
-            <label className="field">
-              <span>出口名称</span>
-              <input
-                value={draft.outletName ?? ""}
-                placeholder="与 {{outlet::名称}} 中的名称一致"
-                disabled={saving}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    outletName: event.target.value || null,
-                  }))
-                }
-              />
-            </label>
-          ) : null}
-          {draft.insertionPosition === "at-depth" ? (
-            <div className="worldbook-entry-editor__grid">
-              <label className="field">
-                <span>历史深度</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={10_000}
-                  value={draft.insertionDepth ?? 0}
-                  disabled={saving}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      insertionDepth: event.target.valueAsNumber || 0,
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>消息角色</span>
-                <select
-                  value={draft.insertionRole}
-                  disabled={saving}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      insertionRole: event.target
-                        .value as WorldbookEntry["insertionRole"],
-                    }))
-                  }
-                >
-                  <option value="system">system</option>
-                  <option value="user">user</option>
-                  <option value="assistant">assistant</option>
-                </select>
-              </label>
-            </div>
-          ) : null}
-          <details className="worldbook-entry-editor__advanced">
-            <summary>匹配与递归设置</summary>
-            <div className="worldbook-entry-editor__checks">
-              {(
-                [
-                  ["caseSensitive", "区分大小写"],
-                  ["matchWholeWords", "仅匹配完整词"],
-                  ["useRegex", "识别 /表达式/flags 关键词"],
-                  ["recursion", "允许此条目触发递归召回"],
-                  ["preventRecursion", "正文不继续参与递归"],
-                  ["excludeRecursion", "递归轮次排除此条目"],
-                  ["delayUntilRecursion", "仅在递归轮次参与匹配"],
-                ] as const
-              ).map(([key, label]) => (
-                <label className="check-row" key={key}>
-                  <input
-                    type="checkbox"
-                    checked={draft[key]}
-                    disabled={saving}
-                    onChange={(event) =>
-                      setDraft((current) => ({
-                        ...current,
-                        [key]: event.target.checked,
-                      }))
-                    }
-                  />
-                  <span>{label}</span>
-                </label>
-              ))}
-            </div>
-          </details>
-          <div className="worldbook-entry__actions">
-            <button
-              className="button button--quiet"
-              type="button"
-              disabled={saving}
-              onClick={() => {
-                setDraft(editableWorldbookEntry(entry));
-                setPrimaryKeys([...entry.primaryKeys]);
-                setSecondaryKeys([...entry.secondaryKeys]);
-                setEditing(false);
-              }}
-            >
-              取消
-            </button>
-            <button
-              className="button button--secondary"
-              type="submit"
-              disabled={saving || !draft.title.trim()}
-            >
-              <FloppyDisk size={15} />
-              {saving ? "保存中" : "保存条目"}
-            </button>
-          </div>
-        </form>
+        <WorldbookEntryEditor
+          worldbook={worldbook}
+          entry={entry}
+          onSave={onSave}
+          onSaved={() => setEditing(false)}
+          onCancel={() => setEditing(false)}
+          onBusyChange={setSaving}
+        />
       ) : (
         <div className="worldbook-entry__row" role="row">
           <button

@@ -479,7 +479,10 @@ export default function App() {
     const closeSupportingDrawers = (matches: boolean) => {
       if (!matches) return;
       dispatch({ type: "nav/set", open: false });
-      dispatch({ type: "modal/set", modal: { kind: "closed" } });
+      // The worldbook manager adapts in place and owns unsaved edit protection.
+      if (workspaceStateRef.current.modal.kind !== "worldbooks") {
+        dispatch({ type: "modal/set", modal: { kind: "closed" } });
+      }
       setPresetSettingsOpen(false);
     };
     closeSupportingDrawers(compactLayout.matches);
@@ -499,7 +502,8 @@ export default function App() {
   }, [state.toast]);
 
   useEffect(() => {
-    if (state.modal.kind === "closed") return;
+    if (state.modal.kind === "closed" || state.modal.kind === "worldbooks")
+      return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape")
         dispatch({ type: "modal/set", modal: { kind: "closed" } });
@@ -2969,12 +2973,6 @@ export default function App() {
         onInstallPlugin={installPlugin}
         onTogglePlugin={togglePlugin}
         onPermission={changePermission}
-        onRequestWorldbookPermission={(worldbookId, entryId) =>
-          dispatch({
-            type: "modal/set",
-            modal: { kind: "permission", worldbookId, entryId },
-          })
-        }
         onTogglePanel={(panel) => dispatch({ type: "panel/toggle", panel })}
         onSaveRegexScope={changeRegexScope}
         onSaveWorldbookEntry={saveWorldbookEntry}

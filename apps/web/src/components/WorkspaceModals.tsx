@@ -1,6 +1,5 @@
 import {
   ArrowClockwise,
-  BookOpenText,
   BracketsCurly,
   Books,
   CheckCircle,
@@ -9,7 +8,6 @@ import {
   FileArrowUp,
   Lock,
   LockOpen,
-  MagnifyingGlass,
   PlugsConnected,
   Plus,
   ShieldWarning,
@@ -54,7 +52,8 @@ import {
   providerConnectionExportFilename,
   serializePortableProviderConnection,
 } from "../providerConnectionPortability";
-import { RegexRail, WorldbookRail } from "./ContextRail";
+import { RegexRail } from "./ContextRail";
+import { WorldbookManager } from "./WorldbookManager";
 import { WorkspaceModalFrame } from "./WorkspaceModalFrame";
 import { IconButton, SurfaceStatus } from "./WorkspacePrimitives";
 
@@ -1191,201 +1190,6 @@ function RegexModal({
   );
 }
 
-function WorldbookModal({
-  card,
-  worldbooks,
-  activeWorldbooks,
-  online,
-  expanded,
-  onClose,
-  onToggle,
-  onPermission,
-  onSave,
-  onSaveCardWorldbooks,
-  onDeleteWorldbook,
-}: {
-  card: RoleCard | null;
-  worldbooks: Worldbook[];
-  activeWorldbooks: Worldbook[];
-  online: boolean;
-  expanded: boolean;
-  onClose: () => void;
-  onToggle: () => void;
-  onPermission: (worldbookId: string, entryId: string) => void;
-  onSave: (
-    worldbook: Worldbook,
-    entry: WorldbookEntry,
-    patch: WorldbookEntryUpdate,
-  ) => Promise<void>;
-  onSaveCardWorldbooks: (worldbookIds: string[]) => Promise<void>;
-  onDeleteWorldbook: (worldbook: Worldbook) => Promise<void>;
-}) {
-  const [query, setQuery] = useState("");
-  const [selectedIds, setSelectedIds] = useState(
-    () => new Set(card?.worldbookIds ?? []),
-  );
-  const [saving, setSaving] = useState(false);
-  const normalizedQuery = query.trim().toLocaleLowerCase();
-  const visibleWorldbooks = normalizedQuery
-    ? worldbooks.filter((worldbook) =>
-        `${worldbook.name}\n${worldbook.description}`
-          .toLocaleLowerCase()
-          .includes(normalizedQuery),
-      )
-    : worldbooks;
-  const selectedWorldbooks = worldbooks.filter((worldbook) =>
-    selectedIds.has(worldbook.id),
-  );
-  const persistedIds = new Set(card?.worldbookIds ?? []);
-  const hasChanges =
-    persistedIds.size !== selectedIds.size ||
-    [...selectedIds].some((worldbookId) => !persistedIds.has(worldbookId));
-  const conversationOnlyWorldbooks = activeWorldbooks.filter(
-    (worldbook) => !persistedIds.has(worldbook.id),
-  );
-
-  const toggleWorldbook = (worldbookId: string) => {
-    setSelectedIds((current) => {
-      const next = new Set(current);
-      if (next.has(worldbookId)) next.delete(worldbookId);
-      else next.add(worldbookId);
-      return next;
-    });
-  };
-
-  const saveCombination = async () => {
-    if (!hasChanges || saving) return;
-    setSaving(true);
-    try {
-      await onSaveCardWorldbooks([...selectedIds]);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <WorkspaceModalFrame
-      title="世界书"
-      description={`从全部世界书中组合附加到当前角色卡${card ? `“${card.name}”` : ""}，并管理条目。`}
-      icon={<BookOpenText size={22} />}
-      onClose={onClose}
-      size="wide"
-    >
-      <div className="worldbook-library">
-        <aside className="worldbook-library__catalog" aria-label="全部世界书">
-          <div className="worldbook-library__heading">
-            <div>
-              <strong>全部世界书</strong>
-              <span>{worldbooks.length} 本已导入</span>
-            </div>
-            <span className="worldbook-library__count">
-              已选 {selectedIds.size}
-            </span>
-          </div>
-          <label className="worldbook-library__search">
-            <MagnifyingGlass size={15} aria-hidden="true" />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="搜索世界书"
-            />
-          </label>
-          <div className="worldbook-library__list">
-            {visibleWorldbooks.map((worldbook) => {
-              const selected = selectedIds.has(worldbook.id);
-              return (
-                <div
-                  className={`worldbook-library__option${
-                    selected ? " worldbook-library__option--selected" : ""
-                  }`}
-                  key={worldbook.id}
-                >
-                  <label className="worldbook-library__select">
-                    <input
-                      type="checkbox"
-                      checked={selected}
-                      onChange={() => toggleWorldbook(worldbook.id)}
-                    />
-                    <span
-                      className="worldbook-library__check"
-                      aria-hidden="true"
-                    >
-                      {selected ? (
-                        <CheckCircle size={17} weight="fill" />
-                      ) : null}
-                    </span>
-                    <span className="worldbook-library__identity">
-                      <strong>{worldbook.name}</strong>
-                      <small>
-                        {worldbook.entries.length} 个条目
-                        {worldbook.imported ? " · 已导入" : " · 本地"}
-                      </small>
-                      {worldbook.description ? (
-                        <span>{worldbook.description}</span>
-                      ) : null}
-                    </span>
-                  </label>
-                  {worldbook.imported ? (
-                    <IconButton
-                      compact
-                      className="worldbook-library__delete"
-                      label={`删除世界书 ${worldbook.name}`}
-                      icon={<Trash size={15} />}
-                      disabled={!online}
-                      onClick={() => void onDeleteWorldbook(worldbook)}
-                    />
-                  ) : null}
-                </div>
-              );
-            })}
-            {visibleWorldbooks.length === 0 ? (
-              <p className="support-empty">
-                {worldbooks.length === 0
-                  ? "还没有导入世界书，可从导入菜单添加独立世界书 JSON。"
-                  : "没有匹配的世界书。"}
-              </p>
-            ) : null}
-          </div>
-          <div className="worldbook-library__save">
-            <span>
-              保存后会应用到这张角色卡的所有对话，不会复制世界书内容。
-            </span>
-            <button
-              className="button button--primary"
-              type="button"
-              disabled={!card || !online || !hasChanges || saving}
-              onClick={() => void saveCombination()}
-            >
-              {saving ? "正在保存" : "保存组合"}
-            </button>
-          </div>
-        </aside>
-        <main className="worldbook-library__selection">
-          <WorldbookRail
-            worldbooks={selectedWorldbooks}
-            title={`当前角色卡组合 · ${selectedWorldbooks.length} 本`}
-            emptyText="当前角色卡还没有附加世界书，请从左侧选择。"
-            expanded={expanded}
-            onToggle={onToggle}
-            onPermission={onPermission}
-            onSaveWorldbookEntry={onSave}
-          />
-          {conversationOnlyWorldbooks.length > 0 ? (
-            <div className="worldbook-library__conversation-note">
-              <strong>当前会话另有专属世界书</strong>
-              <span>
-                {conversationOnlyWorldbooks
-                  .map((worldbook) => worldbook.name)
-                  .join("、")}
-              </span>
-            </div>
-          ) : null}
-        </main>
-      </div>
-    </WorkspaceModalFrame>
-  );
-}
-
 function AgentProposalModal({
   proposal,
   onClose,
@@ -1545,7 +1349,6 @@ type WorkspaceModalsProps = {
     entry: WorldbookEntry,
     editable: boolean,
   ) => Promise<void>;
-  onRequestWorldbookPermission?: (worldbookId: string, entryId: string) => void;
   onTogglePanel?: (panel: PanelId) => void;
   onSaveRegexScope?: (
     scope: RegexScope,
@@ -1602,7 +1405,6 @@ export function WorkspaceModals({
   onInstallPlugin,
   onTogglePlugin,
   onPermission,
-  onRequestWorldbookPermission = () => undefined,
   onTogglePanel = () => undefined,
   onSaveRegexScope = async () => undefined,
   onSaveWorldbookEntry = async () => undefined,
@@ -1677,15 +1479,13 @@ export function WorkspaceModals({
   }
   if (modal.kind === "worldbooks") {
     return (
-      <WorldbookModal
+      <WorldbookManager
         card={selectedCard}
         worldbooks={worldbooks}
         activeWorldbooks={activeWorldbooks}
         online={apiOnline}
-        expanded={expandedPanels.worldbooks}
         onClose={onClose}
-        onToggle={() => onTogglePanel("worldbooks")}
-        onPermission={onRequestWorldbookPermission}
+        onPermission={onPermission}
         onSave={onSaveWorldbookEntry}
         onSaveCardWorldbooks={onSaveCardWorldbooks}
         onDeleteWorldbook={onDeleteWorldbook}

@@ -2767,6 +2767,15 @@ export async function createConversationSpace(input: {
   return normalizeConversation(result.data);
 }
 
+export async function loadConversationSpace(
+  conversationId: string,
+): Promise<ConversationSpace> {
+  const result = await request<ApiEnvelope<ApiConversation>>(
+    `/conversations/${encodeURIComponent(conversationId)}`,
+  );
+  return normalizeConversation(result.data);
+}
+
 export async function deleteConversationSpace(input: {
   conversationId: string;
   expectedRevision: number;

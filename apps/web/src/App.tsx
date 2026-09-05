@@ -35,6 +35,7 @@ import {
   GenerationInterruptedError,
   importPortableFile,
   installLegacyPlugin,
+  loadConversationSpace,
   loadConversationMessagePage,
   loadConversationGeneration,
   loadLegacyGrants,
@@ -1752,19 +1753,34 @@ export default function App() {
         );
         return;
       }
+
+      let deletionTarget = target;
+      if (apiOnline) {
+        try {
+          deletionTarget = await loadConversationSpace(target.id);
+        } catch {
+          showToast("无法读取对话的最新状态；服务器内容没有改变。", "warning");
+          return;
+        }
+      }
       const accepted = window.confirm(
-        `永久删除“${target.title}”？该对话的消息、Swipe、聊天变量、消息变量、对话衍生数据和对话专属世界书绑定会一并删除；仍被其他范围使用的世界书不会受影响。`,
+        `永久删除“${deletionTarget.title}”？该对话的消息、Swipe、聊天变量、消息变量、对话衍生数据和对话专属世界书绑定会一并删除；仍被其他范围使用的世界书不会受影响。`,
       );
       if (!accepted) return;
 
       if (apiOnline) {
         try {
           await deleteConversationSpace({
-            conversationId: target.id,
-            expectedRevision: target.revision ?? 1,
+            conversationId: deletionTarget.id,
+            expectedRevision: deletionTarget.revision ?? 1,
           });
-        } catch {
-          showToast("对话删除失败；服务器内容没有改变。", "warning");
+        } catch (error) {
+          showToast(
+            error instanceof WorkspaceApiError && error.status === 409
+              ? "对话内容刚刚发生变化，请重试删除。"
+              : "对话删除失败；服务器内容没有改变。",
+            "warning",
+          );
           return;
         }
       }
@@ -1786,7 +1802,7 @@ export default function App() {
           return;
         }
       }
-      showToast(`对话“${target.title}”及其会话数据已删除。`, "success");
+      showToast(`对话“${deletionTarget.title}”及其会话数据已删除。`, "success");
     },
     [
       showToast,

@@ -13,11 +13,13 @@ import {
   callLegacyRpc,
   confirmAgentProposal,
   createConversationSpace,
+  deleteConversationSpace,
   deleteWorldbook,
   exportConversationArchive,
   generateConversation,
   importPortableFile,
   installLegacyPlugin,
+  loadConversationSpace,
   loadConversationMessages,
   loadConversationGeneration,
   loadTavernHelperMessageHistory,
@@ -1971,6 +1973,49 @@ describe("workspace API client", () => {
       title: "港区群像",
       cardId: "world-harbor",
     });
+  });
+
+  it("loads the latest conversation revision for deletion", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            id: "conversation live",
+            title: "港区群像",
+            cardId: "world-harbor",
+            revision: 17,
+            updatedAt: "2026-09-06T00:00:00.000Z",
+          },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ data: {} }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const conversation = await loadConversationSpace("conversation live");
+    await deleteConversationSpace({
+      conversationId: conversation.id,
+      expectedRevision: conversation.revision ?? 1,
+    });
+
+    expect(conversation).toMatchObject({
+      id: "conversation live",
+      title: "港区群像",
+      revision: 17,
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/conversations/conversation%20live",
+      expect.any(Object),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/conversations/conversation%20live",
+      expect.objectContaining({
+        method: "DELETE",
+        body: JSON.stringify({ expectedRevision: 17 }),
+      }),
+    );
   });
 
   it("rejects an API conversation without a card binding", async () => {

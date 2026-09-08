@@ -37,6 +37,8 @@ type WorkspaceAction =
   | { type: "bootstrap/error"; error: string }
   | { type: "bootstrap/demo" }
   | { type: "card/select"; id: string }
+  | { type: "workspace/home" }
+  | { type: "worldbook/replace"; worldbook: Worldbook }
   | {
       type: "card/worldbooks";
       card: RoleCard;
@@ -279,6 +281,16 @@ export function workspaceReducer(
       const demo = createDemoWorkspace();
       return { ...demo, availability: "demo", bootstrapError: null };
     }
+    case "workspace/home":
+      return {
+        ...state,
+        selectedCardId: "",
+        selectedConversationId: "",
+        navOpen: false,
+        modal: { kind: "closed" },
+        agentProposal: null,
+        agentRun: null,
+      };
     case "card/select": {
       const selectedConversationId =
         state.conversations.find(
@@ -657,6 +669,13 @@ export function workspaceReducer(
           action.select === false
             ? state.selectedProviderId
             : action.provider.id,
+      };
+    case "worldbook/replace":
+      return {
+        ...state,
+        worldbooks: state.worldbooks.map((book) =>
+          book.id === action.worldbook.id ? action.worldbook : book,
+        ),
       };
     case "worldbook/entry-permission": {
       const worldbooks = state.worldbooks.map((worldbook) =>

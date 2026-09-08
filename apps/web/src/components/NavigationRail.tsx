@@ -12,6 +12,7 @@ import { useDeferredValue, useMemo, useState } from "react";
 import type { RoleCard } from "../domain/workspace";
 import { IconButton } from "./WorkspacePrimitives";
 import { ActionPopover } from "./ActionPopover";
+import { CardCover } from "./CardCover";
 
 type NavigationRailProps = {
   open: boolean;
@@ -90,17 +91,12 @@ export function NavigationRail({
                 aria-current={selected ? "page" : undefined}
                 onClick={() => onSelectCard(card.id)}
               >
-                {card.imageUrl ? (
-                  <img
-                    className="world-row__cover"
-                    src={card.imageUrl}
-                    alt=""
-                  />
-                ) : (
-                  <span className="world-row__icon">
-                    <Books size={18} />
-                  </span>
-                )}
+                <CardCover
+                  src={card.imageUrl}
+                  className="world-row__cover"
+                  placeholderClassName="world-row__icon"
+                  size={18}
+                />
                 <span>
                   <strong>{card.name}</strong>
                   <small>{card.description || "已导入的角色卡"}</small>

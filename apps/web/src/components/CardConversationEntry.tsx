@@ -2,6 +2,7 @@ import { Books, MagnifyingGlass, UploadSimple } from "@phosphor-icons/react";
 import { useDeferredValue, useState, type ReactNode } from "react";
 
 import type { RoleCard } from "../domain/workspace";
+import { CardCover } from "./CardCover";
 
 type CardConversationEntryProps = {
   cards: RoleCard[];
@@ -63,13 +64,10 @@ export function CardConversationEntry({
               key={card.id}
               onClick={() => onSelectCard(card.id)}
             >
-              {card.imageUrl ? (
-                <img src={card.imageUrl} alt="" loading="lazy" />
-              ) : (
-                <span className="card-entry-item__placeholder">
-                  <Books size={25} />
-                </span>
-              )}
+              <CardCover
+                src={card.imageUrl}
+                placeholderClassName="card-entry-item__placeholder"
+              />
               <span className="card-entry-item__body">
                 <strong>{card.name}</strong>
                 <span>{card.description || "已导入的角色卡"}</span>

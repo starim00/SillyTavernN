@@ -28,6 +28,9 @@ import {
   loadPendingAgentToolProposal,
   loadProviderModels,
   loadWorkspaceFromApi,
+  loadRegexScopes,
+  loadPresetDetail,
+  loadWorldbookDetail,
   preparePromptTemplate,
   proposalFromGenerationToolEvent,
   replaceRoleCard,
@@ -51,6 +54,100 @@ const jsonResponse = (value: unknown, status = 200) =>
     status,
     headers: { "Content-Type": "application/json" },
   });
+
+it("loads directory summaries without downloading unused detail or messages", async () => {
+  const fetchMock = vi.fn(async (url: string) => {
+    if (url === "/api/workspace/preferences/resolve")
+      return jsonResponse({
+        data: { selectedPresetId: "p", selectedProviderId: "fake" },
+      });
+    if (url === "/api/conversations?limit=50&view=summary")
+      return jsonResponse({
+        data: {
+          items: [{ id: "c", cardId: "card", title: "Chat" }],
+          nextCursor: null,
+        },
+      });
+    if (url === "/api/cards?view=summary")
+      return jsonResponse({ data: [{ id: "card", name: "Card" }] });
+    if (url === "/api/presets?view=summary")
+      return jsonResponse({
+        data: [{ id: "p", name: "Preset", detailsLoaded: 0 }],
+      });
+    if (url === "/api/worldbooks?view=summary")
+      return jsonResponse({
+        data: [{ id: "w", name: "Book", entryCount: 12, detailsLoaded: 0 }],
+      });
+    if (["/api/personas", "/api/providers/connections"].includes(url))
+      return jsonResponse({ data: [] });
+    throw new Error(`Unexpected bootstrap download: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  try {
+    const [workspace, duplicate] = await Promise.all([
+      loadWorkspaceFromApi(undefined, "c"),
+      loadWorkspaceFromApi(undefined, "c"),
+    ]);
+    expect(duplicate).toBe(workspace);
+    expect(workspace.presets[0]).toMatchObject({
+      detailsLoaded: false,
+      prompts: [],
+    });
+    expect(workspace.worldbooks[0]).toMatchObject({
+      detailsLoaded: false,
+      entries: [],
+      entryCount: 12,
+    });
+    expect(workspace.messagesByConversation).toEqual({});
+    expect(workspace.regexScopes).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(7);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+it("coalesces concurrent detail reads and retries a failed read without retaining rejected cache entries", async () => {
+  const fetchMock = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockResolvedValueOnce(
+      jsonResponse({
+        data: {
+          id: "p",
+          name: "Preset",
+          payload: {
+            prompts: [{ id: "optional", content: "retained", enabled: false }],
+          },
+        },
+      }),
+    )
+    .mockResolvedValueOnce(
+      jsonResponse({ data: { id: "w", name: "Book", entries: [] } }),
+    );
+  vi.stubGlobal("fetch", fetchMock);
+  try {
+    const failures = await Promise.allSettled([
+      loadPresetDetail("p"),
+      loadPresetDetail("p"),
+    ]);
+    expect(failures.every((result) => result.status === "rejected")).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const detail = await loadPresetDetail("p");
+    expect(detail).toMatchObject({
+      detailsLoaded: true,
+      prompts: [
+        expect.objectContaining({ content: "retained", enabled: false }),
+      ],
+    });
+    expect(await loadWorldbookDetail("w")).toMatchObject({
+      detailsLoaded: true,
+      entries: [],
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
 
 describe("deleteWorldbook", () => {
   it("sends the expected revision to the worldbook endpoint", async () => {
@@ -269,12 +366,12 @@ describe("workspace API client", () => {
     });
   });
 
-  it("loads every imported preset prompt, including disabled optional entries", async () => {
+  it("loads imported preset prompts and regex details only when requested", async () => {
     const fetchMock = vi.fn((url: string) => {
       if (url === "/api/health") {
         return Promise.resolve(jsonResponse({ data: { ok: true } }));
       }
-      if (url === "/api/presets") {
+      if (url === "/api/presets?view=summary") {
         return Promise.resolve(
           jsonResponse({
             data: [
@@ -283,36 +380,49 @@ describe("workspace API client", () => {
                 name: "导入预设",
                 kind: "chat-completion",
                 revision: 4,
-                payload: {
-                  mode: "chat-completion",
-                  prompts: [
-                    {
-                      id: "main",
-                      name: "主要指令",
-                      role: "system",
-                      content: "主要正文",
-                      enabled: true,
-                      order: 0,
-                      systemPrompt: true,
-                    },
-                    {
-                      id: "optional",
-                      name: "未启用选项",
-                      role: "system",
-                      content: "可由用户决定是否启用",
-                      enabled: false,
-                      order: 1,
-                      systemPrompt: true,
-                      metadata: { promptOrderMember: false },
-                    },
-                  ],
-                },
+                detailsLoaded: 0,
               },
             ],
           }),
         );
       }
-      if (url === "/api/cards") {
+      if (url === "/api/presets/preset-imported") {
+        return Promise.resolve(
+          jsonResponse({
+            data: {
+              id: "preset-imported",
+              name: "导入预设",
+              kind: "chat-completion",
+              revision: 4,
+              payload: {
+                mode: "chat-completion",
+                prompts: [
+                  {
+                    id: "main",
+                    name: "主要指令",
+                    role: "system",
+                    content: "主要正文",
+                    enabled: true,
+                    order: 0,
+                    systemPrompt: true,
+                  },
+                  {
+                    id: "optional",
+                    name: "未启用选项",
+                    role: "system",
+                    content: "可由用户决定是否启用",
+                    enabled: false,
+                    order: 1,
+                    systemPrompt: true,
+                    metadata: { promptOrderMember: false },
+                  },
+                ],
+              },
+            },
+          }),
+        );
+      }
+      if (url === "/api/cards?view=summary") {
         return Promise.resolve(
           jsonResponse({
             data: [
@@ -392,9 +502,9 @@ describe("workspace API client", () => {
       }
       if (
         [
-          "/api/conversations?limit=50",
+          "/api/conversations?limit=50&view=summary",
           "/api/personas",
-          "/api/worldbooks",
+          "/api/worldbooks?view=summary",
           "/api/providers/connections",
         ].includes(url)
       ) {
@@ -429,7 +539,8 @@ describe("workspace API client", () => {
     });
     expect(workspace.selectedPresetId).toBe("preset-imported");
     expect(workspace.selectedProviderId).toBe("fake");
-    expect(workspace.presets[0]?.prompts).toEqual([
+    expect(workspace.presets[0]?.prompts).toEqual([]);
+    expect((await loadPresetDetail("preset-imported")).prompts).toEqual([
       expect.objectContaining({ id: "main", enabled: true }),
       expect.objectContaining({
         id: "optional",
@@ -442,7 +553,12 @@ describe("workspace API client", () => {
       id: "card-imported",
       worldbookIds: ["worldbook-card", "worldbook-shared"],
     });
-    expect(workspace.regexScopes).toEqual([
+    expect(workspace.regexScopes).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/regex/scopes",
+      expect.any(Object),
+    );
+    expect(await loadRegexScopes()).toEqual([
       expect.objectContaining({
         scope: "global",
         id: "global",
@@ -1019,7 +1135,7 @@ describe("workspace API client", () => {
           }),
         );
       }
-      if (url === "/api/worldbooks") {
+      if (url === "/api/worldbooks?view=summary") {
         return Promise.resolve(
           jsonResponse({
             data: [
@@ -1273,7 +1389,7 @@ describe("workspace API client", () => {
           }),
         );
       }
-      if (url === "/api/worldbooks") {
+      if (url === "/api/worldbooks?view=summary") {
         return Promise.resolve(jsonResponse({ data: [] }));
       }
       if (url === "/api/agent/runs/run-live") {
@@ -1290,7 +1406,7 @@ describe("workspace API client", () => {
     const result = await undoAgentProposal(state);
     expect(result.run.id).toBe("run-live");
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/worldbooks",
+      "/api/worldbooks?view=summary",
       expect.any(Object),
     );
   });
@@ -2005,7 +2121,7 @@ describe("workspace API client", () => {
     });
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      "/api/conversations/conversation%20live",
+      "/api/conversations/conversation%20live?view=summary",
       expect.any(Object),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(

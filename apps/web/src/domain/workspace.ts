@@ -205,6 +205,8 @@ export type WorldbookEntryUpdate = Pick<
 };
 
 export type Worldbook = {
+  detailsLoaded?: boolean;
+  entryCount?: number;
   id: string;
   name: string;
   description: string;
@@ -217,6 +219,7 @@ export type Worldbook = {
 };
 
 export type PromptPreset = {
+  detailsLoaded?: boolean;
   id: string;
   name: string;
   description: string;

@@ -25,6 +25,31 @@ This is a greenfield implementation. The upstream repository is not a source dep
 
 ## Domain boundaries
 
+### Workspace data loading
+
+The workspace requests `view=summary` directories for cards, conversations,
+worldbooks, and presets. Directory responses omit portable legacy payloads,
+preset bodies, and worldbook entries. Worldbook summaries carry an entry count;
+`detailsLoaded=false` distinguishes unloaded content from an empty resource.
+The original list response contracts remain available without this query.
+
+Entering a conversation loads its message page and selected preset detail.
+Selecting a worldbook loads only that book's entries; selecting another preset
+loads that preset if its detail is not already in workspace state. Regex
+management loads when opened. Concurrent identical reads and bootstrap calls
+share an in-flight request, without retaining failed responses. Detail failures
+show a retry control and never expose empty editable defaults.
+
+Compatibility initialization remains scoped to the entered conversation and
+retains its required history, bound worldbooks, and trusted-script contracts.
+Tool proposals hydrate only their target worldbook before constructing a diff;
+server-side write authorization and revision checks remain authoritative.
+
+Card covers request `preview=1` on the authenticated asset route. The response
+omits PNG text chunks while preserving encoded pixels and rendering chunks;
+the original file remains available unchanged. The web proxy compresses JSON
+and text assets, excluding event streams from its added compression types.
+
 ### Cards and conversations
 
 The role card is one user-facing content type. It collects the setting, opening

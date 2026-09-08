@@ -1,7 +1,6 @@
 import {
   ArrowClockwise,
   BracketsCurly,
-  Books,
   CheckCircle,
   ClockCounterClockwise,
   FileArrowDown,
@@ -54,6 +53,7 @@ import {
 } from "../providerConnectionPortability";
 import { RegexRail } from "./ContextRail";
 import { WorldbookManager } from "./WorldbookManager";
+import { CardCover } from "./CardCover";
 import { WorkspaceModalFrame } from "./WorkspaceModalFrame";
 import { IconButton, SurfaceStatus } from "./WorkspacePrimitives";
 
@@ -1036,13 +1036,7 @@ function CreateConversationModal({
           />
         </label>
         <div className="bound-card-note">
-          {card.imageUrl ? (
-            <img src={card.imageUrl} alt="" />
-          ) : (
-            <span aria-hidden="true">
-              <Books size={20} />
-            </span>
-          )}
+          <CardCover src={card.imageUrl} size={20} />
           <div>
             <strong>{card.name}</strong>
             <small>角色卡内容会自动随对话提供给模型</small>
@@ -1361,6 +1355,7 @@ type WorkspaceModalsProps = {
   ) => Promise<void>;
   onSaveCardWorldbooks?: (worldbookIds: string[]) => Promise<void>;
   onDeleteWorldbook?: (worldbook: Worldbook) => Promise<void>;
+  onLoadWorldbook?: (id: string) => Promise<void>;
   onOpenPlugins?: () => void;
   onConfirmToolProposal?: () => void;
   onRejectToolProposal?: () => void;
@@ -1410,6 +1405,7 @@ export function WorkspaceModals({
   onSaveWorldbookEntry = async () => undefined,
   onSaveCardWorldbooks = async () => undefined,
   onDeleteWorldbook = async () => undefined,
+  onLoadWorldbook,
   onOpenPlugins = () => undefined,
   onConfirmToolProposal = () => undefined,
   onRejectToolProposal = () => undefined,
@@ -1489,6 +1485,7 @@ export function WorkspaceModals({
         onSave={onSaveWorldbookEntry}
         onSaveCardWorldbooks={onSaveCardWorldbooks}
         onDeleteWorldbook={onDeleteWorldbook}
+        onLoadWorldbook={onLoadWorldbook}
       />
     );
   }

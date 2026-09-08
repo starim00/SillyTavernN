@@ -27,6 +27,20 @@ function worldbookProposalFixture(
 }
 
 describe("workspaceReducer", () => {
+  it("returns home without discarding drafts, messages or background generation", () => {
+    const state = createDemoWorkspace();
+    const home = workspaceReducer(state, { type: "workspace/home" });
+    expect(home.selectedCardId).toBe("");
+    expect(home.selectedConversationId).toBe("");
+    expect(home.messagesByConversation).toBe(state.messagesByConversation);
+    expect(home.draftByConversation).toBe(state.draftByConversation);
+    expect(home.generation).toBe(state.generation);
+    const reopened = workspaceReducer(home, {
+      type: "card/select",
+      id: state.selectedCardId,
+    });
+    expect(reopened.selectedConversationId).toBe(state.selectedConversationId);
+  });
   afterEach(() => {
     vi.unstubAllGlobals();
   });

@@ -9,6 +9,7 @@ import { ZodError } from "zod";
 import { AgentStore, AppDatabase, AppStore, StorageError } from "@stn/storage";
 
 import { AuthManager } from "./auth.js";
+import { cardCoverPng } from "./card-cover.js";
 import {
   defaultGenerationBudget,
   type GenerationBudget,
@@ -187,29 +188,29 @@ export async function createServer(
   await registerCompatibilityRoutes(app, context);
   await registerRegexRoutes(app, context);
 
-  app.get<{ Params: { filename: string } }>(
-    "/api/assets/cards/:filename",
-    async (request, reply) => {
-      if (!/^[a-f0-9]{64}\.png$/u.test(request.params.filename)) {
-        return reply.code(404).send({
-          error: { code: "ASSET_NOT_FOUND", message: "Asset not found." },
-        });
-      }
-      try {
-        const content = await readFile(
-          path.join(dataDirectory, "assets", "cards", request.params.filename),
-        );
-        return reply
-          .type("image/png")
-          .header("cache-control", "public, max-age=31536000, immutable")
-          .send(content);
-      } catch {
-        return reply.code(404).send({
-          error: { code: "ASSET_NOT_FOUND", message: "Asset not found." },
-        });
-      }
-    },
-  );
+  app.get<{
+    Params: { filename: string };
+    Querystring: { preview?: string };
+  }>("/api/assets/cards/:filename", async (request, reply) => {
+    if (!/^[a-f0-9]{64}\.png$/u.test(request.params.filename)) {
+      return reply.code(404).send({
+        error: { code: "ASSET_NOT_FOUND", message: "Asset not found." },
+      });
+    }
+    try {
+      const content = await readFile(
+        path.join(dataDirectory, "assets", "cards", request.params.filename),
+      );
+      return reply
+        .type("image/png")
+        .header("cache-control", "public, max-age=31536000, immutable")
+        .send(request.query.preview === "1" ? cardCoverPng(content) : content);
+    } catch {
+      return reply.code(404).send({
+        error: { code: "ASSET_NOT_FOUND", message: "Asset not found." },
+      });
+    }
+  });
 
   app.get("/", async () => ({
     name: "SillyTavern N",

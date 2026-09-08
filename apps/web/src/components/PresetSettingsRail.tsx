@@ -13,6 +13,8 @@ import { IconButton } from "./WorkspacePrimitives";
 
 type PresetSettingsRailProps = {
   open: boolean;
+  loadError?: string;
+  onRetryLoad?: () => void;
   presets: PromptPreset[];
   selectedPresetId: string;
   onSelectPreset: (presetId: string) => void;
@@ -34,6 +36,8 @@ type PresetSettingsRailProps = {
 
 export function PresetSettingsRail({
   open,
+  loadError,
+  onRetryLoad,
   presets,
   selectedPresetId,
   onSelectPreset,
@@ -120,7 +124,20 @@ export function PresetSettingsRail({
           </div>
         </div>
 
-        {preset ? (
+        {preset?.detailsLoaded === false ? (
+          <div className="support-empty" role="status">
+            {loadError || "正在加载预设…"}
+            {loadError ? (
+              <button
+                type="button"
+                className="text-button"
+                onClick={onRetryLoad}
+              >
+                重试
+              </button>
+            ) : null}
+          </div>
+        ) : preset ? (
           <PresetDetail
             preset={preset}
             onToggle={onTogglePrompt}

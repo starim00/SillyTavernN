@@ -6,6 +6,7 @@ import {
   CloudCheck,
   CloudSlash,
   GearSix,
+  House,
   LockKey,
   PlugsConnected,
   PuzzlePiece,
@@ -31,6 +32,7 @@ export function WorkspaceHeader({
   onTogglePreset,
   onOpenSettings,
   onOpenSecurity,
+  onGoHome,
 }: {
   title: string;
   cardName: string;
@@ -43,6 +45,7 @@ export function WorkspaceHeader({
   onTogglePreset: () => void;
   onOpenSettings: (target: SettingsTarget) => void;
   onOpenSecurity: () => void;
+  onGoHome: () => void;
 }) {
   const settings = [
     {
@@ -71,6 +74,16 @@ export function WorkspaceHeader({
         </div>
       </div>
       <nav className="topbar__actions" aria-label="工作区操作">
+        <button
+          className="topbar-button"
+          type="button"
+          aria-label="返回角色卡首页"
+          title="返回角色卡首页"
+          onClick={onGoHome}
+        >
+          <House size={19} />
+          <span>首页</span>
+        </button>
         <button
           className="topbar-button topbar-button--preset"
           type="button"

@@ -45,6 +45,10 @@ import {
   loadTavernHelperContext,
   loadTavernHelperMessageHistory,
   loadWorkspaceFromApi,
+  loadPresetDetail,
+  loadWorldbookDetail,
+  loadRegexScopes,
+  loadProposalWorldbook,
   preparePromptTemplate,
   countPreparedPromptTokens,
   proposalFromGenerationToolEvent,
@@ -549,6 +553,45 @@ export default function App() {
     [],
   );
 
+  const [presetLoadError, setPresetLoadError] = useState("");
+  const [presetLoadAttempt, setPresetLoadAttempt] = useState(0);
+  useEffect(() => {
+    if (
+      !apiOnline ||
+      !conversation ||
+      !preset ||
+      preset.detailsLoaded !== false
+    )
+      return;
+    let active = true;
+    setPresetLoadError("");
+    void loadPresetDetail(preset.id)
+      .then((detail) => {
+        if (active) dispatch({ type: "preset/replace", preset: detail });
+      })
+      .catch(() => {
+        if (active) setPresetLoadError("预设加载失败，请重试。");
+      });
+    return () => {
+      active = false;
+    };
+  }, [
+    apiOnline,
+    conversation?.id,
+    preset?.id,
+    preset?.detailsLoaded,
+    presetLoadAttempt,
+  ]);
+
+  const loadWorldbook = useCallback(async (id: string) => {
+    const existing = workspaceStateRef.current.worldbooks.find(
+      (book) => book.id === id,
+    );
+    if (existing && existing.detailsLoaded !== false) return;
+    const detail = await loadWorldbookDetail(id);
+    dispatch({ type: "worldbook/replace", worldbook: detail });
+  }, []);
+
   const persistWorkspacePreferences = useCallback(
     (input: Parameters<typeof saveWorkspacePreferences>[0]) => {
       const request = workspacePreferenceQueueRef.current.then(() =>
@@ -1022,9 +1065,14 @@ export default function App() {
     };
   }, [conversation, messages, tavernHelperContext]);
 
+  const [messageLoadError, setMessageLoadError] = useState("");
+  const [messageLoadPending, setMessageLoadPending] = useState(false);
+  const [messageLoadAttempt, setMessageLoadAttempt] = useState(0);
   useEffect(() => {
     if (!apiOnline || !conversation) return;
     let active = true;
+    setMessageLoadError("");
+    setMessageLoadPending(true);
     void loadConversationMessagePage(conversation.id, state.selectedPresetId)
       .then((page) => {
         if (!active) return;
@@ -1035,11 +1083,22 @@ export default function App() {
           nextCursor: page.nextCursor,
         });
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (active) setMessageLoadError("聊天记录加载失败，请重试。");
+      })
+      .finally(() => {
+        if (active) setMessageLoadPending(false);
+      });
     return () => {
       active = false;
     };
-  }, [conversation, apiOnline, state.selectedPresetId]);
+  }, [
+    conversation?.id,
+    conversation?.personaId,
+    apiOnline,
+    state.selectedPresetId,
+    messageLoadAttempt,
+  ]);
 
   const runGeneration = useCallback(
     async (input: {
@@ -1126,10 +1185,13 @@ export default function App() {
             onReasoningDelta: (delta) => {
               dispatch({ type: "generation/reasoning-delta", delta });
             },
-            onToolProposal: (event) => {
+            onToolProposal: async (event) => {
               try {
                 const proposal = proposalFromGenerationToolEvent(
-                  workspaceStateRef.current,
+                  await loadProposalWorldbook(
+                    workspaceStateRef.current,
+                    event.toolCall,
+                  ),
                   event,
                 );
                 if (!proposal) return;
@@ -2901,16 +2963,28 @@ export default function App() {
     [apiOnline, persistWorkspacePreferences, showToast],
   );
 
+  const presetSelectionRequestRef = useRef(0);
   const selectPromptPreset = useCallback(
     async (id: string) => {
+      const selectionRequest = ++presetSelectionRequestRef.current;
       if (!apiOnline) {
         dispatch({ type: "preset/select", id });
         return;
       }
       try {
+        const cached = workspaceStateRef.current.presets.find(
+          (candidate) => candidate.id === id,
+        );
+        const detail =
+          cached && cached.detailsLoaded !== false
+            ? cached
+            : await loadPresetDetail(id);
+        if (selectionRequest !== presetSelectionRequestRef.current) return;
         const preferences = await persistWorkspacePreferences({
           selectedPresetId: id,
         });
+        if (selectionRequest !== presetSelectionRequestRef.current) return;
+        dispatch({ type: "preset/replace", preset: detail });
         dispatch({ type: "preset/select", id: preferences.selectedPresetId });
       } catch {
         showToast("预设切换失败；后台选择没有改变。", "warning");
@@ -2973,6 +3047,7 @@ export default function App() {
         pluginRealms={legacyRealmPanels}
         legacyHostPlugins={legacyHostPlugins}
         worldbooks={state.worldbooks}
+        onLoadWorldbook={loadWorldbook}
         activeWorldbooks={boundWorldbooks}
         agentProposal={state.agentProposal}
         providerConnections={state.providerConnections}
@@ -3082,10 +3157,29 @@ export default function App() {
           dispatch({ type: "nav/set", open: !state.navOpen })
         }
         onTogglePreset={() => setPresetSettingsOpen((open) => !open)}
-        onOpenSettings={(kind) =>
-          dispatch({ type: "modal/set", modal: { kind } })
-        }
+        onOpenSettings={(kind) => {
+          if (kind !== "regex" || !apiOnline) {
+            dispatch({ type: "modal/set", modal: { kind } });
+            return;
+          }
+          showToast("正在加载正则配置…", "info");
+          void loadRegexScopes()
+            .then((scopes) => {
+              for (const scope of scopes)
+                dispatch({ type: "regexScope/replace", scope });
+              dispatch({ type: "modal/set", modal: { kind } });
+            })
+            .catch(() => showToast("正则配置加载失败，请重试。", "warning"));
+        }}
         onOpenSecurity={openSecurity}
+        onGoHome={() => {
+          void (async () => {
+            await tavernHelperRuntimeRef.current?.flushPersistence();
+            dispatch({ type: "workspace/home" });
+          })().catch(() => {
+            showToast("当前对话保存失败，请稍后重试返回首页。", "warning");
+          });
+        }}
       />
 
       <div className="workspace-layout">
@@ -3096,6 +3190,8 @@ export default function App() {
           }
           open={presetSettingsOpen}
           presets={state.presets}
+          loadError={presetLoadError}
+          onRetryLoad={() => setPresetLoadAttempt((value) => value + 1)}
           selectedPresetId={state.selectedPresetId}
           onSelectPreset={(id) => void selectPromptPreset(id)}
           onDeletePreset={(presetToDelete) =>
@@ -3119,6 +3215,20 @@ export default function App() {
         />
 
         <main className="conversation-workspace">
+          {messageLoadPending || messageLoadError ? (
+            <div className="connection-banner" role="status">
+              {messageLoadError || "正在加载聊天记录…"}
+              {messageLoadError ? (
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => setMessageLoadAttempt((value) => value + 1)}
+                >
+                  重试
+                </button>
+              ) : null}
+            </div>
+          ) : null}
           <WorkspaceConnectionBanner
             availability={state.availability}
             error={state.bootstrapError}

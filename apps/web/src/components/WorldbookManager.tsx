@@ -54,6 +54,7 @@ export function WorldbookManager({
   onSave,
   onSaveCardWorldbooks,
   onDeleteWorldbook,
+  onLoadWorldbook,
 }: {
   card: RoleCard | null;
   worldbooks: Worldbook[];
@@ -72,6 +73,7 @@ export function WorldbookManager({
   ) => Promise<void>;
   onSaveCardWorldbooks: (ids: string[]) => Promise<void>;
   onDeleteWorldbook: (book: Worldbook) => Promise<void>;
+  onLoadWorldbook?: ((id: string) => Promise<void>) | undefined;
 }) {
   const initialBook =
     worldbooks.find((book) => card?.worldbookIds.includes(book.id)) ??
@@ -95,6 +97,19 @@ export function WorldbookManager({
   const confirmRef = useRef<HTMLDivElement>(null);
   const book =
     worldbooks.find((candidate) => candidate.id === bookId) ?? worldbooks[0];
+  const [loadError, setLoadError] = useState("");
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  useEffect(() => {
+    if (!book || book.detailsLoaded !== false || !onLoadWorldbook) return;
+    let active = true;
+    setLoadError("");
+    void onLoadWorldbook(book.id).catch(() => {
+      if (active) setLoadError("世界书加载失败，请重试。");
+    });
+    return () => {
+      active = false;
+    };
+  }, [book?.id, book?.detailsLoaded, onLoadWorldbook, loadAttempt]);
   const entry =
     book?.entries.find((candidate) => candidate.id === entryId) ??
     book?.entries[0];
@@ -272,7 +287,7 @@ export function WorldbookManager({
                   >
                     <strong>{candidate.name}</strong>
                     <span>
-                      {candidate.entries.length} 个条目
+                      {candidate.entryCount ?? candidate.entries.length} 个条目
                       {selectedIds.has(candidate.id)
                         ? " · 角色卡已选"
                         : activeWorldbooks.some(
@@ -410,7 +425,20 @@ export function WorldbookManager({
                     </small>
                   </button>
                 ))}
-                {!entries.length ? (
+                {book?.detailsLoaded === false ? (
+                  <div className="wb-empty" role="status">
+                    {loadError || "正在加载世界书条目…"}
+                    {loadError ? (
+                      <button
+                        type="button"
+                        className="text-button"
+                        onClick={() => setLoadAttempt((value) => value + 1)}
+                      >
+                        重试
+                      </button>
+                    ) : null}
+                  </div>
+                ) : !entries.length ? (
                   <p className="wb-empty">
                     {book?.entries.length
                       ? "没有匹配的条目，试试其他关键词或筛选条件。"

@@ -151,6 +151,8 @@ type ApiWorldbookEntry = {
 };
 
 type ApiWorldbook = {
+  detailsLoaded?: boolean | number;
+  entryCount?: number;
   id: string;
   name: string;
   agentEditable: boolean;
@@ -161,6 +163,7 @@ type ApiWorldbook = {
 };
 
 type ApiPreset = {
+  detailsLoaded?: boolean | number;
   id: string;
   name: string;
   description?: string;
@@ -364,7 +367,7 @@ export type GenerationCallbacks = {
   onGenerationId?: (generationId: string) => void;
   onTextDelta?: (delta: string) => void;
   onReasoningDelta?: (delta: string) => void;
-  onToolProposal?: (proposal: GenerationToolProposal) => void;
+  onToolProposal?: (proposal: GenerationToolProposal) => void | Promise<void>;
   onToolResult?: (result: unknown) => void;
 };
 
@@ -482,7 +485,20 @@ async function errorFromResponse(
   return new WorkspaceApiError(message, response.status, code);
 }
 
-async function request<T>(
+const pendingReads = new Map<string, Promise<unknown>>();
+
+function request<T>(path: string, init?: JsonRequestInit): Promise<T> {
+  if (init !== undefined) return requestUncached<T>(path, init);
+  const pending = pendingReads.get(path);
+  if (pending) return pending as Promise<T>;
+  const result = requestUncached<T>(path).finally(() =>
+    pendingReads.delete(path),
+  );
+  pendingReads.set(path, result);
+  return result;
+}
+
+async function requestUncached<T>(
   path: string,
   { timeoutMs = 30_000, ...init }: JsonRequestInit = {},
 ): Promise<T> {
@@ -720,13 +736,15 @@ const normalizeWorldbookEntry = (entry: ApiWorldbookEntry): WorldbookEntry => {
 };
 
 const normalizeWorldbook = (item: ApiWorldbook): Worldbook => ({
+  detailsLoaded: item.detailsLoaded !== false && item.detailsLoaded !== 0,
+  entryCount: item.entryCount ?? item.entries?.length ?? 0,
   id: item.id,
   name: item.name,
   description:
     item.description ?? (item.imported ? "从便携内容导入" : "本地世界书"),
-  agentEditable: item.agentEditable,
+  agentEditable: Boolean(item.agentEditable),
   revision: item.revision,
-  imported: item.imported ?? false,
+  imported: Boolean(item.imported),
   hitCount: 0,
   hits: [],
   entries: (item.entries ?? []).map(normalizeWorldbookEntry),
@@ -903,6 +921,7 @@ const normalizePreset = (item: ApiPreset): PromptPreset => {
     mode,
     prompts,
     generation: normalizePresetGeneration(item),
+    detailsLoaded: item.detailsLoaded !== false && item.detailsLoaded !== 0,
   };
 };
 
@@ -1209,8 +1228,29 @@ export async function countPreparedPromptTokens(input: {
   return result.data;
 }
 
+export async function loadWorldbookDetail(id: string): Promise<Worldbook> {
+  const result = await request<ApiEnvelope<ApiWorldbook>>(
+    `/worldbooks/${encodeURIComponent(id)}`,
+  );
+  return normalizeWorldbook(result.data);
+}
+
+export async function loadPresetDetail(id: string): Promise<PromptPreset> {
+  const result = await request<ApiEnvelope<ApiPreset>>(
+    `/presets/${encodeURIComponent(id)}`,
+  );
+  return normalizePreset(result.data);
+}
+
+export async function loadRegexScopes(): Promise<RegexScope[]> {
+  const result = await request<ApiEnvelope<ApiRegexScope[]>>("/regex/scopes");
+  return result.data.map(normalizeRegexScope);
+}
+
 export async function loadWorldbooksFromApi(): Promise<Worldbook[]> {
-  const result = await request<ApiEnvelope<ApiWorldbook[]>>("/worldbooks");
+  const result = await request<ApiEnvelope<ApiWorldbook[]>>(
+    "/worldbooks?view=summary",
+  );
   return result.data.map(normalizeWorldbook);
 }
 
@@ -1233,30 +1273,50 @@ export async function updateCardWorldbooks(
   };
 }
 
-export async function loadWorkspaceFromApi(
+const pendingBootstraps = new Map<string, Promise<ApiBootstrap>>();
+
+export function loadWorkspaceFromApi(
   selectedPresetId?: string,
   selectedConversationId?: string,
   selectedProviderId?: string,
 ): Promise<ApiBootstrap> {
-  await request<ApiEnvelope<{ ok?: boolean }>>("/health", {
-    timeoutMs: 30_000,
-  });
+  const key = JSON.stringify([
+    selectedPresetId,
+    selectedConversationId,
+    selectedProviderId,
+  ]);
+  const pending = pendingBootstraps.get(key);
+  if (pending) return pending;
+  const result = loadWorkspaceFromApiUncached(
+    selectedPresetId,
+    selectedConversationId,
+    selectedProviderId,
+  ).finally(() => pendingBootstraps.delete(key));
+  pendingBootstraps.set(key, result);
+  return result;
+}
+
+async function loadWorkspaceFromApiUncached(
+  selectedPresetId?: string,
+  selectedConversationId?: string,
+  selectedProviderId?: string,
+): Promise<ApiBootstrap> {
   const [
     conversationResult,
     cardResult,
     personaResult,
     worldbookResult,
     presetResult,
-    regexResult,
     providerResult,
     preferencesResult,
   ] = await Promise.all([
-    request<ApiEnvelope<ApiPage<ApiConversation>>>("/conversations?limit=50"),
-    request<ApiEnvelope<ApiCard[]>>("/cards"),
+    request<ApiEnvelope<ApiPage<ApiConversation>>>(
+      "/conversations?limit=50&view=summary",
+    ),
+    request<ApiEnvelope<ApiCard[]>>("/cards?view=summary"),
     request<ApiEnvelope<ApiPersona[]>>("/personas"),
-    request<ApiEnvelope<ApiWorldbook[]>>("/worldbooks"),
-    request<ApiEnvelope<ApiPreset[]>>("/presets"),
-    request<ApiEnvelope<ApiRegexScope[]>>("/regex/scopes"),
+    request<ApiEnvelope<ApiWorldbook[]>>("/worldbooks?view=summary"),
+    request<ApiEnvelope<ApiPreset[]>>("/presets?view=summary"),
     request<ApiEnvelope<ApiProviderConnection[]>>("/providers/connections"),
     request<ApiEnvelope<WorkspacePreferences>>(
       "/workspace/preferences/resolve",
@@ -1278,26 +1338,11 @@ export async function loadWorkspaceFromApi(
     )
   ) {
     const selected = await request<ApiEnvelope<ApiConversation>>(
-      `/conversations/${encodeURIComponent(selectedConversationId)}`,
+      `/conversations/${encodeURIComponent(selectedConversationId)}?view=summary`,
     ).catch(() => undefined);
     if (selected !== undefined) conversationItems.push(selected.data);
   }
   const conversations = conversationItems.map(normalizeConversation);
-  const activePresetId =
-    presetResult.data.find(
-      (preset) => preset.id === preferencesResult.data.selectedPresetId,
-    )?.id ?? presetResult.data[0]?.id;
-  const activeConversation =
-    conversations.find(
-      (conversation) => conversation.id === selectedConversationId,
-    ) ?? conversations[0];
-  const activeMessages =
-    activeConversation === undefined
-      ? undefined
-      : await loadConversationMessagePage(
-          activeConversation.id,
-          activePresetId,
-        );
   const participantMap = new Map<string, Participant>();
   cardResult.data.forEach((card) => {
     card.participants?.forEach((participant) => {
@@ -1327,18 +1372,12 @@ export async function loadWorkspaceFromApi(
     ),
     personas: personaResult.data.map(normalizePersona),
     participants: [...participantMap.values()],
-    messagesByConversation:
-      activeConversation === undefined || activeMessages === undefined
-        ? {}
-        : { [activeConversation.id]: activeMessages.items },
+    messagesByConversation: {},
     conversationNextCursor: conversationResult.data.nextCursor,
-    messageNextCursorByConversation:
-      activeConversation === undefined || activeMessages === undefined
-        ? {}
-        : { [activeConversation.id]: activeMessages.nextCursor },
+    messageNextCursorByConversation: {},
     worldbooks: worldbookResult.data.map(normalizeWorldbook),
     presets: presetResult.data.map(normalizePreset),
-    regexScopes: regexResult.data.map(normalizeRegexScope),
+    regexScopes: [],
     providerConnections: providerResult.data,
     selectedPresetId: preferencesResult.data.selectedPresetId,
     selectedProviderId: preferencesResult.data.selectedProviderId,
@@ -1565,7 +1604,7 @@ export async function generateConversation(
   let eventCount = 0;
   let outputBytes = 0;
 
-  const consume = (frame: string) => {
+  const consume = async (frame: string) => {
     const data = dataFromFrame(frame);
     if (!data) return;
     if (
@@ -1665,7 +1704,7 @@ export async function generateConversation(
       const run = normalizeAgentRun(payload.run);
       const toolCall = normalizeConversationToolCall(payload.toolCall);
       toolProposalReceived = true;
-      callbacks.onToolProposal?.({
+      await callbacks.onToolProposal?.({
         run,
         toolCall,
         text: typeof payload.text === "string" ? payload.text : run.objective,
@@ -1714,10 +1753,10 @@ export async function generateConversation(
           "GENERATION_SSE_BUFFER_LIMIT",
         );
       }
-      parsed.frames.forEach(consume);
+      for (const frame of parsed.frames) await consume(frame);
     }
     buffer += decoder.decode();
-    if (buffer.trim()) consume(buffer);
+    if (buffer.trim()) await consume(buffer);
   } catch (error) {
     if (input.signal?.aborted) throw new GenerationInterruptedError();
     throw error;
@@ -2354,6 +2393,24 @@ function artifactProposalFromCall(
   );
 }
 
+export async function loadProposalWorldbook(
+  state: WorkspaceState,
+  call: { toolName: string; arguments: Record<string, unknown> },
+): Promise<WorkspaceState> {
+  if (!call.toolName.startsWith("worldbook.")) return state;
+  const book = state.worldbooks.find(
+    (candidate) => candidate.id === call.arguments.worldbookId,
+  );
+  if (!book || book.detailsLoaded !== false) return state;
+  const detail = await loadWorldbookDetail(book.id);
+  return {
+    ...state,
+    worldbooks: state.worldbooks.map((candidate) =>
+      candidate.id === detail.id ? detail : candidate,
+    ),
+  };
+}
+
 export function proposalFromGenerationToolEvent(
   state: WorkspaceState,
   event: GenerationToolProposal,
@@ -2434,7 +2491,12 @@ export async function loadPendingAgentToolProposal(
       return {
         run,
         proposal: call.toolName.startsWith("worldbook.")
-          ? worldbookProposalFromCall(state, run, call, run.objective)
+          ? worldbookProposalFromCall(
+              await loadProposalWorldbook(state, call),
+              run,
+              call,
+              run.objective,
+            )
           : artifactProposalFromCall(state, run, call, run.objective),
         text: "",
       };
@@ -2771,7 +2833,7 @@ export async function loadConversationSpace(
   conversationId: string,
 ): Promise<ConversationSpace> {
   const result = await request<ApiEnvelope<ApiConversation>>(
-    `/conversations/${encodeURIComponent(conversationId)}`,
+    `/conversations/${encodeURIComponent(conversationId)}?view=summary`,
   );
   return normalizeConversation(result.data);
 }

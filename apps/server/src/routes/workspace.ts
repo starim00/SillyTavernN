@@ -53,7 +53,9 @@ function workspacePreferences(
     stored !== null && typeof stored === "object" && !Array.isArray(stored)
       ? (stored as Record<string, unknown>)
       : {};
-  const presets = context.store.listPresets();
+  const presets = context.store.database.all<{ id: string }>(
+    "SELECT id FROM presets ORDER BY updated_at DESC, id",
+  );
   const presetIds = new Set(presets.map(({ id }) => id));
   const providerIds = new Set(
     context.store.listProviderConnections().map(({ id }) => id),
@@ -110,6 +112,7 @@ const conversationListQuerySchema = z
     cardId: entityId.optional(),
     limit: z.coerce.number().int().min(1).max(100).default(50),
     cursor: z.string().max(2_048).optional(),
+    view: z.literal("summary").optional(),
   })
   .strict();
 
@@ -207,7 +210,7 @@ function isJsonObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function conversationDto(context: ServerContext, id: string) {
+function conversationDto(context: ServerContext, id: string, summary = false) {
   const conversation = context.store.getConversation(id);
   const effectivePersonaId =
     conversation.personaId ?? context.store.getDefaultPersona()?.id ?? null;
@@ -231,10 +234,25 @@ function conversationDto(context: ServerContext, id: string) {
     new Set(bindings.map((binding) => binding.worldbook_id)),
   );
   return {
-    ...conversation,
+    ...(summary
+      ? {
+          id: conversation.id,
+          cardId: conversation.cardId,
+          title: conversation.title,
+          revision: conversation.revision,
+          updatedAt: conversation.updatedAt,
+        }
+      : conversation),
     personaId: effectivePersonaId,
     participantIds: participants.map((participant) => participant.id),
-    participants,
+    participants: summary
+      ? participants.map(({ id, name, role, cardId }) => ({
+          id,
+          name,
+          role,
+          cardId,
+        }))
+      : participants,
     worldbookIds,
   };
 }
@@ -253,7 +271,7 @@ function messageDto(context: ServerContext, id: string) {
   };
 }
 
-function cardDto(context: ServerContext, id: string) {
+function cardDto(context: ServerContext, id: string, summary = false) {
   const card = context.store.getCard(id);
   const normalized = normalizedCard(card);
   const worldbookIds = context.store.database
@@ -273,8 +291,26 @@ function cardDto(context: ServerContext, id: string) {
       )?.path
     : undefined;
   return {
-    ...card,
-    participants: context.store.listCardParticipants(card.id),
+    ...(summary
+      ? {
+          id: card.id,
+          name: card.name,
+          description: card.description,
+          revision: card.revision,
+        }
+      : card),
+    participants: context.store
+      .listCardParticipants(card.id)
+      .map((participant) =>
+        summary
+          ? {
+              id: participant.id,
+              name: participant.name,
+              role: participant.role,
+              cardId: participant.cardId,
+            }
+          : participant,
+      ),
     worldbookIds,
     ...(imageUrl === undefined ? {} : { imageUrl }),
   };
@@ -459,9 +495,13 @@ export async function registerWorkspaceRoutes(
     },
   );
 
-  app.get("/api/cards", async () =>
+  app.get<{ Querystring: { view?: string } }>("/api/cards", async (request) =>
     envelope(
-      context.store.listCards().map((card) => cardDto(context, card.id)),
+      context.store
+        .listCards()
+        .map((card) =>
+          cardDto(context, card.id, request.query.view === "summary"),
+        ),
     ),
   );
 
@@ -641,7 +681,12 @@ export async function registerWorkspaceRoutes(
   );
 
   app.get<{
-    Querystring: { cardId?: string; limit?: string; cursor?: string };
+    Querystring: {
+      cardId?: string;
+      limit?: string;
+      cursor?: string;
+      view?: string;
+    };
   }>("/api/conversations", async (request) => {
     const query = conversationListQuerySchema.parse(request.query);
     const scope = query.cardId ?? "all";
@@ -659,7 +704,7 @@ export async function registerWorkspaceRoutes(
     const last = page.items.at(-1);
     return envelope({
       items: page.items.map((conversation) =>
-        conversationDto(context, conversation.id),
+        conversationDto(context, conversation.id, query.view === "summary"),
       ),
       nextCursor:
         page.hasMore && last !== undefined
@@ -714,10 +759,16 @@ export async function registerWorkspaceRoutes(
     });
   });
 
-  app.get<{ Params: { id: string } }>(
+  app.get<{ Params: { id: string }; Querystring: { view?: string } }>(
     "/api/conversations/:id",
     async (request) =>
-      envelope(conversationDto(context, entityId.parse(request.params.id))),
+      envelope(
+        conversationDto(
+          context,
+          entityId.parse(request.params.id),
+          request.query.view === "summary",
+        ),
+      ),
   );
 
   app.post("/api/conversations", async (request, reply) => {
@@ -989,12 +1040,47 @@ export async function registerWorkspaceRoutes(
     },
   );
 
-  app.get("/api/worldbooks", async () =>
-    envelope(
-      context.store
-        .listWorldbooks()
-        .map((worldbook) => storedWorldbookDto(context.store, worldbook.id)),
-    ),
+  app.get<{ Querystring: { view?: string } }>(
+    "/api/worldbooks",
+    async (request) =>
+      envelope(
+        request.query.view === "summary"
+          ? context.store.database.all(`SELECT w.id, w.name, w.revision,
+            w.agent_editable AS agentEditable,
+            COALESCE(json_extract(w.legacy_payload_json, '$.normalized.description'), '') AS description,
+            CASE WHEN json_extract(w.legacy_payload_json, '$.normalized.compatibility.sourceFormat') IS NOT NULL
+              AND json_extract(w.legacy_payload_json, '$.normalized.compatibility.sourceFormat') != 'native-storage' THEN 1 ELSE 0 END AS imported,
+            (SELECT COUNT(*) FROM worldbook_entries e WHERE e.worldbook_id = w.id) AS entryCount,
+            0 AS detailsLoaded
+          FROM worldbooks w ORDER BY w.updated_at DESC, w.id`)
+          : context.store
+              .listWorldbooks()
+              .map((worldbook) =>
+                storedWorldbookDto(context.store, worldbook.id),
+              ),
+      ),
+  );
+
+  app.get<{ Params: { worldbookId: string } }>(
+    "/api/worldbooks/:worldbookId",
+    async (request) => {
+      const book = storedWorldbookDto(
+        context.store,
+        request.params.worldbookId,
+      );
+      return envelope({
+        id: book.id,
+        name: book.name,
+        description: book.description,
+        agentEditable: book.agentEditable,
+        revision: book.revision,
+        imported: book.imported,
+        entries: book.entries.map(({ metadata, ...entry }) => {
+          void metadata;
+          return entry;
+        }),
+      });
+    },
   );
 
   app.delete<{ Params: { worldbookId: string } }>(
@@ -1135,5 +1221,24 @@ export async function registerWorkspaceRoutes(
     },
   );
 
-  app.get("/api/presets", async () => envelope(context.store.listPresets()));
+  app.get<{ Querystring: { view?: string } }>("/api/presets", async (request) =>
+    envelope(
+      request.query.view === "summary"
+        ? context.store.database.all(
+            "SELECT id, name, kind, revision, 0 AS detailsLoaded FROM presets ORDER BY updated_at DESC, id",
+          )
+        : context.store.listPresets(),
+    ),
+  );
+
+  app.get<{ Params: { id: string } }>("/api/presets/:id", async (request) => {
+    const preset = context.store.getPreset(request.params.id);
+    return envelope({
+      id: preset.id,
+      name: preset.name,
+      kind: preset.kind,
+      revision: preset.revision,
+      payload: preset.payload,
+    });
+  });
 }

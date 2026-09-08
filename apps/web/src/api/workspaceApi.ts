@@ -484,7 +484,7 @@ async function errorFromResponse(
 
 async function request<T>(
   path: string,
-  { timeoutMs = 5_000, ...init }: JsonRequestInit = {},
+  { timeoutMs = 30_000, ...init }: JsonRequestInit = {},
 ): Promise<T> {
   const controller = new AbortController();
   const timeout = globalThis.setTimeout(() => controller.abort(), timeoutMs);
@@ -1239,7 +1239,7 @@ export async function loadWorkspaceFromApi(
   selectedProviderId?: string,
 ): Promise<ApiBootstrap> {
   await request<ApiEnvelope<{ ok?: boolean }>>("/health", {
-    timeoutMs: 1_600,
+    timeoutMs: 30_000,
   });
   const [
     conversationResult,
@@ -1797,7 +1797,7 @@ export async function saveProviderConnection(
         ...input,
         ...(current ? { expectedRevision: current.revision } : {}),
       }),
-      timeoutMs: 10_000,
+      timeoutMs: 30_000,
     },
   );
   return result.data;
@@ -1812,7 +1812,7 @@ export async function exportProviderConnection(
     {
       method: "POST",
       body: JSON.stringify({ includeApiKey }),
-      timeoutMs: 10_000,
+      timeoutMs: 30_000,
     },
   );
   return result.data;
@@ -1823,7 +1823,7 @@ export async function loadProviderModels(
 ): Promise<ProviderModel[]> {
   const result = await request<ApiEnvelope<ApiProviderModel[]>>(
     `/providers/connections/${encodeURIComponent(connectionId)}/models`,
-    { timeoutMs: 20_000 },
+    { timeoutMs: 30_000 },
   );
   const seen = new Set<string>();
   const models: ProviderModel[] = [];
@@ -2649,7 +2649,7 @@ export async function importPortableFile(
         filename: file.name,
         conflictStrategy: "duplicate",
       }),
-      timeoutMs: 20_000,
+      timeoutMs: 30_000,
     });
     return { kind, result: response.data };
   }
@@ -2674,7 +2674,7 @@ export async function importPortableFile(
   const response = await request<ApiEnvelope<unknown>>(route, {
     method: "POST",
     body: formData,
-    timeoutMs: 20_000,
+    timeoutMs: 30_000,
   });
   return { kind, result: response.data };
 }
@@ -2703,7 +2703,7 @@ export async function replaceRoleCard(input: {
   >(`/cards/${encodeURIComponent(input.card.id)}/replace`, {
     method: "POST",
     body: formData,
-    timeoutMs: 20_000,
+    timeoutMs: 30_000,
   });
   return {
     card: normalizeCard(response.data.card, response.data.conversations),
@@ -2718,7 +2718,7 @@ export async function exportConversationArchive(
 ): Promise<ConversationArchive> {
   const response = await request<ApiEnvelope<ConversationArchive>>(
     `/conversations/${encodeURIComponent(conversationId)}/export`,
-    { timeoutMs: 20_000 },
+    { timeoutMs: 30_000 },
   );
   return response.data;
 }

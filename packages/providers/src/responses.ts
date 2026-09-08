@@ -231,6 +231,7 @@ function generationPayload(
   }
   for (const [key, value] of Object.entries(generation.additional ?? {})) {
     if (
+      key === "reasoning_effort" ||
       internalGenerationFields.has(key) ||
       protectedResponseFields.has(key) ||
       key in payload
@@ -238,6 +239,14 @@ function generationPayload(
       continue;
     }
     payload[key] = value;
+  }
+  const effort = generation.additional?.reasoning_effort;
+  if (typeof effort === "string") {
+    const reasoning = { ...(asJsonObject(payload.reasoning) ?? {}) };
+    if (effort === "auto") delete reasoning.effort;
+    else reasoning.effort = effort;
+    if (Object.keys(reasoning).length) payload.reasoning = reasoning;
+    else delete payload.reasoning;
   }
   return payload;
 }

@@ -1332,6 +1332,7 @@ describe("prompt preset routes", () => {
           additional: {
             maxContextTokens: 200_000,
             maxContextUnlocked: true,
+            reasoning_effort: "medium",
           },
         },
       },
@@ -1352,6 +1353,7 @@ describe("prompt preset routes", () => {
             additional: {
               maxContextTokens: 200_000,
               maxContextUnlocked: true,
+              reasoning_effort: "medium",
             },
           },
         },
@@ -1370,6 +1372,7 @@ describe("prompt preset routes", () => {
       openai_max_tokens: 2048,
       n: 3,
       stream_openai: false,
+      reasoning_effort: "medium",
       temperature: 1.25,
       top_p: 0.72,
     });

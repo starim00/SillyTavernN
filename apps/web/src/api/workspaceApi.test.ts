@@ -55,6 +55,35 @@ const jsonResponse = (value: unknown, status = 200) =>
     headers: { "Content-Type": "application/json" },
   });
 
+it.each([undefined, "auto", "medium"])(
+  "restores legacy reasoning effort while preserving %s override",
+  async (effort) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          data: {
+            id: "reasoning-preset",
+            name: "Reasoning",
+            kind: "chat-completion",
+            revision: 1,
+            payload: {
+              generation: {
+                additional: effort ? { reasoning_effort: effort } : {},
+              },
+              extensions: { legacySource: { reasoning_effort: "high" } },
+            },
+          },
+        }),
+      ),
+    );
+    expect(
+      (await loadPresetDetail("reasoning-preset")).generation?.additional
+        .reasoning_effort,
+    ).toBe(effort ?? "high");
+  },
+);
+
 it("loads directory summaries without downloading unused detail or messages", async () => {
   const fetchMock = vi.fn(async (url: string) => {
     if (url === "/api/workspace/preferences/resolve")

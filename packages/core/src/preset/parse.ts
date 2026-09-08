@@ -67,6 +67,7 @@ const ROOT_KNOWN_FIELDS: Readonly<Record<PresetFormat, readonly string[]>> = {
     "n",
     "seed",
     "stream_openai",
+    "reasoning_effort",
     "stop",
   ],
   "text-generation": [
@@ -440,6 +441,8 @@ function generationOf(source: JsonObject): GenerationSettings {
       ) ?? [],
     additional: {},
   };
+  const effort = readString(source, "reasoning_effort");
+  if (effort !== undefined) generation.additional.reasoning_effort = effort;
   const maxContextTokens = readNumber(source, "openai_max_context");
   if (maxContextTokens !== undefined) {
     generation.additional.maxContextTokens = Math.max(

@@ -79,7 +79,22 @@ export const PromptPresetSchema = z
     createdAt: DateTimeSchema,
     updatedAt: DateTimeSchema,
   })
-  .strict();
+  .strict()
+  .transform((preset) => {
+    // Older imports retained this setting only in their compatibility source.
+    const source = preset.extensions.legacySource;
+    const legacy =
+      (source && typeof source === "object" && !Array.isArray(source)
+        ? source.reasoning_effort
+        : undefined) ?? preset.compatibility?.unknownFields.reasoning_effort;
+    if (
+      preset.generation.additional.reasoning_effort === undefined &&
+      typeof legacy === "string"
+    ) {
+      preset.generation.additional.reasoning_effort = legacy;
+    }
+    return preset;
+  });
 
 export type PromptPreset = z.infer<typeof PromptPresetSchema>;
 

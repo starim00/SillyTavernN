@@ -808,6 +808,19 @@ function normalizePresetGeneration(item: ApiPreset): GenerationSettings {
   const payload = item.payload ?? {};
   const raw = isRecord(payload.generation) ? payload.generation : payload;
   const additional = isRecord(raw.additional) ? raw.additional : {};
+  const effort =
+    additional.reasoning_effort ??
+    raw.reasoning_effort ??
+    (isRecord(additional.reasoning)
+      ? additional.reasoning.effort
+      : undefined) ??
+    (isRecord(payload.extensions) && isRecord(payload.extensions.legacySource)
+      ? payload.extensions.legacySource.reasoning_effort
+      : undefined) ??
+    (isRecord(payload.compatibility) &&
+    isRecord(payload.compatibility.unknownFields)
+      ? payload.compatibility.unknownFields.reasoning_effort
+      : undefined);
   const candidate = {
     ...defaults,
     temperature:
@@ -862,6 +875,7 @@ function normalizePresetGeneration(item: ApiPreset): GenerationSettings {
     additional: {
       ...defaults.additional,
       ...additional,
+      ...(typeof effort === "string" ? { reasoning_effort: effort } : {}),
       maxContextTokens:
         numberValue(additional.maxContextTokens) ??
         numberValue(raw.openai_max_context) ??

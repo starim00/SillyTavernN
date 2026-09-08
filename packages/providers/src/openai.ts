@@ -118,6 +118,7 @@ function generationPayload(
   if (generation.stop && generation.stop.length > 0)
     payload.stop = generation.stop;
   for (const [key, value] of Object.entries(generation.additional ?? {})) {
+    if (key === "reasoning_effort" && value === "auto") continue;
     if (!internalGenerationFields.has(key) && !(key in payload)) {
       payload[key] = value;
     }

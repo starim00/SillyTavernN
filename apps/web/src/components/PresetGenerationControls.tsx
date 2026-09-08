@@ -1,17 +1,12 @@
-import {
-  CaretDown,
-  CaretRight,
-  PencilSimple,
-  SlidersHorizontal,
-  Wrench,
-} from "@phosphor-icons/react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { SlidersHorizontal } from "@phosphor-icons/react";
+import { useEffect, useRef, useState } from "react";
 
 import type { PromptPreset } from "../domain/workspace";
 
 export type PresetGenerationPatch = Partial<PromptPreset["generation"]>;
 
 type Draft = {
+  reasoningEffort: string;
   maxContextTokens: number;
   maxContextUnlocked: boolean;
   maxOutputTokens: number;
@@ -31,6 +26,10 @@ const contextLimit = (preset: PromptPreset): number => {
 };
 
 const draftFromPreset = (preset: PromptPreset): Draft => ({
+  reasoningEffort:
+    typeof preset.generation?.additional?.reasoning_effort === "string"
+      ? preset.generation.additional.reasoning_effort
+      : "auto",
   maxContextTokens: contextLimit(preset),
   maxContextUnlocked:
     preset.generation?.additional?.maxContextUnlocked === true,
@@ -69,7 +68,7 @@ export function PresetGenerationControls({
   onSave: (patch: PresetGenerationPatch) => Promise<void>;
 }) {
   const [draft, setDraft] = useState(() => draftFromPreset(preset));
-  const submittedRef = useRef<Record<string, number | boolean>>({});
+  const submittedRef = useRef<Record<string, number | boolean | string>>({});
 
   useEffect(() => {
     setDraft(draftFromPreset(preset));
@@ -78,7 +77,7 @@ export function PresetGenerationControls({
 
   const submit = (
     key: keyof Draft,
-    value: number | boolean,
+    value: number | boolean | string,
     patch: PresetGenerationPatch,
   ) => {
     if (submittedRef.current[key] === value) return;
@@ -305,45 +304,34 @@ export function PresetGenerationControls({
         onCommit={() => commitDecimal("topP", draft.topP, 0, 1)}
       />
 
-      <PresetGenerationSection
-        title="快速提示词编辑"
-        icon={<PencilSimple size={13} />}
-      >
-        <p>
-          Main、世界书和历史指令等动态提示词，继续在当前预设的提示词条目中管理。
-        </p>
-      </PresetGenerationSection>
-      <PresetGenerationSection title="实用提示词" icon={<Wrench size={13} />}>
-        <p>
-          生成参数会随当前预设保存，并在下一次对话、续写或重新生成时提交给
-          Provider。
-        </p>
-      </PresetGenerationSection>
+      <label className="preset-generation__field">
+        <span className="preset-generation__label-row">思考强度</span>
+        <select
+          aria-label="思考强度"
+          value={draft.reasoningEffort}
+          onChange={(event) => {
+            const value = event.target.value;
+            setDraft((current) => ({ ...current, reasoningEffort: value }));
+            submit("reasoningEffort", value, {
+              additional: { reasoning_effort: value },
+            });
+          }}
+        >
+          {!["auto", "low", "medium", "high"].includes(
+            draft.reasoningEffort,
+          ) && (
+            <option value={draft.reasoningEffort}>
+              {draft.reasoningEffort}（预设值）
+            </option>
+          )}
+          <option value="auto">自动（模型默认）</option>
+          <option value="low">低</option>
+          <option value="medium">中</option>
+          <option value="high">高</option>
+        </select>
+        <small>由当前模型决定支持的强度；自动使用模型默认设置。</small>
+      </label>
     </section>
-  );
-}
-
-function PresetGenerationSection({
-  title,
-  icon,
-  children,
-}: {
-  title: string;
-  icon: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <details className="preset-generation__details">
-      <summary>
-        <span>
-          {icon}
-          {title}
-        </span>
-        <CaretRight className="preset-generation__caret-right" size={14} />
-        <CaretDown className="preset-generation__caret-down" size={14} />
-      </summary>
-      <div>{children}</div>
-    </details>
   );
 }
 

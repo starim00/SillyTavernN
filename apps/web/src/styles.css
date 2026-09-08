@@ -2152,6 +2152,7 @@ select:focus-visible {
   font-weight: 720;
 }
 
+.preset-generation__field small,
 .preset-generation__heading small,
 .preset-generation__check small {
   color: var(--text-faint);
@@ -2186,6 +2187,19 @@ select:focus-visible {
   display: grid;
   min-width: 0;
   gap: 6px;
+}
+
+.preset-generation__field select {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
 }
 
 .preset-generation__field--number {
@@ -2259,56 +2273,6 @@ select:focus-visible {
 
 .preset-generation__range-row > output {
   display: none;
-}
-
-.preset-generation__details {
-  border-top: 1px solid #dbe6e8;
-}
-
-.preset-generation__details summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 29px;
-  padding-top: 6px;
-  color: #466c7d;
-  cursor: pointer;
-  list-style: none;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.preset-generation__details summary::-webkit-details-marker {
-  display: none;
-}
-
-.preset-generation__details summary > span {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.preset-generation__caret-down {
-  display: none;
-}
-
-.preset-generation__details[open] .preset-generation__caret-right {
-  display: none;
-}
-
-.preset-generation__details[open] .preset-generation__caret-down {
-  display: block;
-}
-
-.preset-generation__details > div {
-  padding: 1px 2px 4px 19px;
-  color: var(--text-faint);
-  font-size: 11px;
-  line-height: 1.45;
-}
-
-.preset-generation__details p {
-  margin: 0;
 }
 
 .preset-detail__summary {

@@ -1,4 +1,8 @@
-import type { JsonObject, PromptPreset } from "@stn/contracts";
+import {
+  PromptPresetSchema,
+  type JsonObject,
+  type PromptPreset,
+} from "@stn/contracts";
 import { describe, expect, it } from "vitest";
 
 import { ImportSecurityError } from "../import/safe-json.js";
@@ -659,5 +663,38 @@ describe("preset conflict strategies", () => {
       "prompt-id",
     ]);
     expect(merged.preset.compatibility?.unknownFields.future).toBe("kept");
+  });
+});
+
+describe("preset reasoning effort", () => {
+  it("imports and exports edited reasoning effort", () => {
+    const preset = importPromptPreset(
+      { prompts: [], prompt_order: [], reasoning_effort: "high" },
+      parseOptions(),
+    );
+    expect(preset.generation.additional.reasoning_effort).toBe("high");
+    preset.generation.additional.reasoning_effort = "medium";
+    const exported = exportPromptPreset(preset, {
+      format: "openai",
+      target: "sillytavern",
+    });
+    expect(
+      importPromptPreset(exported, parseOptions()).generation.additional
+        .reasoning_effort,
+    ).toBe("medium");
+  });
+  it("recovers old imports without overriding an explicit auto selection", () => {
+    const preset = importPromptPreset(
+      { prompts: [], prompt_order: [], reasoning_effort: "high" },
+      parseOptions(),
+    );
+    delete preset.generation.additional.reasoning_effort;
+    expect(
+      PromptPresetSchema.parse(preset).generation.additional.reasoning_effort,
+    ).toBe("high");
+    preset.generation.additional.reasoning_effort = "auto";
+    expect(
+      PromptPresetSchema.parse(preset).generation.additional.reasoning_effort,
+    ).toBe("auto");
   });
 });

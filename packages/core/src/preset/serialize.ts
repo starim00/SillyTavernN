@@ -245,6 +245,7 @@ function generationFields(
   );
   if (format === "openai") {
     set(output, "n", generation.n);
+    set(output, "reasoning_effort", generation.additional.reasoning_effort);
     set(output, "openai_max_context", generation.additional.maxContextTokens);
     set(
       output,

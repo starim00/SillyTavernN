@@ -47,6 +47,12 @@ scripts execute in the main page with Tavern Helper/MVU globals, DOM and browser
 storage access, and ordinary browser networking. Revoking source trust disposes
 that source on the next runtime reload.
 
+The main web document bundles Font Awesome Free 6.7.2 CSS and webfonts for
+`fa-*` icons mounted by trusted legacy scripts, including floating panels.
+These assets are served locally with the application and do not require a CDN.
+Native application controls continue to use Phosphor icons. Message iframe
+documents retain their own stylesheet dependencies.
+
 Tavern Regex data remains a separate `regex_scripts` array. It is never merged
 with executable Tavern Helper scripts. Imported card- and preset-scoped regexes
 start disabled and transform prompt/display copies only after an explicit

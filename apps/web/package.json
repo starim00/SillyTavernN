@@ -12,6 +12,7 @@
     "test:sites": "node --test tests/sites-worker.test.mjs"
   },
   "dependencies": {
+    "@fortawesome/fontawesome-free": "6.7.2",
     "@phosphor-icons/react": "2.1.10",
     "@stn/contracts": "*",
     "@stn/legacy-compat": "*",
